@@ -1,0 +1,49 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "tc5061_proyecto_equipo5"
+version = "0.0.1"
+description = "Dise\u00f1ar, como equipo, una propuesta de soluci\u00f3n de Machine Learning para un conjunto de preguntas sobre el sistema de bicicleta p\u00fablica MiBici, que combine modelos de regresi\u00f3n, clasificaci\u00f3n y clustering. Y earealizar tareas de manipulaci\u00f3n, preparaci\u00f3n, exploraci\u00f3n y preprocesamiento de datos, gestionando grandes vol\u00famenes de datos distribuidos y aplicando t\u00e9cnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning."
+authors = [
+  { name = "Equipo 5" },
+]
+
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    
+]
+dependencies = [
+    "ipython",
+    "jupyterlab",
+    "loguru",
+    "matplotlib",
+    "mkdocs",
+    "notebook",
+    "numpy",
+    "pandas",
+    "pip",
+    "pytest",
+    "python-dotenv",
+    "ruff",
+    "scikit-learn",
+    "tqdm",
+    "typer",
+]
+requires-python = "~=3.13.0"
+
+
+[tool.ruff]
+line-length = 99
+src = ["tc5061_proyecto_equipo5"]
+include = ["pyproject.toml", "tc5061_proyecto_equipo5/**/*.py"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Add import sorting
+
+[tool.ruff.lint.isort]
+known-first-party = ["tc5061_proyecto_equipo5"]
+force-sort-within-sections = true
+
