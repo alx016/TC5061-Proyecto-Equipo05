@@ -14,8 +14,8 @@ import typer
 
 from tc5061_proyecto_equipo5.config import (
     DATA_MANIFEST_PATH,
-    END_DATE,
-    INITIAL_DATE,
+    END_YEAR,
+    INITIAL_YEAR,
     INTERIM_DATA_DIR,
     RAW_DATA_DIR,
 )
@@ -158,8 +158,8 @@ def build_manifest(data_dir: Path) -> dict:
 @app.command()
 def download(
     output_dir: Path = RAW_DATA_DIR,
-    initial_year: int = INITIAL_DATE,
-    end_year: int = END_DATE,
+    initial_year: int = INITIAL_YEAR,
+    end_year: int = END_YEAR,
     max_workers: int = 6,
 ):
     """Download the MiBici monthly trip CSVs into output_dir/<year>/."""
