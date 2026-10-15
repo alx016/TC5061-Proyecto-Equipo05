@@ -30,6 +30,7 @@ dependencies = [
     "python-dotenv",
     "ruff",
     "scikit-learn",
+    "seaborn>=0.13.2",
     "tqdm",
     "typer",
 ]
