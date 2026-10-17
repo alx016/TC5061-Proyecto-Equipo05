@@ -256,7 +256,7 @@ def clean(
     logger.info(f"Cleaning {len(paths)} files into {output_dir}")
     rows = 0
     written = 0
-    for path in tqdm(paths): # tqdm show a progress bar
+    for path in tqdm(paths):  # tqdm show a progress bar
         match = RAW_NAME_PATTERN.fullmatch(path.stem)
         if match is None:
             raise ValueError(f"{path}: unexpected file name")
@@ -291,7 +291,9 @@ def manifest(
         logger.error(f"No Parquet files found in {data_dir}; run the clean command first.")
         raise typer.Exit(1)
     if not current["estaciones"]:
-        logger.error(f"No station catalog found in {stations_dir}; run the download command first.")
+        logger.error(
+            f"No station catalog found in {stations_dir}; run the download command first."
+        )
         raise typer.Exit(1)
 
     if check:
