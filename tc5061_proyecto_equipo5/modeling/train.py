@@ -1,11 +1,9 @@
-"""Train the two classification baselines for the MiBici risk question.
+"""Train the two classification baselines for the MiBici station risk question.
 
-The question is whether a station will be short of bikes, short of docks or
-balanced during hour ``t + 1``, using only what is known at minute 50 of hour
-``t``.  The classes are severely imbalanced (about 98.8% balanced), so the
-baselines are scored with macro-F1, balanced accuracy and PR-AUC instead of plain
-accuracy.  Both runs are logged in MLflow under the ``mibici-equipo05``
-experiment, using the default local tracking so artifacts stay in ``mlruns/``.
+The question is whether a station will be short of bikes, short of docks or balanced during hour t+1, using only what
+is known at minute 50 of hour t.  The classes are severely imbalanced (about 98.7% balanced), so the baselines are
+scored with macro-F1, balanced accuracy and PR-AUC instead of plain accuracy.  Both runs are logged in MLflow under the
+mibici-equipo05 experiment, with the default local tracking so the artifacts stay inside the ignored mlruns/ folder.
 """
 
 import json
@@ -49,13 +47,12 @@ app = typer.Typer()
 EXPERIMENT_NAME = "mibici-equipo05"
 FEATURE_SET = "classification_lags"
 SPLITS = ("train", "validation", "test")
-CLASS_NAMES = ["balanced", "risk_shortage", "risk_saturation"]
+# Figures and the text report are labeled in Spanish; identifiers stay English.
+CLASS_NAMES_ES = ["Balanceado", "Riesgo_Desabasto", "Riesgo_Saturacion"]
 
-# Anti-leakage decision point: the forecast is made at minute 50 of hour ``t``,
-# so departures, arrivals and net_flow of the current hour are not fully known
-# yet and are never used as features.  Only lagged flows, calendar columns, the
-# station size and its location are kept.  ``station_id``, ``hour``, ``target``
-# and ``split`` are identifiers or the label, so they are excluded as well.
+# Anti-leakage decision point: the forecast is made at minute 50 of hour t, so the departures, arrivals and net_flow of
+# the current hour are not fully known yet and are never used as features.  Only the lagged flows, the calendar columns,
+# the station size and its location are kept; station_id, hour, target and split are identifiers or the label itself.
 FEATURE_COLUMNS = [
     "capacity",
     "latitude",
@@ -98,8 +95,8 @@ def load_rows(path: Path) -> pd.DataFrame:
     """Read the feature table and drop the rows that cannot be used."""
     frame = pd.read_parquet(path)
     logger.info(f"Loaded {len(frame):,} rows from {path}")
-    # The last hour of the year has no next hour (370 empty targets) and the first
-    # hours of January have empty lags (warm-up); both are dropped, never filled.
+    # The last hour of the year has no next hour (358 empty targets) and the first hours of January have empty lags
+    # (warm-up); both are dropped, never filled.
     clean = frame.dropna(subset=["target"]).dropna(subset=FEATURE_COLUMNS)
     logger.info(f"Dropped {len(frame) - len(clean):,} rows with missing target or features")
     return clean
@@ -108,9 +105,8 @@ def load_rows(path: Path) -> pd.DataFrame:
 def metrics(y_true, y_pred, y_proba, prefix: str) -> dict[str, float]:
     """Return the metrics of one model, with the given ``val_`` or ``test_`` prefix.
 
-    Accuracy is useless when one class holds 98.8% of the rows, so macro-F1 and
-    balanced accuracy are logged too.  The two PR-AUC values treat shortage and
-    saturation one-vs-rest, which is the honest view of a rare-event model.
+    Accuracy is useless when one class holds 98.7% of the rows, so macro-F1 and balanced accuracy are logged too.
+    The two PR-AUC values treat shortage and saturation one-vs-rest, which is the honest view of a rare-event model.
     """
     return {
         f"{prefix}accuracy": accuracy_score(y_true, y_pred),
@@ -134,14 +130,19 @@ def metrics(y_true, y_pred, y_proba, prefix: str) -> dict[str, float]:
 def save_artifacts(folder: Path, y_true, y_pred, title: str) -> None:
     """Write the classification report and the confusion matrix as files."""
     report = classification_report(
-        y_true, y_pred, labels=[0, 1, 2], target_names=CLASS_NAMES, zero_division=0
+        y_true, y_pred, labels=[0, 1, 2], target_names=CLASS_NAMES_ES, zero_division=0
     )
     (folder / "classification_report.txt").write_text(report)
-    figure, axis = plt.subplots(figsize=(5, 4))
+    figure, axis = plt.subplots(figsize=(6.5, 4.5))
     ConfusionMatrixDisplay.from_predictions(
-        y_true, y_pred, labels=[0, 1, 2], display_labels=CLASS_NAMES, ax=axis, colorbar=False
+        y_true, y_pred, labels=[0, 1, 2], display_labels=CLASS_NAMES_ES, ax=axis, colorbar=False
     )
-    axis.set_title(title)
+    axis.set_title(f"Matriz de confusión ({title})")
+    axis.set_xlabel("Etiqueta predicha")
+    axis.set_ylabel("Etiqueta real")
+    axis.tick_params(axis="x", rotation=15)
+    for label in axis.get_xticklabels():
+        label.set_horizontalalignment("right")
     figure.tight_layout()
     figure.savefig(folder / "confusion_matrix.png", bbox_inches="tight")
     plt.close(figure)
@@ -229,8 +230,8 @@ def classification(
             {"model": "logistic_regression", "C": 1.0},
         ),
     }
-    # Default local tracking: no tracking URI is set, so MLflow writes metadata and
-    # artifacts under the repository (the artifact root stays in the ignored mlruns/).
+    # Default local tracking: no tracking URI is set, so MLflow writes its metadata and artifacts under the repository
+    # (the artifact root stays inside the ignored mlruns/ folder).
     mlflow.set_experiment(EXPERIMENT_NAME)
     records = []
     for name, (model, model_params) in models.items():
