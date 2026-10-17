@@ -27,6 +27,13 @@ To check that your local data matches the committed manifest:
 python tc5061_proyecto_equipo5/dataset.py manifest --check
 ```
 
+## Feature engineering
+
+Un único `features.py` ofrece recetas independientes para demanda, riesgo y clustering,
+con historia causal y preprocesadores sin ajustar para cada estimador. Consulta los
+[contratos, comandos y límites](docs/docs/feature-engineering.md) y la
+[investigación con fuentes primarias](docs/docs/feature-engineering-research.md).
+
 ## Modeling scripts
 
 Each project question has its own training script so the team can work in parallel without editing the same file:
@@ -45,7 +52,7 @@ Rules that keep the three scripts comparable:
 - Every run logs the data version from the manifest as a parameter.
 - Code, comments, docstrings and file names are written in English; figures and text artifacts are written in Spanish.
 
-Feature engineering follows the same idea: `features.py` builds the shared station-hour panel and one feature table per question (`python -m tc5061_proyecto_equipo5.features classification`), and `plots.py` draws the justification figures.
+The classification artifacts are materialized with `python -m tc5061_proyecto_equipo5.features classification` and the justification figures with `python -m tc5061_proyecto_equipo5.plots classification`.
 
 ## Project Organization
 

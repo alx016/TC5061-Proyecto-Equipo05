@@ -54,6 +54,8 @@ nav:
       - P3 · Clustering Funcional: canvases/p3-clustering.md
   - Reproducibilidad:
       - Guía de Inicio y Comandos: getting-started.md
+      - Contratos de Features: feature-engineering.md
+      - Evidencia de Diseño de Features: feature-engineering-research.md
 
 extra_css:
   - stylesheets/extra.css

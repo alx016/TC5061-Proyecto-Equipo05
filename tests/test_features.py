@@ -1,267 +1,375 @@
-"""Unit tests for the classification feature contract in features.py.
+"""Behavioral contracts: exact hours, point-in-time invariance and recipe isolation."""
 
-All tests use small synthetic DataFrames, so they do not need the real dataset.
-"""
+import json
 
+import numpy as np
 import pandas as pd
+from pandas.testing import assert_frame_equal
 import pytest
+from typer.testing import CliRunner
 
 from tc5061_proyecto_equipo5.features import (
-    add_calendar,
-    add_lags,
-    add_neighbors,
-    add_split,
-    add_target,
-    build_panel,
-    load_stations,
+    app,
+    build_demand_features,
+    build_hourly_panel,
+    build_risk_features,
+    build_station_profiles,
+    make_preprocessor,
+    training_mask,
 )
 
-YEAR = 2024
-STATION_HOURS = pd.date_range(f"{YEAR}-01-01", f"{YEAR}-12-31 23:00", freq="h")
+
+def panel(start="2024-09-20", end="2024-12-02"):
+    grid = pd.MultiIndex.from_product(
+        [[1, 2], pd.date_range(start, end, freq="h", inclusive="left")],
+        names=["station_id", "target_time"],
+    ).to_frame(index=False)
+    grid["departures"] = np.arange(len(grid)) % 11
+    grid["arrivals"] = np.arange(len(grid)) % 7
+    return grid
 
 
-def make_stations():
-    """Return a tiny station catalog with two stations."""
-    return pd.DataFrame(
+def stations():
+    return pd.DataFrame({"station_id": [1, 2], "capacity": [10, 20]})
+
+
+def risk(data, **kwargs):
+    return build_risk_features(data, stations(), catalog_known_at="2023-01-01", **kwargs)
+
+
+def test_dense_grid_counts_arrivals_at_end_not_start_and_half_open_intervals():
+    trips = pd.DataFrame(
         {
-            "station_id": [1, 2],
-            "name": ["A", "B"],
-            "latitude": [19.43, 19.44],
-            "longitude": [-99.13, -99.14],
-            "capacity": [10, 20],
+            "viaje_id": [1, 2, 3],
+            "origen_id": [1, 2, 1],
+            "destino_id": [2, 1, 2],
+            "inicio_viaje": pd.to_datetime(
+                ["2023-12-31 23:50", "2024-01-01 00:15", "2024-01-01 02:00"]
+            ),
+            "fin_viaje": pd.to_datetime(
+                ["2024-01-01 01:01", "2024-01-01 01:00", "2024-01-01 03:00"]
+            ),
         }
+    )
+    result = build_hourly_panel(trips, [1, 2, 3], start="2024-01-01", end="2024-01-01 02:00")
+    assert len(result) == 6
+    assert result.departures.sum() == 1
+    assert result.arrivals.sum() == 2
+    assert result.loc[result.station_id.eq(3), ["departures", "arrivals"]].eq(0).all().all()
+    assert result.loc[result.target_time.eq(pd.Timestamp("2024-01-01")), "arrivals"].eq(0).all()
+    with pytest.raises(ValueError, match="duplicate"):
+        build_hourly_panel(pd.concat([trips, trips]), [1, 2], start="2024-01-01", end="2024-01-02")
+    with pytest.raises(ValueError, match="absent"):
+        build_hourly_panel(trips, [1], start="2024-01-01", end="2024-01-02")
+
+
+@pytest.mark.parametrize("builder", [build_demand_features, risk])
+def test_future_and_unfinished_hour_perturbations_do_not_change_predictors(builder):
+    data = panel()
+    before = data.copy(deep=True)
+    target = pd.Timestamp("2024-10-02 10:00")
+    baseline = builder(data)
+    mask = data.target_time.ge(target - pd.Timedelta(hours=1))
+    data.loc[mask, ["departures", "arrivals"]] = [1000, 2000]
+    changed = builder(data)
+    rows = baseline.keys.target_time.le(target)
+    assert_frame_equal(baseline.X.loc[rows], changed.X.loc[rows])
+    assert not baseline.y.equals(changed.y)
+    # Recipes are pure and do not mutate the caller's input.
+    assert_frame_equal(before, panel())
+
+
+def test_lags_rolling_and_station_isolation_are_exact():
+    data = panel("2024-01-01", "2024-01-10")
+    original = data.copy(deep=True)
+    result = build_demand_features(data)
+    row = 170
+    assert result.X.loc[row, "departures_lag_2"] == data.departures.iloc[row - 2]
+    assert result.X.loc[row, "departures_lag_168"] == data.departures.iloc[row - 168]
+    past = data.departures.iloc[row - 4 : row - 1]
+    assert result.X.loc[row, "departures_mean_3"] == pytest.approx(past.mean())
+    assert result.X.loc[row, "departures_std_3"] == pytest.approx(past.std())
+    assert result.X.loc[216, "departures_lag_2"] != result.X.loc[216, "departures_lag_2"]  # NaN
+    assert_frame_equal(data, original)
+    assert "demand" not in result.X and "target_time" not in result.X
+    custom = build_demand_features(data, lags=(24,), windows=())
+    assert "departures_lag_2" not in custom.X
+    assert "departures_lag_24" in custom.X
+    with pytest.raises(ValueError, match=">= 2"):
+        build_demand_features(data, lags=(1,))
+
+
+def test_sparse_duplicate_negative_and_timezone_panels_fail():
+    data = panel()
+    with pytest.raises(ValueError, match="every hour"):
+        build_demand_features(data.drop(index=10))
+    with pytest.raises(ValueError, match="unique"):
+        build_demand_features(pd.concat([data, data.iloc[:1]]))
+    data.loc[0, "departures"] = -1
+    with pytest.raises(ValueError, match="nonnegative"):
+        build_demand_features(data)
+    data = panel()
+    data["target_time"] = data.target_time.dt.tz_localize("UTC")
+    with pytest.raises(ValueError, match="timezone"):
+        build_demand_features(data)
+
+
+def test_risk_inclusive_thresholds_and_unbounded_pressure():
+    data = panel("2024-01-01", "2024-01-02")
+    data.loc[:3, "departures"] = [4, 0, 3, 100]
+    data.loc[:3, "arrivals"] = [0, 4, 0, 0]
+    result = risk(data)
+    assert result.y.iloc[:4].tolist() == [
+        "Riesgo_Desabasto",
+        "Riesgo_Saturacion",
+        "Balanceado",
+        "Riesgo_Desabasto",
+    ]
+    assert result.X.loc[5, "net_ratio_lag_2"] == -10
+    assert "net_flow" not in result.X and "risk" not in result.X
+    assert result.X.loc[0, "capacity"] == 10
+    assert result.X.loc[24, "capacity"] == 20
+    assert "arrivals_lag_2" not in build_demand_features(data).X
+
+
+@pytest.mark.parametrize("capacity", [0, -2, float("nan"), float("inf")])
+def test_risk_rejects_invalid_capacity(capacity):
+    cat = stations()
+    cat["capacity"] = cat.capacity.astype(float)
+    cat.loc[0, "capacity"] = capacity
+    with pytest.raises(ValueError):
+        build_risk_features(panel(), cat, catalog_known_at="2023-01-01")
+
+
+def test_catalog_provenance_missing_ids_and_duplicate_ids_fail_closed():
+    data = panel()
+    with pytest.raises(ValueError, match="not known"):
+        build_risk_features(data, stations(), catalog_known_at="2026-09-01")
+    with pytest.raises(ValueError, match="capacity"):
+        build_risk_features(data, stations().iloc[:1], catalog_known_at="2023-01-01")
+    with pytest.raises(ValueError, match="unique"):
+        build_risk_features(
+            data, pd.concat([stations(), stations()]), catalog_known_at="2023-01-01"
+        )
+
+
+def test_splits_follow_target_window_and_issue_is_minute_50():
+    result = build_demand_features(panel())
+    keys = result.keys.set_index(["station_id", "target_time"])
+    assert keys.loc[(1, pd.Timestamp("2024-09-30 23:00")), "split"] == "train"
+    assert keys.loc[(1, pd.Timestamp("2024-10-01")), "split"] == "validation"
+    assert keys.loc[(1, pd.Timestamp("2024-12-01")), "split"] == "test"
+    assert keys.loc[(1, pd.Timestamp("2024-10-01")), "issue_time"] == pd.Timestamp(
+        "2024-09-30 23:50"
     )
 
 
-def add_monthly_activity(trips, station_ids=(1, 2)):
-    """Add one self-loop trip per month per station, so the stations count as full-year stations."""
-    extra = [
-        {
-            "inicio_viaje": pd.Timestamp(year=YEAR, month=month, day=15, hour=3),
-            "origen_id": station_id,
-            "destino_id": station_id,
-        }
-        for month in range(1, 13)
-        for station_id in station_ids
-    ]
-    return pd.concat([trips, pd.DataFrame(extra)], ignore_index=True)
+def test_p3_has_49_features_normalizes_and_ignores_future():
+    data = panel("2024-01-01", "2024-11-01")
+    result = build_station_profiles(data)
+    assert result.X.shape == (2, 49)
+    for prefix in ("departures_hour_", "arrivals_hour_"):
+        assert np.allclose(result.X.filter(like=prefix).sum(axis=1), 1)
+    assert result.X.asymmetry.between(-1, 1).all()
+    assert result.y is None
+    assert result.keys.window_end.eq(pd.Timestamp("2024-10-01")).all()
+    data.loc[data.target_time.ge("2024-10-01"), ["departures", "arrivals"]] = 9999
+    assert_frame_equal(result.X, build_station_profiles(data).X)
 
 
-def make_trips():
-    """Return the two base trips plus one trip per month, so both stations last the whole year."""
-    return add_monthly_activity(
+def test_p3_filters_low_activity_in_any_month_and_rejects_missing_coverage():
+    data = panel("2024-01-01", "2024-10-01")
+    data.loc[data.station_id.eq(2) & data.target_time.dt.month.eq(3), "departures"] = 0
+    assert build_station_profiles(data).keys.station_id.tolist() == [1]
+    data["arrivals"] = 0
+    assert build_station_profiles(data).X.empty
+    with pytest.raises(ValueError, match="coverage"):
+        build_station_profiles(data.loc[data.target_time.ge("2024-02-01")])
+    with pytest.raises(ValueError, match="whole calendar"):
+        build_station_profiles(data, start="2024-01-02")
+
+
+def test_model_preprocessor_does_not_learn_validation_statistics():
+    X = pd.DataFrame({"station_id": ["1", "2", "future"], "count": [0.0, 2.0, 1000.0]})
+    transformer = make_preprocessor(X)
+    assert not hasattr(transformer, "transformers_")
+    transformer.fit(X.iloc[:2])
+    scaler = transformer.named_transformers_["numeric"].steps[-1][1]
+    assert scaler.mean_[0] == 1
+    assert transformer.transform(X.iloc[2:]).shape[0] == 1
+    unscaled = make_preprocessor(X, scale_numeric=False)
+    assert len(unscaled.transformers[0][1].steps) == 1
+
+
+def test_cli_end_to_end_and_deterministic_receipt(tmp_path):
+    root = tmp_path / "viajes" / "year=2024"
+    root.mkdir(parents=True)
+    for month in range(1, 13):
+        time = pd.Timestamp(2024, month, 1, 12)
         pd.DataFrame(
             {
-                "inicio_viaje": pd.to_datetime(["2024-01-01 00:10", "2024-01-01 01:20"]),
-                "origen_id": [1, 2],
-                "destino_id": [2, 1],
+                "viaje_id": [month],
+                "origen_id": [1],
+                "destino_id": [1],
+                "inicio_viaje": [time],
+                "fin_viaje": [time + pd.Timedelta(minutes=15)],
             }
+        ).to_parquet(root / f"viajes_2024_{month:02}.parquet", index=False)
+    cat = tmp_path / "stations.csv"
+    pd.DataFrame({"station_id": [1], "capacity": [10]}).to_csv(cat, index=False)
+    runner = CliRunner()
+    base = [
+        "--stations-path",
+        str(cat),
+        "--catalog-known-at",
+        "2023-01-01",
+        "--input-dir",
+        str(root.parent),
+        "--output-dir",
+        str(tmp_path / "processed"),
+    ]
+    for problem in ("p1", "p2", "p3"):
+        args = ["--problem", problem, *base]
+        first = runner.invoke(app, args)
+        assert first.exit_code == 0, first.output + str(first.exception)
+        target = tmp_path / "processed" / problem
+        receipt = (target / "features_manifest.json").read_bytes()
+        assert runner.invoke(app, args).exit_code == 0
+        assert (target / "features_manifest.json").read_bytes() == receipt
+        meta = json.loads(receipt)
+        assert len(meta["input_sha256"]) == 13
+        assert meta["feature_version"] == "4"
+        if problem != "p3":
+            keys = pd.read_parquet(target / "keys.parquet")
+            assert keys.label_available_at.eq(keys.target_time + pd.Timedelta(hours=1)).all()
+        assert (target / "X.parquet").is_file() and (target / "keys.parquet").is_file()
+        assert (target / "y.parquet").is_file() == (problem != "p3")
+    (root / "viajes_2024_12.parquet").unlink()
+    missing = runner.invoke(app, ["--problem", "p1", *base])
+    assert missing.exit_code != 0 and "Missing monthly coverage" in missing.output
+    bad = runner.invoke(app, ["--problem", "p2", *base, "--catalog-known-at", "2026-09-01"])
+    assert bad.exit_code != 0 and "catalog" in bad.output
+
+
+def dense(start, end):
+    times = pd.date_range(start, end, freq="h", inclusive="left")
+    return pd.DataFrame({"station_id": 1, "target_time": times, "departures": 4, "arrivals": 0})
+
+
+@pytest.mark.parametrize(
+    "boundary,next_split", [("2024-10-01", "validation"), ("2024-12-01", "test")]
+)
+def test_all_prior_split_labels_are_available_before_first_next_prediction(boundary, next_split):
+    boundary = pd.Timestamp(boundary)
+    result = build_demand_features(
+        dense(boundary - pd.Timedelta(days=2), boundary + pd.Timedelta(days=1))
+    )
+    evaluation_issue = result.keys.loc[result.keys["split"].eq(next_split), "issue_time"].min()
+    previous_split = "train" if next_split == "validation" else "validation"
+    eligible = training_mask(result.keys, fit_as_of=evaluation_issue, splits=(previous_split,))
+    assert eligible.any()
+    assert result.keys.loc[eligible, "label_available_at"].le(evaluation_issue).all()
+    last_previous = result.keys.target_time.eq(boundary - pd.Timedelta(hours=1))
+    assert not eligible.loc[last_previous].any()
+    assert result.keys.loc[last_previous, "split"].eq(previous_split).all()
+    known_previous = result.keys.target_time.eq(boundary - pd.Timedelta(hours=2))
+    assert eligible.loc[known_previous].all()
+
+
+@pytest.mark.parametrize("column", ["inicio_viaje", "fin_viaje"])
+def test_datetime_strings_parsing_to_nat_are_rejected(column):
+    trip = {
+        "viaje_id": [1],
+        "origen_id": [1],
+        "destino_id": [1],
+        "inicio_viaje": ["2024-01-01 01:00"],
+        "fin_viaje": ["2024-01-01 01:10"],
+    }
+    trip[column] = ["NaT"]
+    with pytest.raises(ValueError):
+        build_hourly_panel(pd.DataFrame(trip), [1], start="2024-01-01", end="2024-01-02")
+
+
+def test_valid_unsigned_counts_do_not_reverse_risk_direction():
+    data = dense("2024-01-01", "2024-01-03")
+    data[["departures", "arrivals"]] = data[["departures", "arrivals"]].astype("uint32")
+    result = build_risk_features(
+        data, pd.DataFrame({"station_id": [1], "capacity": [10]}), catalog_known_at="2023-01-01"
+    )
+    assert result.y.eq("Riesgo_Desabasto").all(), result.y.unique().tolist()
+    assert result.X.loc[2, "net_ratio_lag_2"] == -0.4
+
+
+def test_valid_unsigned_counts_preserve_negative_profile_asymmetry():
+    data = dense("2024-01-01", "2024-02-01")
+    data["arrivals"] = 1
+    data[["departures", "arrivals"]] = data[["departures", "arrivals"]].astype("uint32")
+    result = build_station_profiles(data, start="2024-01-01", end="2024-02-01")
+    assert result.X.loc[0, "asymmetry"] == pytest.approx(-0.6)
+
+
+@pytest.mark.parametrize("builder", [build_demand_features, risk])
+def test_counts_outside_safe_aggregation_range_are_rejected(builder):
+    data = dense("2024-01-01", "2024-01-03")
+    data["departures"] = np.uint64(2**63)
+    with pytest.raises(ValueError, match="safe signed"):
+        builder(data)
+
+
+def test_training_mask_allows_only_available_labels_in_permitted_splits():
+    result = build_demand_features(panel())
+    keys = result.keys.copy(deep=True)
+    fit_as_of = "2024-11-30 23:50"
+    eligible = training_mask(keys, fit_as_of=fit_as_of, splits=("train", "validation"))
+    assert keys.loc[eligible, "split"].isin(["train", "validation"]).all()
+    assert keys.loc[eligible, "label_available_at"].le(pd.Timestamp(fit_as_of)).all()
+    assert not eligible.loc[keys["split"].eq("test")].any()
+    assert eligible.loc[keys["split"].eq("train")].all()
+    assert_frame_equal(keys, result.keys)
+    with pytest.raises(ValueError, match="never test"):
+        training_mask(keys, fit_as_of=fit_as_of, splits=("test",))
+
+
+def test_training_mask_honors_delayed_labels_and_rejects_backdating():
+    keys = build_demand_features(dense("2024-09-30 22:00", "2024-10-01 01:00")).keys
+    keys.loc[0, "label_available_at"] = pd.Timestamp("2024-10-01 00:05")
+    mask = training_mask(keys, fit_as_of="2024-09-30 23:50")
+    assert not mask.any()  # Even the older target has not been published yet.
+    keys.loc[0, "label_available_at"] = pd.Timestamp("2024-09-30 22:59")
+    with pytest.raises(ValueError, match="before their target"):
+        training_mask(keys, fit_as_of="2024-09-30 23:50")
+
+
+@pytest.mark.parametrize("cutoff", ["NaT", "2024-09-30T23:50:00Z"])
+def test_training_cutoff_requires_nonnull_local_time(cutoff):
+    keys = build_demand_features(dense("2024-09-30", "2024-10-02")).keys
+    with pytest.raises(ValueError, match="timezone-naive"):
+        training_mask(keys, fit_as_of=cutoff)
+
+
+def test_future_training_label_cannot_change_first_validation_prediction():
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+
+    data = dense("2024-09-27", "2024-10-02")
+    changed = data.copy(deep=True)
+    # One extra group of departures in the label bucket still open at 23:50.
+    changed.loc[changed.target_time.eq("2024-09-30 23:00"), "departures"] = 1004
+
+    def predict_first(frame, *, purge):
+        features = build_demand_features(frame, lags=(2,), windows=())
+        val = features.keys["split"].eq("validation")
+        first = features.keys.loc[val].index[:1]
+        cutoff = features.keys.loc[first, "issue_time"].iloc[0]
+        eligible = (
+            training_mask(features.keys, fit_as_of=cutoff)
+            if purge
+            else features.keys["split"].eq("train")
         )
-    )
+        model = make_pipeline(make_preprocessor(features.X), Ridge(solver="lsqr"))
+        model.fit(features.X.loc[eligible], features.y.loc[eligible])
+        return model.predict(features.X.loc[first])[0]
 
-
-def make_flow_panel(hours, flows_by_station):
-    """Build a minimal panel from {station_id: [net_flow values]}."""
-    rows = []
-    for station_id, flows in flows_by_station.items():
-        for hour, flow in zip(hours, flows, strict=True):
-            rows.append(
-                {
-                    "station_id": station_id,
-                    "hour": hour,
-                    "arrivals": 0,
-                    "departures": 0,
-                    "net_flow": flow,
-                    "capacity": 10,
-                    "latitude": 19.43 + station_id / 100,
-                    "longitude": -99.13 - station_id / 100,
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-def test_panel_full_grid():
-    panel = build_panel(make_trips(), make_stations(), YEAR)
-
-    # Every station must have one row for every hour of the whole year.
-    assert len(panel) == 2 * len(STATION_HOURS)
-    assert panel["departures"].notna().all()
-    assert panel["arrivals"].notna().all()
-    # Two base trips plus one trip per month per station (2 x 12) create activity.
-    assert panel["departures"].sum() == 26
-    assert panel["arrivals"].sum() == 26
-    quiet = panel[(panel["station_id"] == 1) & (panel["hour"] == pd.Timestamp("2024-06-15 12:00"))]
-    assert quiet["departures"].item() == 0
-    assert quiet["arrivals"].item() == 0
-
-
-def test_partial_stations_are_dropped():
-    # Station 1 moves bikes every month; station 2 only appears in January.
-    base = pd.DataFrame(
-        {
-            "inicio_viaje": pd.to_datetime(["2024-01-20 05:00"]),
-            "origen_id": [2],
-            "destino_id": [1],
-        }
-    )
-    trips = add_monthly_activity(base, station_ids=(1,))
-
-    panel = build_panel(trips, make_stations(), YEAR)
-
-    assert panel["station_id"].unique().tolist() == [1]
-    assert len(panel) == len(STATION_HOURS)
-
-
-def test_net_flow_formula():
-    # Station 1 has capacity 10, 3 departures and 7 arrivals in the 08:00 hour.
-    departures = pd.DataFrame(
-        {
-            "inicio_viaje": pd.to_datetime(
-                ["2024-03-01 08:05", "2024-03-01 08:15", "2024-03-01 08:25"]
-            ),
-            "origen_id": [1, 1, 1],
-            "destino_id": [2, 2, 2],
-        }
-    )
-    arrivals = pd.DataFrame(
-        {
-            "inicio_viaje": pd.to_datetime(
-                [f"2024-03-01 08:{minute:02d}" for minute in range(5, 40, 5)]
-            ),
-            "origen_id": [2] * 7,
-            "destino_id": [1] * 7,
-        }
-    )
-    trips = add_monthly_activity(pd.concat([departures, arrivals], ignore_index=True))
-
-    panel = build_panel(trips, make_stations(), YEAR)
-    row = panel[(panel["station_id"] == 1) & (panel["hour"] == pd.Timestamp("2024-03-01 08:00"))]
-
-    assert row["departures"].item() == 3
-    assert row["arrivals"].item() == 7
-    assert row["net_flow"].item() == pytest.approx((7 - 3) / 10)
-
-
-def test_lags_use_past_only():
-    hours = pd.date_range("2024-01-01 00:00", periods=30, freq="h")
-    panel = make_flow_panel(
-        hours, {1: [i / 10 for i in range(30)], 2: [100 + i / 10 for i in range(30)]}
-    )
-    lags = add_lags(panel).set_index(["station_id", "hour"])
-    original = panel.set_index(["station_id", "hour"])
-    now = hours[27]
-
-    for station_id in (1, 2):
-        assert (
-            lags.loc[(station_id, now), "net_flow_lag1"]
-            == original.loc[(station_id, hours[26]), "net_flow"]
-        )
-        assert (
-            lags.loc[(station_id, now), "net_flow_lag2"]
-            == original.loc[(station_id, hours[25]), "net_flow"]
-        )
-        assert (
-            lags.loc[(station_id, now), "net_flow_lag24"]
-            == original.loc[(station_id, hours[3]), "net_flow"]
-        )
-        # The lag must never be the value of the current hour.
-        assert (
-            lags.loc[(station_id, now), "net_flow_lag1"]
-            != original.loc[(station_id, now), "net_flow"]
-        )
-
-    # The first hour of each station has no past, so it cannot borrow from another station.
-    assert pd.isna(lags.loc[(1, hours[0]), "net_flow_lag1"])
-    assert pd.isna(lags.loc[(2, hours[0]), "net_flow_lag1"])
-
-
-def test_target_thresholds():
-    net_flows = [-0.60, -0.50, -0.40, 0.0, 0.40, 0.50, 0.0]
-    hours = pd.date_range("2024-01-01 00:00", periods=len(net_flows), freq="h")
-    panel = make_flow_panel(hours, {1: net_flows})
-
-    targets = add_target(panel)["target"].tolist()
-
-    # target[t] uses net_flow[t+1]: below, exactly -0.40, balanced, exactly +0.40, above, balanced.
-    assert targets[:6] == [1, 1, 0, 2, 2, 0]
-    assert pd.isna(targets[6])
-
-
-def test_split_months():
-    hours = pd.to_datetime(
-        [
-            "2024-01-15 12:00",
-            "2024-09-30 23:00",
-            "2024-10-01 00:00",
-            "2024-11-30 23:00",
-            "2024-12-01 00:00",
-            "2024-12-31 23:00",
-        ]
-    )
-    panel = make_flow_panel(hours, {1: [0.0] * len(hours)})
-
-    split = add_split(panel)["split"].tolist()
-
-    assert split == ["train", "train", "validation", "validation", "test", "test"]
-
-
-def test_calendar():
-    hours = pd.to_datetime(
-        [
-            "2024-05-01 12:00",  # Wednesday, Mexican holiday
-            "2024-05-04 12:00",  # Saturday
-            "2024-05-06 12:00",  # Monday, regular day
-        ]
-    )
-    panel = make_flow_panel(hours, {1: [0.0] * len(hours)})
-
-    calendar = add_calendar(panel)
-
-    assert calendar["is_weekend"].tolist() == [False, True, False]
-    assert calendar["is_holiday"].tolist() == [True, False, False]
-    assert {"hour_sin", "hour_cos", "day_of_week"}.issubset(calendar.columns)
-
-
-def test_neighbor_is_lagged():
-    hours = pd.date_range("2024-01-01 00:00", periods=5, freq="h")
-    panel = make_flow_panel(hours, {1: [0.1] * 5, 2: [0.9] * 5})
-
-    neighbors = add_neighbors(panel, k=1).set_index(["station_id", "hour"])
-
-    # At hour t the neighbor value is the other station's flow at hour t-1.
-    for station_id, expected in ((1, 0.9), (2, 0.1)):
-        assert pd.isna(neighbors.loc[(station_id, hours[0]), "neighbor_net_flow"])
-        for hour in hours[1:]:
-            assert neighbors.loc[(station_id, hour), "neighbor_net_flow"] == pytest.approx(
-                expected
-            )
-
-
-def test_load_stations_renames_capacity(tmp_path):
-    stations_dir = tmp_path / "stations"
-    stations_dir.mkdir()
-    csv_path = stations_dir / "nomenclatura_2024_01.csv"
-    csv_path.write_text(
-        '"id","name","latitude","longitude","dpcapacity"\n'
-        '1,"A",19.43,-99.13,10\n'
-        '2,"B",19.44,-99.14,20\n',
-        encoding="utf-8",
-    )
-
-    stations = load_stations(stations_dir)
-
-    assert "capacity" in stations.columns
-    assert "dpcapacity" not in stations.columns
-    assert {"station_id", "name", "latitude", "longitude", "capacity"} == set(stations.columns)
-    assert stations["capacity"].tolist() == [10, 20]
-
-
-def test_no_label_leak_in_features():
-    panel = build_panel(make_trips(), make_stations(), YEAR)
-    features = add_split(add_target(add_lags(add_neighbors(add_calendar(panel), k=1))))
-
-    assert "net_flow_next" not in features.columns
-    assert "target" in features.columns
-    assert "split" in features.columns
-    for column in ("net_flow_lag1", "net_flow_lag2", "net_flow_lag24", "neighbor_net_flow"):
-        assert column in features.columns
+    assert predict_first(data, purge=True) == pytest.approx(predict_first(changed, purge=True))
+    # Positive control: this test would detect the original documentation's leaky fit.
+    assert predict_first(data, purge=False) != pytest.approx(predict_first(changed, purge=False))

@@ -85,3 +85,6 @@
     - **Davies-Bouldin Index:** Minimización ($< 1.0$).
 - **Validación Cualitativa Urbana:**
     - Los centroides deben correlacionar de manera intuitiva con los usos de suelo de Guadalajara (nodos residenciales en Zapopan/Providencia vs. nodos atractores en Zona Financiera / Chapultepec / Centro Histórico).
+
+!!! info "Ventana de entrenamiento implementada"
+    El baseline construye 49 dimensiones únicamente con enero–septiembre de 2024, disponibles al cierre de esa ventana; no introduce el perfil anual como predictor de meses anteriores. Excluye estaciones con menos de 100 salidas en cualquier mes y direcciones sin actividad. Ver [contratos de features](../feature-engineering.md).
