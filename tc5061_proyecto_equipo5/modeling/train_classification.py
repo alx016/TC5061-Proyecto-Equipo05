@@ -2,13 +2,12 @@
 
 The question is whether a station will be short of bikes, short of docks or balanced during hour t+1, using only what
 is known at minute 50 of hour t.  The classes are severely imbalanced (about 98.7% balanced), so the baselines are
-scored with macro-F1, balanced accuracy and PR-AUC instead of plain accuracy.  Both runs are logged in MLflow under the
-mibici-equipo05 experiment, with the default local tracking so the artifacts stay inside the ignored mlruns/ folder.
+scored with macro-F1, balanced accuracy and PR-AUC instead of plain accuracy.  Both runs use the shared helpers in
+modeling/common.py (same experiment, data version and Git commit) and the default local tracking, so the artifacts stay
+inside the ignored mlruns/ folder.
 """
 
-import json
 from pathlib import Path
-import subprocess
 import tempfile
 
 from loguru import logger
@@ -33,10 +32,10 @@ import typer
 
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
-    DATA_MANIFEST_PATH,
     RISK_THRESHOLD,
     STUDY_YEAR,
 )
+from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
 
 # matplotlib has to switch to a non-interactive backend before pyplot is imported
 matplotlib.use("Agg")
@@ -44,7 +43,6 @@ import matplotlib.pyplot as plt
 
 app = typer.Typer()
 
-EXPERIMENT_NAME = "mibici-equipo05"
 FEATURE_SET = "classification_lags"
 SPLITS = ("train", "validation", "test")
 # Figures and the text report are labeled in Spanish; identifiers stay English.
@@ -73,22 +71,6 @@ FEATURE_COLUMNS = [
     "departures_lag2",
     "departures_lag3",
 ]
-
-
-def data_version() -> str:
-    """Read the data version hash written by the dataset manifest command."""
-    return json.loads(DATA_MANIFEST_PATH.read_text())["data_version"]
-
-
-def git_commit() -> str:
-    """Return the short hash of the current commit."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
 
 
 def load_rows(path: Path) -> pd.DataFrame:
@@ -166,9 +148,7 @@ def train_and_log(name, model, model_params, data, seed) -> dict:
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(
-            {"team": "equipo05", "question": "classification", "git_commit": git_commit()}
-        )
+        mlflow.set_tags(base_tags("classification"))
         test_metrics = {}
         for split in ("validation", "test"):
             prefix = "val_" if split == "validation" else "test_"
@@ -230,9 +210,8 @@ def classification(
             {"model": "logistic_regression", "C": 1.0},
         ),
     }
-    # Default local tracking: no tracking URI is set, so MLflow writes its metadata and artifacts under the repository
-    # (the artifact root stays inside the ignored mlruns/ folder).
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    # Default local tracking comes from modeling/common.py: one shared experiment for the team
+    setup_experiment()
     records = []
     for name, (model, model_params) in models.items():
         logger.info(f"Training {name}")

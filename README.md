@@ -27,6 +27,26 @@ To check that your local data matches the committed manifest:
 python tc5061_proyecto_equipo5/dataset.py manifest --check
 ```
 
+## Modeling scripts
+
+Each project question has its own training script so the team can work in parallel without editing the same file:
+
+| Question | Task | Script | Command |
+|:---|:---|:---|:---|
+| P1 | Regression | `modeling/train_regression.py` *(pending)* | `python -m tc5061_proyecto_equipo5.modeling.train_regression` |
+| P2 | Classification | `modeling/train_classification.py` | `python -m tc5061_proyecto_equipo5.modeling.train_classification classification` |
+| P3 | Clustering | `modeling/train_clustering.py` *(pending)* | `python -m tc5061_proyecto_equipo5.modeling.train_clustering` |
+
+Rules that keep the three scripts comparable:
+
+- Shared reproducibility helpers live in `modeling/common.py`: `data_version()`, `git_commit()`, `setup_experiment()` and `base_tags(question)`. Do not duplicate them.
+- All runs go to the `mibici-equipo05` experiment, tagged with `team`, `question` and `git_commit`.
+- Metric names carry the split as a prefix: `test_macro_f1`, `val_mae`, etc.
+- Every run logs the data version from the manifest as a parameter.
+- Code, comments, docstrings and file names are written in English; figures and text artifacts are written in Spanish.
+
+Feature engineering follows the same idea: `features.py` builds the shared station-hour panel and one feature table per question (`python -m tc5061_proyecto_equipo5.features classification`), and `plots.py` draws the justification figures.
+
 ## Project Organization
 
 ```
@@ -72,8 +92,11 @@ python tc5061_proyecto_equipo5/dataset.py manifest --check
     │
     ├── modeling                
     │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
+    │   ├── common.py                   <- Helpers shared by the three training scripts
+    │   ├── predict.py                  <- Code to run model inference with trained models          
+    │   ├── train_classification.py     <- P2: station risk classification baselines
+    │   ├── train_clustering.py         <- P3: station clustering (pending)
+    │   └── train_regression.py         <- P1: demand regression (pending)
     │
     └── plots.py                <- Code to create visualizations
 ```
