@@ -85,3 +85,6 @@
 - **Monitoreo en Producción:**
     - Seguimiento de WAPE rodante de 7 días.
     - Alerta de degradación de modelo si $\text{WAPE} > 25\%$ durante tres periodos consecutivos.
+
+!!! info "Contrato temporal implementado"
+    La receta baseline predice `[h,h+1)` a las `h-00:10`. No usa la hora en curso: el lag reciente mínimo es 2 respecto al inicio del objetivo. Los atributos espaciales y festivos se incorporarán cuando existan fuentes point-in-time acreditadas. Ver [contratos de features](../feature-engineering.md).
