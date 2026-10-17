@@ -1,0 +1,410 @@
+{
+  "data_version": "b37bda69b0a71be1f5016977107e587bc96981e7bcba28a36361637e5cf7741e",
+  "total_files": 67,
+  "total_rows": 23523090,
+  "total_bytes": 458906107,
+  "files": [
+    {
+      "path": "year=2021/viajes_2021_01.parquet",
+      "rows": 197195,
+      "bytes": 4479614,
+      "sha256": "8e4cd51a3e77089705d6988224167b5a6df586fe0b4ac1158d3fb0d282932f4e"
+    },
+    {
+      "path": "year=2021/viajes_2021_02.parquet",
+      "rows": 202781,
+      "bytes": 4576322,
+      "sha256": "b50cff169956a4a44a0465f87c27c4e7f1882becd967ba0f84c9201725e74c11"
+    },
+    {
+      "path": "year=2021/viajes_2021_03.parquet",
+      "rows": 248294,
+      "bytes": 5363332,
+      "sha256": "0ae8d2f1e30bf4726e2c081e50bc293f6a86c3cdc50f51919501235d005e2ca8"
+    },
+    {
+      "path": "year=2021/viajes_2021_04.parquet",
+      "rows": 240557,
+      "bytes": 5230310,
+      "sha256": "54a151c3d585843386e97a2b2c95976baf90b3cca55868b40f88c8b5cb2c7c81"
+    },
+    {
+      "path": "year=2021/viajes_2021_05.parquet",
+      "rows": 269595,
+      "bytes": 5730721,
+      "sha256": "5c7373f967fbb25503c67d9ae51960fd828938a593185834a36e2cfd28c85df7"
+    },
+    {
+      "path": "year=2021/viajes_2021_06.parquet",
+      "rows": 272721,
+      "bytes": 5769432,
+      "sha256": "4c88be646faffef072e7ab79d2f90601b3d132dbdf9f06613d5955710557a735"
+    },
+    {
+      "path": "year=2021/viajes_2021_07.parquet",
+      "rows": 268605,
+      "bytes": 5714850,
+      "sha256": "3a2cd69c75b04fe9658dc3515a1e3a23a63f32e9c41cdf86dac2686ac9373b5c"
+    },
+    {
+      "path": "year=2021/viajes_2021_08.parquet",
+      "rows": 273668,
+      "bytes": 5809129,
+      "sha256": "b3d2e3f9e98c6785ab4898058a980cd710949eae358acb53472097e9a5925e77"
+    },
+    {
+      "path": "year=2021/viajes_2021_09.parquet",
+      "rows": 270554,
+      "bytes": 5758304,
+      "sha256": "77668b7cab00c9569257439ce3f80d9439f446ff528193e4537a5f79c270832c"
+    },
+    {
+      "path": "year=2021/viajes_2021_10.parquet",
+      "rows": 318787,
+      "bytes": 6479550,
+      "sha256": "3fa6c7bb8725b98461ec80439ca46fd6b5913766329debc25e1d10fc244d26c4"
+    },
+    {
+      "path": "year=2021/viajes_2021_11.parquet",
+      "rows": 322648,
+      "bytes": 6519732,
+      "sha256": "a11af186ac16dfc00e2290e3dff5b48f791af45a308afa4eb4a553df7a4150e3"
+    },
+    {
+      "path": "year=2021/viajes_2021_12.parquet",
+      "rows": 299005,
+      "bytes": 6197209,
+      "sha256": "ff450fb3ff37cee46958193b5772662d037b88e40bd7f73a08e525f405801332"
+    },
+    {
+      "path": "year=2022/viajes_2022_01.parquet",
+      "rows": 289864,
+      "bytes": 6045505,
+      "sha256": "eb0a20ef111ea6f5050e1660fb8a5588f642e663c9539fcc9266a5a6c22e8ced"
+    },
+    {
+      "path": "year=2022/viajes_2022_02.parquet",
+      "rows": 313752,
+      "bytes": 6397840,
+      "sha256": "266e845a56201e02b1befb2bd544d23cf8b97d5911a7e76dbe85c3f7b7321c3c"
+    },
+    {
+      "path": "year=2022/viajes_2022_03.parquet",
+      "rows": 377505,
+      "bytes": 7339453,
+      "sha256": "6d930c6e065e1ea4f2c12fab330f0aaf09905431b0df70d16f30ad436c392db2"
+    },
+    {
+      "path": "year=2022/viajes_2022_04.parquet",
+      "rows": 330094,
+      "bytes": 6708481,
+      "sha256": "f066f271a811da9d7d51a372dfb33da6d73666a64e945ec03cf99c1e1322d016"
+    },
+    {
+      "path": "year=2022/viajes_2022_05.parquet",
+      "rows": 373701,
+      "bytes": 7307564,
+      "sha256": "55998496800dc60c1e8372345b135a5503e51f26341ea8e28e53b921a46b1811"
+    },
+    {
+      "path": "year=2022/viajes_2022_06.parquet",
+      "rows": 351595,
+      "bytes": 6971967,
+      "sha256": "c7d865ecad3684ed836ec3102d19e800b19b88dd3d9898248828ff32cc0c3ddf"
+    },
+    {
+      "path": "year=2022/viajes_2022_07.parquet",
+      "rows": 334356,
+      "bytes": 6736357,
+      "sha256": "9c52c52f1db850dfa992f7ccee0c4f13303ee9a0e4bcfb7f9d84867170ed76d3"
+    },
+    {
+      "path": "year=2022/viajes_2022_08.parquet",
+      "rows": 363161,
+      "bytes": 7151289,
+      "sha256": "b39d7f6837148b6b2dbe5f32620f2a80e25f603725a7c8d898a148fe74f6281c"
+    },
+    {
+      "path": "year=2022/viajes_2022_09.parquet",
+      "rows": 375014,
+      "bytes": 7326286,
+      "sha256": "158fde83353b4e2b74e18632d6947727e67b88abf7b2dd35f7a2d8cdef3b46ba"
+    },
+    {
+      "path": "year=2022/viajes_2022_10.parquet",
+      "rows": 390156,
+      "bytes": 7535189,
+      "sha256": "86a615b5781d681d71c7292c22dda16f772775a2c399965a036d796b8d47614b"
+    },
+    {
+      "path": "year=2022/viajes_2022_11.parquet",
+      "rows": 381192,
+      "bytes": 7396438,
+      "sha256": "3acbec35011c2b3285036df1e515351acc56f1180993929f7d506aa479d25c74"
+    },
+    {
+      "path": "year=2022/viajes_2022_12.parquet",
+      "rows": 322552,
+      "bytes": 6559040,
+      "sha256": "339451b9de54677537acdcb5c5dd98a19aed6477f1dd29496b6c68de5fdb833c"
+    },
+    {
+      "path": "year=2023/viajes_2023_01.parquet",
+      "rows": 366018,
+      "bytes": 7191665,
+      "sha256": "a42753c0e1c9caf0cba3c940e34d1b39d33e15e0300500e4bcf767bc251f74ff"
+    },
+    {
+      "path": "year=2023/viajes_2023_02.parquet",
+      "rows": 355291,
+      "bytes": 7000796,
+      "sha256": "11f30ab213ab8005302a62138e8b8ed5efb0c02c000f34beb9a9c9cfc71169ab"
+    },
+    {
+      "path": "year=2023/viajes_2023_03.parquet",
+      "rows": 402460,
+      "bytes": 7723564,
+      "sha256": "1bdc7cba8e0174ea0b13845014e122f7c592fb59e8f8d116f55222c664be7c46"
+    },
+    {
+      "path": "year=2023/viajes_2023_06.parquet",
+      "rows": 339628,
+      "bytes": 6805417,
+      "sha256": "6ca481747dae6532536e7941dd5571eaf546706592d7462048359990a080a047"
+    },
+    {
+      "path": "year=2023/viajes_2023_07.parquet",
+      "rows": 331787,
+      "bytes": 6671395,
+      "sha256": "179431213fd3c54184462243ff7d145a0ecd37fe228578a4ab8f3aea48e94d9c"
+    },
+    {
+      "path": "year=2023/viajes_2023_08.parquet",
+      "rows": 354810,
+      "bytes": 7029304,
+      "sha256": "8246f5d2a454d72d1c6d5b1c163467840d1aee354d10a3450b788523fe68e42a"
+    },
+    {
+      "path": "year=2023/viajes_2023_09.parquet",
+      "rows": 363859,
+      "bytes": 7144355,
+      "sha256": "f9c1d6d18ec4a9a5ed4a7cacb11bd7c6312faecb29ea44a38927d3a5ee98cfdb"
+    },
+    {
+      "path": "year=2023/viajes_2023_10.parquet",
+      "rows": 383239,
+      "bytes": 7434336,
+      "sha256": "efe34afdfddba6466ac6a21f9f2983c43692c26d7f1173c30fca69526a969a08"
+    },
+    {
+      "path": "year=2023/viajes_2023_11.parquet",
+      "rows": 384464,
+      "bytes": 4731591,
+      "sha256": "1edc3de18ccd000497383a08974709d2353ef43b24c752ea3790e03af622ecc1"
+    },
+    {
+      "path": "year=2023/viajes_2023_12.parquet",
+      "rows": 314164,
+      "bytes": 6455907,
+      "sha256": "6b2ba98150c11c1e4eba91885f92128a2378849c7290f33d405e02cb8e102131"
+    },
+    {
+      "path": "year=2024/viajes_2024_01.parquet",
+      "rows": 391591,
+      "bytes": 7558236,
+      "sha256": "d922e62b87e495fa1b9753d2c3dd2035d9254cefb46d4e1a9ff6d4af84555a35"
+    },
+    {
+      "path": "year=2024/viajes_2024_02.parquet",
+      "rows": 383732,
+      "bytes": 7452490,
+      "sha256": "35c261ccddfbbb5cff759cc83e03e8b56318aeafbc17b17bc63649288edeefd6"
+    },
+    {
+      "path": "year=2024/viajes_2024_03.parquet",
+      "rows": 390513,
+      "bytes": 7595077,
+      "sha256": "c5da0dfa8eae530d09e72976c0ec22e556515174f85cfd67a428d4f76121a962"
+    },
+    {
+      "path": "year=2024/viajes_2024_04.parquet",
+      "rows": 405308,
+      "bytes": 7798475,
+      "sha256": "27865548250dc37d3cb0ae6eb0c97026efc4a170e66b573c98623282981e2acb"
+    },
+    {
+      "path": "year=2024/viajes_2024_05.parquet",
+      "rows": 410806,
+      "bytes": 7851340,
+      "sha256": "6e391965053e318e51db5df698a0cbbea1270a3f0b533b1f5a64944644d49522"
+    },
+    {
+      "path": "year=2024/viajes_2024_06.parquet",
+      "rows": 365000,
+      "bytes": 7196621,
+      "sha256": "f21410bfd5850a5515a19acbcfaccbe0fcc7787848895fee0a5c72b72d7e9757"
+    },
+    {
+      "path": "year=2024/viajes_2024_07.parquet",
+      "rows": 364177,
+      "bytes": 7214300,
+      "sha256": "3e4d17a908c0f1ff5b8176f3e89e9aa9ec8d3bf73338f9c0addfca1114ea1ef3"
+    },
+    {
+      "path": "year=2024/viajes_2024_08.parquet",
+      "rows": 394894,
+      "bytes": 7652031,
+      "sha256": "799a1584909516bd3c253f1e9e5922bd04fdf3b29b72eb6d102ee39600d094e4"
+    },
+    {
+      "path": "year=2024/viajes_2024_09.parquet",
+      "rows": 390072,
+      "bytes": 4807101,
+      "sha256": "ce3ebcedbba54a9ddc8180f7bf8c3a07bafb0b1a40f7be3c11bc3dd59ce5b8ff"
+    },
+    {
+      "path": "year=2024/viajes_2024_10.parquet",
+      "rows": 418690,
+      "bytes": 5072591,
+      "sha256": "02fa64b811936fc654076391f970ae49f478b211c9ca518b9733d69028b27a8e"
+    },
+    {
+      "path": "year=2024/viajes_2024_11.parquet",
+      "rows": 391089,
+      "bytes": 7584107,
+      "sha256": "3ceb3cbfd181b0582e6f757235a4067bcabd170be80d5031a2f6995d45e5c316"
+    },
+    {
+      "path": "year=2024/viajes_2024_12.parquet",
+      "rows": 340049,
+      "bytes": 6863051,
+      "sha256": "d1c41b585f72ec1ceddb5d9ddd84fd14b4a9bea57aa0727154437e2ccedee2cc"
+    },
+    {
+      "path": "year=2025/viajes_2025_01.parquet",
+      "rows": 380184,
+      "bytes": 7449510,
+      "sha256": "285c79c5955f0ac8ba861cbb6441ba5744ef5530c0dcf74a1b9d729d18811b83"
+    },
+    {
+      "path": "year=2025/viajes_2025_02.parquet",
+      "rows": 372529,
+      "bytes": 7309079,
+      "sha256": "f040b6109c3a1908dd6f96dc777a1fd29b036e73302b46348b148627d2109113"
+    },
+    {
+      "path": "year=2025/viajes_2025_03.parquet",
+      "rows": 405110,
+      "bytes": 7818876,
+      "sha256": "bcf5e696645aaefae4f2e915aff4f6dbe1330c2eed4f709d59440d454857489d"
+    },
+    {
+      "path": "year=2025/viajes_2025_04.parquet",
+      "rows": 366193,
+      "bytes": 7235368,
+      "sha256": "8123b880c8f07034652521f372104feff7d587e8750ca01cc1380850277bd3d5"
+    },
+    {
+      "path": "year=2025/viajes_2025_05.parquet",
+      "rows": 395891,
+      "bytes": 7698907,
+      "sha256": "3453d63f0ea0aee8f3808840d3ac84d5db23dd5bc8371bee8c72552e808019ec"
+    },
+    {
+      "path": "year=2025/viajes_2025_06.parquet",
+      "rows": 356611,
+      "bytes": 7093783,
+      "sha256": "c97ddcd2f16287a71e5ac1fa928616392f8fd6d5f467ae11fa63d9143e826a92"
+    },
+    {
+      "path": "year=2025/viajes_2025_07.parquet",
+      "rows": 368186,
+      "bytes": 7293740,
+      "sha256": "4991d3b82fba147a4554559b100115dd715236e666164528720326b66006798f"
+    },
+    {
+      "path": "year=2025/viajes_2025_08.parquet",
+      "rows": 374727,
+      "bytes": 7370681,
+      "sha256": "3d8cbee14f2bc0d425bc47239e724d5b5401b784725311276229d5b09d680a76"
+    },
+    {
+      "path": "year=2025/viajes_2025_09.parquet",
+      "rows": 376789,
+      "bytes": 7406203,
+      "sha256": "f5b0ab91c5137058f8bc7d155c6d86e1283566c29bdb5bd148cf4bf34c41a38f"
+    },
+    {
+      "path": "year=2025/viajes_2025_10.parquet",
+      "rows": 420064,
+      "bytes": 8045061,
+      "sha256": "2cbf0f59bb206b59b767cdf9ff933049077697680210f2788fc6c21df9ef410b"
+    },
+    {
+      "path": "year=2025/viajes_2025_11.parquet",
+      "rows": 380328,
+      "bytes": 7453786,
+      "sha256": "3b8a524336830e2056c8d5b67adc01b8dd3692813dde1ca8b21c032007c00d7b"
+    },
+    {
+      "path": "year=2025/viajes_2025_12.parquet",
+      "rows": 335420,
+      "bytes": 6802431,
+      "sha256": "34a2024c841ddef9948ded0b2e1cc1ab5e8e8be271b1b6ac7825a67d737b5924"
+    },
+    {
+      "path": "year=2026/viajes_2026_01.parquet",
+      "rows": 357180,
+      "bytes": 7099565,
+      "sha256": "7de6b1a51906a99309cbf6a4ad871a47c5ef1ce1ba8ee745218b960d67341b7d"
+    },
+    {
+      "path": "year=2026/viajes_2026_02.parquet",
+      "rows": 333756,
+      "bytes": 6722614,
+      "sha256": "34a6f336a806a28293b0b154a70e68d46bfbe4d2d413e820e1bfdb8ee0cc37d1"
+    },
+    {
+      "path": "year=2026/viajes_2026_03.parquet",
+      "rows": 376243,
+      "bytes": 7419189,
+      "sha256": "b8e26e1fb10437eb0933f692f089ae7abfe7f472d50ae09f1ca6a4e3e49078b9"
+    },
+    {
+      "path": "year=2026/viajes_2026_04.parquet",
+      "rows": 351851,
+      "bytes": 7013281,
+      "sha256": "3ca29ef9357c59a90aaec4df32262ba34ccf2aecb4ae309fca320c3aa262445d"
+    },
+    {
+      "path": "year=2026/viajes_2026_05.parquet",
+      "rows": 315895,
+      "bytes": 6484216,
+      "sha256": "7615164310f0bf0b54a773ed144409c68e5f06decdd2e037244061a721ce14ab"
+    },
+    {
+      "path": "year=2026/viajes_2026_06.parquet",
+      "rows": 355303,
+      "bytes": 7080231,
+      "sha256": "42c8556de73c66b2d6d34bb972a01bf5af52eba6cac7ab41634781d5f8b721db"
+    },
+    {
+      "path": "year=2026/viajes_2026_07.parquet",
+      "rows": 388257,
+      "bytes": 7560590,
+      "sha256": "dddf5f9236ecbf94d70cef516e14e154830f942b3dc8b876719f1f558b42f187"
+    },
+    {
+      "path": "year=2026/viajes_2026_08.parquet",
+      "rows": 393524,
+      "bytes": 7654037,
+      "sha256": "56805b9f634bc8a738153a2f814276904cf06791cc77b9169c648e82856b0d7c"
+    },
+    {
+      "path": "year=2026/viajes_2026_09.parquet",
+      "rows": 490056,
+      "bytes": 8957295,
+      "sha256": "1340a8ea57a368af77a4bce5f69a56de9a97bbddf6eec4008fbb57f9bd1deea0"
+    }
+  ]
+}
