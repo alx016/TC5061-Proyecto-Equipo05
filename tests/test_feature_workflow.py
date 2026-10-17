@@ -157,6 +157,7 @@ def test_ready_cli_needs_no_future_station_catalog_for_demand(tmp_path):
     result = CliRunner().invoke(
         app,
         [
+            "main",
             "--problem",
             "p1",
             "--prepare-ready",

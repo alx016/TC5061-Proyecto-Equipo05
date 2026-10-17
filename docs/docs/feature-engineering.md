@@ -320,13 +320,20 @@ La ruta nueva `--prepare-ready` necesita doce Parquets de 2024 y permite diciemb
 las filas por primera observación e historia completa, no por fecha de apertura.
 
 ```bash
-python -m tc5061_proyecto_equipo5.features --problem p1 --prepare-ready \
+python -m tc5061_proyecto_equipo5.features main --problem p1 --prepare-ready \
   --input-dir data/interim/viajes \
   --output-dir data/processed/fe_2024_v4
-python -m tc5061_proyecto_equipo5.features --problem p3 --prepare-ready \
+python -m tc5061_proyecto_equipo5.features main --problem p3 --prepare-ready \
   --input-dir data/interim/viajes \
   --output-dir data/processed/fe_2024_v4
 ```
+
+Los artefactos de clasificación (P2) tienen sus propios comandos: `features panel`
+construye el panel estación-hora compartido y `features classification` construye la
+tabla que consumen `modeling/train_classification.py` y `plots.py`. Como el portal
+publica únicamente el catálogo de estaciones vigente, esa ruta **asume capacidad
+estática** entre 2024 y el snapshot del catálogo; el supuesto queda registrado y debe
+reportarse junto con los resultados.
 
 Usar otro directorio para repetir: se rechaza sobrescribir una entrega publicada.
 La receta ampliada agrega interacciones, variables temporales y logaritmos. El

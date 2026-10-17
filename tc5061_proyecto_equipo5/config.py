@@ -26,3 +26,17 @@ FIGURES_DIR = REPORTS_DIR / "figures"
 
 INITIAL_YEAR = 2024
 END_YEAR = 2026
+
+# Classification study: predict if a station will be short of bikes or docks next hour
+STUDY_YEAR = 2024
+# A station is at risk when one hour moves at least 40% of its capacity
+RISK_THRESHOLD = 0.40
+
+# Temporal split: train in the first nine months, validate and test out-of-time
+TRAIN_MONTHS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+VALIDATION_MONTHS = (10, 11)
+TEST_MONTHS = (12,)
+
+# Shared station-hour base and the classification feature table
+CLASSIFICATION_PANEL_PATH = PROCESSED_DATA_DIR / "panel_station_hour.parquet"
+CLASSIFICATION_FEATURES_PATH = PROCESSED_DATA_DIR / "classification_features.parquet"
