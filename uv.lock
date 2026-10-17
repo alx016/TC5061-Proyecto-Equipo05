@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -1652,22 +1652,22 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ipython" },
-    { name = "jupyterlab" },
-    { name = "loguru" },
-    { name = "matplotlib" },
-    { name = "mkdocs" },
-    { name = "notebook" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pip" },
-    { name = "pyarrow" },
-    { name = "pytest" },
-    { name = "python-dotenv" },
-    { name = "ruff" },
-    { name = "scikit-learn" },
-    { name = "tqdm" },
-    { name = "typer" },
+    { name = "ipython", specifier = "==9.17.1" },
+    { name = "jupyterlab", specifier = "==4.6.4" },
+    { name = "loguru", specifier = "==0.7.3" },
+    { name = "matplotlib", specifier = "==3.11.2" },
+    { name = "mkdocs", specifier = "==1.6.1" },
+    { name = "notebook", specifier = "==7.6.3" },
+    { name = "numpy", specifier = "==2.5.4" },
+    { name = "pandas", specifier = "==3.0.6" },
+    { name = "pip", specifier = "==26.2.1" },
+    { name = "pyarrow", specifier = "==26.0.0" },
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "python-dotenv", specifier = "==1.2.4" },
+    { name = "ruff", specifier = "==0.17.0" },
+    { name = "scikit-learn", specifier = "==1.9.1" },
+    { name = "tqdm", specifier = "==4.70.1" },
+    { name = "typer", specifier = "==0.27.3" },
 ]
 
 [[package]]
