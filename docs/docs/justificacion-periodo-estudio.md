@@ -21,7 +21,7 @@ A través de un Análisis Exploratorio de Datos (EDA) reproducible ejecutado en 
 | **Topología de Red** | Expansión variable (86 a 274 estaciones) | **360 estaciones activas estables** | Elimina sesgo espacial por estaciones inexistentes en fases previas. |
 | **Estabilidad de Demanda** | Ruptura estructural por COVID-19 (-60.3% en 2020) | **Régimen maduro (~3.82M viajes anuales)** | Evita que patrones atípicos de confinamiento contaminen el entrenamiento. |
 | **Calidad de Registros** | Formatos dispersos en CSV | **0.0% nulos en variables clave; Parquet Snappy** | Ahorro del 62.0% en almacenamiento (~139.6 MB) y carga columnar ultrarrápida. |
-| **Proxy de Riesgo (P2)** | No disponible en inventario directo | **Flujo neto normalizado ($\Delta_{s,t}$) calibrado** | 12.6% de eventos críticos; justifica Macro F1 y PR-AUC ante desbalance. |
+| **Proxy de Riesgo (P2)** | No disponible en inventario directo | **Flujo neto normalizado ($\Delta_{s,t}$) calibrado** | 1.22% de eventos críticos (98.78% balanceado); justifica Macro F1 y PR-AUC ante desbalance. |
 | **Partición de Datos** | Fuga por split aleatorio convencional | **Partición temporal estricta (Train/Val/Test OOT)** | Cero fuga de información (*zero data leakage*); evaluación ciega sobre fin de año. |
 
 ---
@@ -190,21 +190,21 @@ $$Y_{s,t}^{\text{P2}} = \begin{cases}
 
 ### 5.3 Distribución Empírica y Justificación de Métricas
 
-La evaluación empírica del proxy sobre el dataset de 2024 arrojó la siguiente distribución de estados operativos:
+La evaluación empírica del proxy sobre la cuadrícula completa de 2024 (370 estaciones con actividad × 8,784 horas = 3,250,080 estaciones-hora; 3,249,710 con etiqueta) arrojó la siguiente distribución de estados operativos:
 
 | Estado Operativo ($Y^{\text{P2}}$) | Condición Formal | Proporción Empírica (%) | Interpretación Operativa en MiBici |
 |:---|:---:|:---:|:---|
-| **Balanceado** | $-0.40 < \Delta_{s,t} < 0.40$ | **87.4%** | Operación normal; disponibilidad suficiente de bicicletas y anclajes. |
-| **Riesgo_Desabasto** | $\Delta_{s,t} \le -0.40$ | **6.8%** | Demanda saliente crítica; riesgo inminente de estación vacía si no se rebalancea. |
-| **Riesgo_Saturacion** | $\Delta_{s,t} \ge 0.40$ | **5.8%** | Flujo entrante crítico; riesgo inminente de estación llena donde los usuarios no pueden anclar. |
+| **Balanceado** | $-0.40 < \Delta_{s,t} < 0.40$ | **98.78%** | Operación normal; disponibilidad suficiente de bicicletas y anclajes. |
+| **Riesgo_Desabasto** | $\Delta_{s,t} \le -0.40$ | **0.64%** | Demanda saliente crítica; riesgo inminente de estación vacía si no se rebalancea. |
+| **Riesgo_Saturacion** | $\Delta_{s,t} \ge 0.40$ | **0.58%** | Flujo entrante crítico; riesgo inminente de estación llena donde los usuarios no pueden anclar. |
 
 ![Figura 4: Proxy de Riesgo P2 - Distribución y Clases](figures/04_p2_proxy_riesgo_distribucion.png)
-*Figura 4: Distribución del Flujo Neto Normalizado ($\Delta$) y proporciones de las clases operativas resultantes para el problema P2.*
+*Figura 4: Distribución del Flujo Neto Normalizado ($\Delta$) y proporciones de las clases operativas resultantes para el problema P2, calculadas sobre el año 2024 completo (cuadrícula estación-hora).*
 
 !!! important "Desbalance Severo de Clases y Descarte de Accuracy"
-    Los eventos operativos críticos (desabasto 6.8% y saturación 5.8%) representan conjuntamente el **12.6% de las observaciones estación-hora**:
+    Los eventos operativos críticos (desabasto 0.64% y saturación 0.58%) representan conjuntamente el **1.22% de las observaciones estación-hora**:
 
-    - Si se utilizara **Exactitud (*Accuracy*)** como métrica de evaluación, un modelo trivial o "ingenuo" que prediga siempre la clase mayoritaria `Balanceado` obtendría un **87.4% de exactitud**, pero fracasaría por completo en su objetivo operativo (detectaría 0 eventos de riesgo).
+    - Si se utilizara **Exactitud (*Accuracy*)** como métrica de evaluación, un modelo trivial o "ingenuo" que prediga siempre la clase mayoritaria `Balanceado` obtendría un **98.78% de exactitud**, pero fracasaría por completo en su objetivo operativo (detectaría 0 eventos de riesgo).
     - Por lo tanto, se justifica formalmente que la función objetivo y métricas de evaluación para P2 deban ser obligatoriamente:
         1. **Macro F1-Score:** Pondera por igual el desempeño en las clases minoritarias críticas sin permitir que la clase dominante infle artificialmente la métrica.
         2. **PR-AUC (Área bajo la Curva Precision-Recall):** Mide la capacidad del modelo para priorizar estaciones en riesgo minimizando falsas alarmas operativas.
