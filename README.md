@@ -6,6 +6,25 @@
 
 Diseñar, como equipo, una propuesta de solución de Machine Learning para un conjunto de preguntas sobre el sistema de bicicleta pública MiBici, que combine modelos de regresión, clasificación y clustering. Y realizar tareas de manipulación, preparación, exploración y preprocesamiento de datos, gestionando grandes volúmenes de datos distribuidos y aplicando técnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning.
 
+## Getting the data
+
+The data is not stored in Git. To download and prepare it, run:
+
+```bash
+make data
+```
+
+This downloads the MiBici monthly trip CSVs into `data/raw/`, cleans them into
+Parquet files in `data/interim/viajes/`, and writes `references/viajes_manifest.json`.
+The years it covers are set by `INITIAL_YEAR` and `END_YEAR` in
+`tc5061_proyecto_equipo5/config.py` (currently 2024–2026).
+
+To check that your local data matches the committed manifest:
+
+```bash
+python tc5061_proyecto_equipo5/dataset.py manifest --check
+```
+
 ## Project Organization
 
 ```

@@ -1,4 +1,85 @@
-site_name: MiBici
-# 
-site_author: Equipo 5
-# 
+site_name: TC5061 - MiBici MLOps (Equipo 05)
+site_description: Propuesta Técnica y Sistema de MLOps para MiBici (TC5061 - Entrega 1)
+site_author: TC5061 - Equipo 05
+
+theme:
+  name: material
+  language: es
+  palette:
+    # Modo Oscuro (Obsidian 2026 - Predeterminado)
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Cambiar a modo claro
+    # Modo Claro (Frost 2026)
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Cambiar a modo oscuro
+  font:
+    text: Plus Jakarta Sans
+    code: JetBrains Mono
+  icon:
+    logo: material/bicycle
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.path
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+
+nav:
+  - Inicio: index.md
+  - Datos y EDA:
+      - Justificación del Periodo 2024: justificacion-periodo-estudio.md
+  - Machine Learning Canvases:
+      - Resumen de Arquitectura: canvases/index.md
+      - P1 · Demanda Horaria: canvases/p1-demanda.md
+      - P2 · Riesgo Operativo: canvases/p2-riesgo.md
+      - P3 · Clustering Funcional: canvases/p3-clustering.md
+  - Reproducibilidad:
+      - Guía de Inicio y Comandos: getting-started.md
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+markdown_extensions:
+  - pymdownx.arithmatex:
+      generic: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - toc:
+      permalink: true
