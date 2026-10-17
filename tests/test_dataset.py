@@ -110,11 +110,25 @@ def write_parquet(data_dir, name: str, rows: list[str]):
     return target
 
 
+STATIONS_CSV = (
+    "id,name,latitude,longitude,dpcapacity\n1,Plaza,20.6,-103.4,20\n2,Centro,20.7,-103.3,15\n"
+)
+
+
+def write_stations(stations_dir, name: str = "nomenclatura_2026_09.csv"):
+    stations_dir.mkdir(exist_ok=True)
+    path = stations_dir / name
+    path.write_text(STATIONS_CSV)
+    return path
+
+
 def test_build_manifest_describes_each_file(tmp_path):
     write_parquet(tmp_path, "viajes_2021_02.parquet", ISO_ROWS[:1])
     first = write_parquet(tmp_path, "viajes_2021_01.parquet", ISO_ROWS)
+    stations_dir = tmp_path / "estaciones"
+    stations = write_stations(stations_dir)
 
-    manifest = build_manifest(tmp_path)
+    manifest = build_manifest(tmp_path, stations_dir)
 
     assert [entry["path"] for entry in manifest["files"]] == [
         "year=2021/viajes_2021_01.parquet",
@@ -124,21 +138,39 @@ def test_build_manifest_describes_each_file(tmp_path):
     assert manifest["files"][0]["bytes"] == first.stat().st_size
     assert manifest["total_files"] == 2
     assert manifest["total_rows"] == 4
+    assert [entry["path"] for entry in manifest["estaciones"]] == ["nomenclatura_2026_09.csv"]
+    assert manifest["estaciones"][0]["rows"] == 2
+    assert manifest["estaciones"][0]["bytes"] == stations.stat().st_size
+
+
+def test_build_manifest_ignores_older_station_catalogs(tmp_path):
+    stations_dir = tmp_path / "estaciones"
+    write_stations(stations_dir, "nomenclatura_2026_09.csv")
+    newest = write_stations(stations_dir, "nomenclatura_2026_10.csv")
+
+    manifest = build_manifest(tmp_path, stations_dir)
+
+    assert [entry["path"] for entry in manifest["estaciones"]] == ["nomenclatura_2026_10.csv"]
+    assert manifest["estaciones"][0]["bytes"] == newest.stat().st_size
 
 
 def test_build_manifest_is_stable_for_unchanged_data(tmp_path):
     write_parquet(tmp_path, "viajes_2021_01.parquet", ISO_ROWS)
+    stations_dir = tmp_path / "estaciones"
 
-    assert build_manifest(tmp_path) == build_manifest(tmp_path)
+    manifest = build_manifest(tmp_path, stations_dir)
+    assert manifest["estaciones"] == []  # an absent catalog is not an error
+    assert manifest == build_manifest(tmp_path, stations_dir)
 
 
 def test_build_manifest_version_changes_when_data_changes(tmp_path):
     write_parquet(tmp_path, "viajes_2021_01.parquet", ISO_ROWS)
-    before = build_manifest(tmp_path)
+    stations_dir = tmp_path / "estaciones"
+    before = build_manifest(tmp_path, stations_dir)
 
     changed = [ISO_ROWS[0].replace(",1990,", ",1991,"), *ISO_ROWS[1:]]
     write_parquet(tmp_path, "viajes_2021_01.parquet", changed)
-    after = build_manifest(tmp_path)
+    after = build_manifest(tmp_path, stations_dir)
 
     # Same number of rows, so only the hash can tell the difference
     assert after["total_rows"] == before["total_rows"]

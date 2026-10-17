@@ -1,5 +1,5 @@
 {
-  "data_version": "232c26bafca5eb6f71c9750088926aedcaf1f7d2edb2fbab9439409d426ee153",
+  "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
   "total_files": 33,
   "total_rows": 12540018,
   "total_bytes": 239613863,
@@ -201,6 +201,14 @@
       "rows": 490056,
       "bytes": 8957295,
       "sha256": "1340a8ea57a368af77a4bce5f69a56de9a97bbddf6eec4008fbb57f9bd1deea0"
+    }
+  ],
+  "estaciones": [
+    {
+      "path": "nomenclatura_2026_09.csv",
+      "rows": 484,
+      "bytes": 40841,
+      "sha256": "206e45fe633922b634d858142fa21e6fd9f4c421b6435c02980ef290cc2df90d"
     }
   ]
 }
