@@ -42,7 +42,7 @@ Each project question has its own training script so the team can work in parall
 |:---|:---|:---|:---|
 | P1 | Regression | `modeling/train_regression.py` *(pending)* | `python -m tc5061_proyecto_equipo5.modeling.train_regression` |
 | P2 | Classification | `modeling/train_classification.py` | `python -m tc5061_proyecto_equipo5.modeling.train_classification classification` |
-| P3 | Clustering | `modeling/train_clustering.py` *(pending)* | `python -m tc5061_proyecto_equipo5.modeling.train_clustering` |
+| P3 | Clustering | `modeling/train_clustering.py` | `python -m tc5061_proyecto_equipo5.modeling.train_clustering clustering` |
 
 Rules that keep the three scripts comparable:
 
@@ -102,7 +102,7 @@ The classification artifacts are materialized with `python -m tc5061_proyecto_eq
     │   ├── common.py                   <- Helpers shared by the three training scripts
     │   ├── predict.py                  <- Code to run model inference with trained models          
     │   ├── train_classification.py     <- P2: station risk classification baselines
-    │   ├── train_clustering.py         <- P3: station clustering (pending)
+    │   ├── train_clustering.py         <- P3: station profile clustering
     │   └── train_regression.py         <- P1: demand regression (pending)
     │
     └── plots.py                <- Code to create visualizations
