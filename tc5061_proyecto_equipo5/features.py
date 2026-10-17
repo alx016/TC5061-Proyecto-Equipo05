@@ -135,14 +135,41 @@ def station_hours(year: int) -> pd.DatetimeIndex:
     return pd.date_range(start, end, freq="h", inclusive="left")
 
 
-def select_stations(trips: pd.DataFrame, stations: pd.DataFrame) -> pd.DataFrame:
-    """Keep the catalog stations that moved at least one bike during the year.
+# The panel covers a full calendar year, so a station has to operate in all 12 months
+FULL_YEAR_MONTHS = 12
 
-    A station that never appears in the trips is not operating, so filling it
-    with zeros would add noise; a station without capacity cannot be normalized.
+
+def active_months(trips: pd.DataFrame) -> pd.Series:
+    """Count the months in which each station moved at least one bike.
+
+    A station counts when it appears as the origin of a departure or as the destination of an arrival,
+    so the number reflects real operation and not a zero-filled grid.  The result is indexed by station id.
     """
+    end_column = arrival_column(trips)
+    departures = pd.DataFrame({"station_id": trips["origen_id"], "when": trips["inicio_viaje"]})
+    arrivals = pd.DataFrame({"station_id": trips["destino_id"], "when": trips[end_column]})
+    both = pd.concat([departures, arrivals], ignore_index=True)
+    both["month"] = both["when"].dt.month
+    return both.groupby("station_id")["month"].nunique()
+
+
+def select_stations(trips: pd.DataFrame, stations: pd.DataFrame) -> pd.DataFrame:
+    """Keep the catalog stations that operated during the whole study year.
+
+    A station that only appears in part of the year would contribute zero-filled station-hours for the
+    months when it did not exist, and those fake rows are all labeled ``balanced``.  Requiring activity
+    in every month keeps the panel honest and gives every station the same history in the three splits.
+    """
+    months = active_months(trips)
     used = pd.Index(sorted(set(trips["origen_id"]) | set(trips["destino_id"])))
-    active = stations[stations["station_id"].isin(used)].copy()
+    partial = months[months < FULL_YEAR_MONTHS]
+    if len(partial):
+        logger.info(
+            f"Dropping {len(partial)} stations that did not operate the whole year: "
+            f"{sorted(partial.index.tolist())}"
+        )
+    full_year = months[months == FULL_YEAR_MONTHS].index
+    active = stations[stations["station_id"].isin(full_year)].copy()
     unknown = used.difference(active["station_id"])
     if len(unknown):
         logger.warning(f"{len(unknown)} station ids in trips are not in the catalog")

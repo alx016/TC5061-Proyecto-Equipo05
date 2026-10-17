@@ -33,14 +33,30 @@ def make_stations():
     )
 
 
-def make_trips():
-    """Return two trips: one leaves station 1 and one leaves station 2."""
-    return pd.DataFrame(
+def add_monthly_activity(trips, station_ids=(1, 2)):
+    """Add one self-loop trip per month per station, so the stations count as full-year stations."""
+    extra = [
         {
-            "inicio_viaje": pd.to_datetime(["2024-01-01 00:10", "2024-01-01 01:20"]),
-            "origen_id": [1, 2],
-            "destino_id": [2, 1],
+            "inicio_viaje": pd.Timestamp(year=YEAR, month=month, day=15, hour=3),
+            "origen_id": station_id,
+            "destino_id": station_id,
         }
+        for month in range(1, 13)
+        for station_id in station_ids
+    ]
+    return pd.concat([trips, pd.DataFrame(extra)], ignore_index=True)
+
+
+def make_trips():
+    """Return the two base trips plus one trip per month, so both stations last the whole year."""
+    return add_monthly_activity(
+        pd.DataFrame(
+            {
+                "inicio_viaje": pd.to_datetime(["2024-01-01 00:10", "2024-01-01 01:20"]),
+                "origen_id": [1, 2],
+                "destino_id": [2, 1],
+            }
+        )
     )
 
 
@@ -71,12 +87,29 @@ def test_panel_full_grid():
     assert len(panel) == 2 * len(STATION_HOURS)
     assert panel["departures"].notna().all()
     assert panel["arrivals"].notna().all()
-    # Only the two trips create activity; every other station-hour must be zero.
-    assert panel["departures"].sum() == 2
-    assert panel["arrivals"].sum() == 2
+    # Two base trips plus one trip per month per station (2 x 12) create activity.
+    assert panel["departures"].sum() == 26
+    assert panel["arrivals"].sum() == 26
     quiet = panel[(panel["station_id"] == 1) & (panel["hour"] == pd.Timestamp("2024-06-15 12:00"))]
     assert quiet["departures"].item() == 0
     assert quiet["arrivals"].item() == 0
+
+
+def test_partial_stations_are_dropped():
+    # Station 1 moves bikes every month; station 2 only appears in January.
+    base = pd.DataFrame(
+        {
+            "inicio_viaje": pd.to_datetime(["2024-01-20 05:00"]),
+            "origen_id": [2],
+            "destino_id": [1],
+        }
+    )
+    trips = add_monthly_activity(base, station_ids=(1,))
+
+    panel = build_panel(trips, make_stations(), YEAR)
+
+    assert panel["station_id"].unique().tolist() == [1]
+    assert len(panel) == len(STATION_HOURS)
 
 
 def test_net_flow_formula():
@@ -99,7 +132,7 @@ def test_net_flow_formula():
             "destino_id": [1] * 7,
         }
     )
-    trips = pd.concat([departures, arrivals], ignore_index=True)
+    trips = add_monthly_activity(pd.concat([departures, arrivals], ignore_index=True))
 
     panel = build_panel(trips, make_stations(), YEAR)
     row = panel[(panel["station_id"] == 1) & (panel["hour"] == pd.Timestamp("2024-03-01 08:00"))]
