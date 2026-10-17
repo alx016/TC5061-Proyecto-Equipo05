@@ -15,7 +15,9 @@ make data
 ```
 
 This downloads the MiBici monthly trip CSVs into `data/raw/`, cleans them into
-Parquet files in `data/interim/viajes/`, and writes `references/viajes_manifest.json`.
+Parquet files in `data/interim/viajes/`, downloads the latest station catalog
+(id, name, coordinates and capacity) into `data/external/estaciones/`, and writes
+`references/viajes_manifest.json`.
 The years it covers are set by `INITIAL_YEAR` and `END_YEAR` in
 `tc5061_proyecto_equipo5/config.py` (currently 2024–2026).
 
