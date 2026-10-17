@@ -197,3 +197,8 @@ mlartifacts/
 # Serialized Models
 models/*.pkl
 
+# Machine-specific validation outputs; keep scripts and human-readable reports
+/reports/validation/*-suite.txt
+/reports/validation/*-adversarial.txt
+/reports/validation/*-environment.json
+/reports/validation/*-runtime-*.json
