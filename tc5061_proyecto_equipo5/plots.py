@@ -67,8 +67,9 @@ FEATURE_COLUMNS = [
 # 0 = balanced, 1 = risk_shortage, 2 = risk_saturation
 CLASS_LABELS = {0: "balanced", 1: "risk_shortage", 2: "risk_saturation"}
 CLASS_COLORS = {0: "tab:blue", 1: "tab:red", 2: "tab:orange"}
-# Spanish names for the figure that goes into the Spanish study-period report
-PROXY_CLASS_LABELS = {0: "Balanceado", 1: "Riesgo_Desabasto", 2: "Riesgo_Saturacion"}
+# Figures are always labeled in Spanish (they go into the Spanish report).
+# The English names above stay as identifiers for the CSV keys.
+CLASS_LABELS_ES = {0: "Balanceado", 1: "Riesgo_Desabasto", 2: "Riesgo_Saturacion"}
 
 
 def load_features(path: Path) -> pd.DataFrame:
@@ -97,7 +98,7 @@ def plot_class_distribution(frame: pd.DataFrame, output_dir: Path) -> None:
     """
     counts = frame.loc[frame["target"].notna(), "target"].value_counts().sort_index()
     total = int(counts.sum())
-    labels = [CLASS_LABELS[value] for value in counts.index]
+    labels = [CLASS_LABELS_ES[value] for value in counts.index]
     colors = [CLASS_COLORS[value] for value in counts.index]
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -112,11 +113,12 @@ def plot_class_distribution(frame: pd.DataFrame, output_dir: Path) -> None:
             fontsize=10,
         )
     ax.set_yscale("log")
-    ax.set_xlabel("Class")
-    ax.set_ylabel("Number of rows (log scale)")
+    ax.set_xlabel("Clase")
+    ax.set_ylabel("Número de filas (escala log)")
+    missing = int(frame["target"].isna().sum())
     ax.set_title(
-        f"Class distribution of target\npercentages over the {total:,} labeled rows "
-        "(370 rows without label are excluded)"
+        f"Distribución de clases de la variable objetivo\nporcentajes sobre las {total:,} filas "
+        f"etiquetadas (se excluyen {missing:,} filas sin etiqueta)"
     )
     ax.margins(y=0.25)
     save_figure(fig, output_dir, "class_distribution.png")
@@ -131,21 +133,21 @@ def plot_net_flow_histogram(frame: pd.DataFrame, output_dir: Path) -> None:
         color="tab:red",
         linestyle="--",
         linewidth=1.5,
-        label=f"shortage threshold ({-RISK_THRESHOLD:+.2f})",
+        label=f"Umbral desabasto ({-RISK_THRESHOLD:+.2f})",
     )
     ax.axvline(
         RISK_THRESHOLD,
         color="tab:orange",
         linestyle="--",
         linewidth=1.5,
-        label=f"saturation threshold ({RISK_THRESHOLD:+.2f})",
+        label=f"Umbral saturación ({RISK_THRESHOLD:+.2f})",
     )
     ax.set_yscale("log")
     ax.set_xlim(-2, 2)
-    ax.set_xlabel("net_flow = (arrivals - departures) / capacity")
-    ax.set_ylabel("Number of station-hours (log scale)")
-    ax.set_title("Distribution of net_flow (x-axis clipped to [-2, 2])")
-    ax.legend(title="RISK_THRESHOLD = 0.40")
+    ax.set_xlabel("Flujo neto = (llegadas - salidas) / capacidad")
+    ax.set_ylabel("Número de estaciones-hora (escala log)")
+    ax.set_title("Distribución del flujo neto (eje x recortado a [-2, 2])")
+    ax.legend(title="Umbral de riesgo = 0.40")
     save_figure(fig, output_dir, "net_flow_histogram.png")
 
 
@@ -172,9 +174,9 @@ def plot_missing_values(frame: pd.DataFrame, output_dir: Path) -> None:
                 textcoords="offset points",
             )
     ax.invert_yaxis()
-    ax.set_xlabel("Number of NaN rows")
-    ax.set_ylabel("Feature column")
-    ax.set_title("Missing values per feature column (warm-up of the lagged features)")
+    ax.set_xlabel("Número de filas con NaN")
+    ax.set_ylabel("Variable")
+    ax.set_title("Valores faltantes por variable (calentamiento de los rezagos)")
     save_figure(fig, output_dir, "missing_values.png")
 
 
@@ -186,9 +188,9 @@ def plot_hourly_net_flow(frame: pd.DataFrame, output_dir: Path) -> None:
     ax.bar(hourly.index, hourly.to_numpy(), color="tab:blue")
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_xticks(range(24))
-    ax.set_xlabel("Hour of day")
-    ax.set_ylabel("Average net_flow")
-    ax.set_title("Average net_flow by hour of day (0-23)")
+    ax.set_xlabel("Hora del día")
+    ax.set_ylabel("Flujo neto promedio")
+    ax.set_title("Flujo neto promedio por hora del día (0-23)")
     save_figure(fig, output_dir, "hourly_net_flow.png")
 
 
@@ -196,16 +198,16 @@ def plot_class_vs_lag(frame: pd.DataFrame, output_dir: Path) -> None:
     """Average net_flow_lag1 per class, to show the lag separates the classes."""
     labeled = frame.dropna(subset=["net_flow_lag1", "target"])
     means = labeled.groupby("target")["net_flow_lag1"].mean().sort_index()
-    labels = [CLASS_LABELS[value] for value in means.index]
+    labels = [CLASS_LABELS_ES[value] for value in means.index]
     colors = [CLASS_COLORS[value] for value in means.index]
 
     fig, ax = plt.subplots(figsize=(8, 5))
     bars = ax.bar(labels, means.to_numpy(), color=colors)
     ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=10)
     ax.axhline(0, color="black", linewidth=0.8)
-    ax.set_xlabel("Class (target)")
-    ax.set_ylabel("Average net_flow_lag1 (previous hour)")
-    ax.set_title("Average net_flow_lag1 per class: the lag separates the classes")
+    ax.set_xlabel("Clase (variable objetivo)")
+    ax.set_ylabel("Flujo neto del rezago 1 (promedio)")
+    ax.set_title("Flujo neto del rezago 1 por clase: el rezago separa las clases")
     save_figure(fig, output_dir, "class_vs_lag.png")
 
 
@@ -230,11 +232,11 @@ def plot_station_coverage(frame: pd.DataFrame, output_dir: Path) -> None:
         color="black",
         linestyle="--",
         linewidth=1.5,
-        label=f"full year ({total_hours:,} hours)",
+        label=f"año completo ({total_hours:,} horas)",
     )
-    ax.set_xlabel("Active hours per station (departures + arrivals > 0)")
-    ax.set_ylabel("Number of stations")
-    ax.set_title(f"Station coverage: active hours per station (out of {total_hours:,})")
+    ax.set_xlabel("Horas activas por estación (salidas + llegadas > 0)")
+    ax.set_ylabel("Número de estaciones")
+    ax.set_title(f"Cobertura por estación: horas activas (de {total_hours:,})")
     ax.legend()
     save_figure(fig, output_dir, "station_coverage.png")
 
@@ -250,7 +252,7 @@ def plot_proxy_distribution(frame: pd.DataFrame, output_dir: Path) -> None:
     total_labeled = len(labeled)
     counts = labeled.value_counts().sort_index()
     shares = 100 * counts / total_labeled
-    labels = [PROXY_CLASS_LABELS[value] for value in counts.index]
+    labels = [CLASS_LABELS_ES[value] for value in counts.index]
     colors = [CLASS_COLORS[value] for value in counts.index]
 
     fig, (left, right) = plt.subplots(1, 2, figsize=(14, 5.5))
