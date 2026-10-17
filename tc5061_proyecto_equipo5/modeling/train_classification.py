@@ -1,8 +1,9 @@
-"""Train the two classification baselines for the MiBici station risk question.
+"""Train the classification models for the MiBici station risk question.
 
 The question is whether a station will be short of bikes, short of docks or balanced during hour t+1, using only what
-is known at minute 50 of hour t.  The classes are severely imbalanced (about 98.7% balanced), so the baselines are
-scored with macro-F1, balanced accuracy and PR-AUC instead of plain accuracy.  Both runs use the shared helpers in
+is known at minute 50 of hour t.  The classes are severely imbalanced (about 98.7% balanced), so the models are scored
+with macro-F1, balanced accuracy and PR-AUC instead of plain accuracy.  Two simple baselines (majority and logistic
+regression) are compared against the gradient boosting candidate of the ML Canvas.  All runs use the shared helpers in
 modeling/common.py (same experiment, data version and Git commit) and the default local tracking, so the artifacts stay
 inside the ignored mlruns/ folder.
 """
@@ -10,9 +11,11 @@ inside the ignored mlruns/ folder.
 from pathlib import Path
 import tempfile
 
+from lightgbm import LGBMClassifier
 from loguru import logger
 import matplotlib
 import mlflow
+import mlflow.lightgbm
 import mlflow.sklearn
 import pandas as pd
 from sklearn.dummy import DummyClassifier
@@ -130,8 +133,8 @@ def save_artifacts(folder: Path, y_true, y_pred, title: str) -> None:
     plt.close(figure)
 
 
-def train_and_log(name, model, model_params, data, seed) -> dict:
-    """Fit one baseline, evaluate it and log the whole run in MLflow."""
+def train_and_log(name, model, model_params, data, seed, flavor="sklearn") -> dict:
+    """Fit one model, evaluate it and log the whole run in MLflow."""
     features, labels = data["X"], data["y"]
     model.fit(features["train"], labels["train"])
     params = {
@@ -166,7 +169,10 @@ def train_and_log(name, model, model_params, data, seed) -> dict:
                 Path(folder), labels["test"].to_numpy(), model.predict(features["test"]), name
             )
             mlflow.log_artifacts(folder)
-        mlflow.sklearn.log_model(model, name="model")
+        if flavor == "lightgbm":
+            mlflow.lightgbm.log_model(model, name="model")
+        else:
+            mlflow.sklearn.log_model(model, name="model")
         run_id = run.info.run_id
     logger.success(f"{name}: run {run_id} logged")
     return {"run_id": run_id, "run_name": name, **test_metrics}
@@ -182,7 +188,7 @@ def classification(
     features_path: Path = CLASSIFICATION_FEATURES_PATH,
     seed: int = 42,
 ):
-    """Train the majority and logistic baselines and log them in MLflow."""
+    """Train the two baselines and the LightGBM candidate, and log them in MLflow."""
     frame = load_rows(features_path)
     for split in SPLITS:
         logger.info(f"{split}: {len(frame[frame['split'] == split]):,} rows")
@@ -194,6 +200,7 @@ def classification(
         "classification-baseline-majority": (
             DummyClassifier(strategy="most_frequent"),
             {"model": "dummy_most_frequent", "strategy": "most_frequent"},
+            "sklearn",
         ),
         "classification-baseline-logistic": (
             Pipeline(
@@ -208,17 +215,40 @@ def classification(
                 ]
             ),
             {"model": "logistic_regression", "C": 1.0},
+            "sklearn",
+        ),
+        # Candidate from the ML Canvas: gradient boosting with balanced class weights
+        "classification-candidate-lightgbm": (
+            LGBMClassifier(
+                objective="multiclass",
+                num_class=3,
+                n_estimators=200,
+                learning_rate=0.1,
+                num_leaves=31,
+                class_weight="balanced",
+                random_state=seed,
+                n_jobs=1,
+                verbose=-1,
+            ),
+            {
+                "model": "lightgbm",
+                "n_estimators": 200,
+                "learning_rate": 0.1,
+                "num_leaves": 31,
+                "class_weight": "balanced",
+            },
+            "lightgbm",
         ),
     }
     # Default local tracking comes from modeling/common.py: one shared experiment for the team
     setup_experiment()
     records = []
-    for name, (model, model_params) in models.items():
+    for name, (model, model_params, flavor) in models.items():
         logger.info(f"Training {name}")
-        records.append(train_and_log(name, model, model_params, data, seed))
+        records.append(train_and_log(name, model, model_params, data, seed, flavor))
     table = pd.DataFrame(records).set_index("run_name")
     columns = [column for column in table.columns if column.startswith("test_")]
-    logger.success("Comparison of the two baseline runs:")
+    logger.success("Comparison of the runs:")
     print(table[["run_id", *columns]].to_string())
 
 
