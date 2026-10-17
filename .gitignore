@@ -193,6 +193,8 @@ cython_debug/
 # MLFlow
 mlruns/
 mlartifacts/
+mlflow.db
+mlflow.db-journal
 
 # Serialized Models
 models/*.pkl
