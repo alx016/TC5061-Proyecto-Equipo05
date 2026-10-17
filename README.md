@@ -39,8 +39,8 @@ Each project question has its own training script so the team can work in parall
 
 Rules that keep the three scripts comparable:
 
-- Shared reproducibility helpers live in `modeling/common.py`: `data_version()`, `git_commit()`, `setup_experiment()` and `base_tags(question)`. Do not duplicate them.
-- All runs go to the `mibici-equipo05` experiment, tagged with `team`, `question` and `git_commit`.
+- Shared reproducibility helpers live in `modeling/common.py`: `data_version()`, `setup_experiment()` and `base_tags(question)`. Do not duplicate them.
+- All runs go to the `mibici-equipo05` experiment, tagged with `team` and `question`. MLflow adds the Git commit, the branch and the repo URL by itself (`mlflow.source.git.*`), so there is nothing to read by hand.
 - Metric names carry the split as a prefix: `test_macro_f1`, `val_mae`, etc.
 - Every run logs the data version from the manifest as a parameter.
 - Code, comments, docstrings and file names are written in English; figures and text artifacts are written in Spanish.
