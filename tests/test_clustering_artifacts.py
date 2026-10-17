@@ -15,6 +15,8 @@ from tc5061_proyecto_equipo5.modeling.train_clustering import (
     column_names,
     labels_for_splits,
     load_split,
+    profile_summary,
+    zone_from_name,
 )
 
 
@@ -34,11 +36,50 @@ def test_choose_k_prefers_the_real_number_of_groups():
         [rng.normal(center, 0.1, size=(30, 2)) for center in ([0, 0], [5, 5], [10, 0])]
     )
 
-    best, scores = choose_k(blobs, (2, 3, 4), seed=42)
+    best, table = choose_k(blobs, blobs, (2, 3, 4), seed=42)
 
     assert best == 3
-    assert set(scores) == {2, 3, 4}
+    assert set(table["k"]) == {2, 3, 4}
+    assert set(table.columns) == {
+        "k",
+        "train_silhouette",
+        "train_davies_bouldin",
+        "train_inertia",
+        "validation_silhouette",
+    }
+    scores = table.set_index("k")["validation_silhouette"]
     assert scores[3] > scores[2]
+
+
+def test_zone_from_name_reads_the_catalog_prefix():
+    assert zone_from_name("(GDL-001) C. Epigmenio") == "GDL"
+    assert zone_from_name("(ZPN-102) C. Volcán") == "ZPN"
+    assert zone_from_name("sin prefijo") == "OTRA"
+
+
+def test_profile_summary_reports_peaks_shares_and_zone():
+    centroids = pd.DataFrame(
+        {
+            "departures_hour_08": [0.2, 0.05],
+            "departures_hour_18": [0.05, 0.3],
+            "arrivals_hour_08": [0.3, 0.05],
+            "arrivals_hour_18": [0.05, 0.25],
+            "asymmetry": [0.1, -0.2],
+        },
+        index=[0, 1],
+    )
+    labels = np.array([0, 0, 1, 1])
+    located = pd.DataFrame(
+        {"station_id": [1, 2, 3, 4], "cluster": [0, 0, 1, 1], "zone": ["GDL", "GDL", "ZPN", "ZPN"]}
+    )
+
+    summary = profile_summary(centroids, labels, located)
+
+    assert summary["cluster"].tolist() == [0, 1]
+    assert summary["peak_departure_hour"].tolist() == [8, 18]
+    assert summary["peak_arrival_hour"].tolist() == [8, 18]
+    assert summary["top_zone"].tolist() == ["GDL", "ZPN"]
+    assert summary["share_percent"].tolist() == [50.0, 50.0]
 
 
 def test_cluster_metrics_returns_nan_for_a_single_group():

@@ -54,6 +54,14 @@ Rules that keep the three scripts comparable:
 
 The classification artifacts are materialized with `python -m tc5061_proyecto_equipo5.features classification` and the justification figures with `python -m tc5061_proyecto_equipo5.plots classification`. Because the open data portal publishes only the current station catalog, that path assumes capacity is static between 2024 and the catalog snapshot; the assumption is logged and must be reported with the results.
 
+The clustering script consumes the P3 artifacts, so they are produced first:
+
+```bash
+python -m tc5061_proyecto_equipo5.features main --problem p3 --prepare-ready \
+  --input-dir data/interim/viajes --output-dir data/processed/fe_2024_v4
+python -m tc5061_proyecto_equipo5.modeling.train_clustering clustering
+```
+
 ## Project Organization
 
 ```
