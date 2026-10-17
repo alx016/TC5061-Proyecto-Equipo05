@@ -89,7 +89,7 @@
 ## 8. Métricas de Evaluación (Evaluation)
 
 !!! important "Métricas Obligatorias ante Desbalance"
-    Debido a que la clase mayoritaria `Balanceado` representa el 98.78% de las observaciones, se descarta *Accuracy* como métrica decisional:
+    Debido a que la clase mayoritaria `Balanceado` representa el 98.74% de las observaciones, se descarta *Accuracy* como métrica decisional:
 
     - **Métrica Primaria:** **Macro F1-Score** $\ge 0.72$ (pondera por igual las tres clases).
     - **Métrica de Detección:** **Recall en Desabasto** $\ge 85\%$ (minimiza usuarios varados sin bici).

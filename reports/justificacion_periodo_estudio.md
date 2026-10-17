@@ -24,7 +24,7 @@ A partir de un Análisis Exploratorio de Datos (EDA) estructurado y reproducible
    - **3,825,000+ viajes registrados** distribuidos en 360 estaciones activas estables.
    - Calidad de datos sobresaliente: **0.0% de valores nulos** en variables clave (`Viaje_Id`, `Origen_Id`, `Destino_Id`, `Inicio_del_viaje`, `Fin_del_viaje`).
    - Eficiencia de serialización: La conversión de los 367.38 MB de CSV originales a formato Parquet con compresión Snappy reduce el tamaño en disco a **~139.6 MB (62.0% de ahorro)**, optimizando los tiempos de I/O en pipelines de entrenamiento.
-4. **Validación empírica del proxy de riesgo para P2:** Con un umbral de estrés operativo $\tau = 0.40$ sobre el flujo neto normalizado, la distribución empírica resultante exhibe un **98.78% de estados balanceados, 0.64% de riesgo de desabasto y 0.58% de riesgo de saturación**. Este desbalance del 1.22% de eventos críticos justifica formally el descarte de *Accuracy* y el uso obligatorio de *Macro F1* y *PR-AUC*.
+4. **Validación empírica del proxy de riesgo para P2:** Con un umbral de estrés operativo $\tau = 0.40$ sobre el flujo neto normalizado, la distribución empírica resultante exhibe un **98.74% de estados balanceados, 0.66% de riesgo de desabasto y 0.60% de riesgo de saturación**. Este desbalance del 1.26% de eventos críticos justifica formally el descarte de *Accuracy* y el uso obligatorio de *Macro F1* y *PR-AUC*.
 5. **Partición temporal estricta (*Zero Data Leakage*):** Se fijó cronológicamente la partición en **Train (Ene–Sep 2024, 75.0%)**, **Validation (Oct–Nov 2024, 16.7%)** y **Test Out-of-Time (Dic 2024, 8.3%)**, previniendo la fuga catastrófica de información futura que causaría un `train_test_split` aleatorio convencional.
 
 ---
@@ -196,27 +196,28 @@ $$Y_{s,t}^{\text{P2}} = \begin{cases}
 
 ### 5.3 Distribución Empírica y Justificación de Métricas
 
-La evaluación empírica de este proxy sobre la cuadrícula completa de 2024 (370 estaciones con actividad × 8,784 horas = 3,250,080 estaciones-hora; 3,249,710 con etiqueta) arrojó la siguiente distribución de clases:
+> **Universo del panel:** el catálogo nominal tiene 484 estaciones; 360 operaron en un mes típico (ene–may, jul–nov), 370 tuvieron actividad en algún momento del año y **358 operaron de forma continua los 12 meses**. Se adoptan las 358 para no rellenar con ceros meses en los que la estación no existía (las 12 restantes solo operaron 1, 6 o 7 meses).
+La evaluación empírica de este proxy sobre la cuadrícula completa de 2024 (358 estaciones con operación continua los 12 meses × 8,784 horas = 3,144,672 estaciones-hora; 3,144,314 con etiqueta) arrojó la siguiente distribución de clases:
 
 | Clase Operativa ($Y^{\text{P2}}$) | Condición Matemática | Proporción Empírica (%) | Interpretación Operativa en MiBici |
 |:---|:---:|:---:|:---|
-| **Balanceado** | $-0.40 < \Delta_{s,t} < 0.40$ | **98.78%** | Operación normal; la estación cuenta con disponibilidad suficiente de bicicletas y anclajes. |
-| **Riesgo_Desabasto** | $\Delta_{s,t} \le -0.40$ | **0.64%** | Demanda saliente crítica; riesgo inminente de estación vacía si no se rebalancea. |
-| **Riesgo_Saturacion** | $\Delta_{s,t} \ge 0.40$ | **0.58%** | Flujo entrante crítico; riesgo inminente de estación llena donde los usuarios no pueden devolver la bici. |
+| **Balanceado** | $-0.40 < \Delta_{s,t} < 0.40$ | **98.74%** | Operación normal; la estación cuenta con disponibilidad suficiente de bicicletas y anclajes. |
+| **Riesgo_Desabasto** | $\Delta_{s,t} \le -0.40$ | **0.66%** | Demanda saliente crítica; riesgo inminente de estación vacía si no se rebalancea. |
+| **Riesgo_Saturacion** | $\Delta_{s,t} \ge 0.40$ | **0.60%** | Flujo entrante crítico; riesgo inminente de estación llena donde los usuarios no pueden devolver la bici. |
 
 ```
                        Distribución de Clases Proxy P2 (tau = 0.40)
-  Balanceado (98.78%)        [██████████████████████████████████████████████] 98.78%
-  Riesgo_Desabasto (0.64%)   [█] 0.64%
-  Riesgo_Saturacion (0.58%)  [█] 0.58%
+  Balanceado (98.74%)        [██████████████████████████████████████████████] 98.74%
+  Riesgo_Desabasto (0.66%)   [█] 0.66%
+  Riesgo_Saturacion (0.60%)  [█] 0.60%
 ```
 
 ![Figura 4: Proxy de Riesgo P2 - Distribución y Clases](figures/04_p2_proxy_riesgo_distribucion.png)
-*Figura 4: Distribución del Flujo Neto Normalizado ($\Delta$) y proporciones de las clases operativas resultantes para el problema P2, calculadas sobre el año 2024 completo (cuadrícula estación-hora).*
+*Figura 4: Distribución del Flujo Neto Normalizado ($\Delta$) y proporciones de las clases operativas resultantes para el problema P2, calculadas sobre el año 2024 completo con las 358 estaciones de operación continua.*
 
 #### Justificación Metodológica para la Rúbrica:
-Esta distribución empírica evidencia un **severo desbalance de clases**, donde los eventos operativos críticos (desabasto y saturación) representan conjuntamente el **1.22%** de las observaciones estación-hora.
-- Si se utilizara **Exactitud (*Accuracy*)** como métrica de evaluación, un modelo trivial o "ingenuo" que prediga siempre la clase mayoritaria `Balanceado` obtendría un 98.78% de exactitud, pero fracasaría por completo en su objetivo de negocio (detectaría 0 eventos de riesgo).
+Esta distribución empírica evidencia un **severo desbalance de clases**, donde los eventos operativos críticos (desabasto y saturación) representan conjuntamente el **1.26%** de las observaciones estación-hora.
+- Si se utilizara **Exactitud (*Accuracy*)** como métrica de evaluación, un modelo trivial o "ingenuo" que prediga siempre la clase mayoritaria `Balanceado` obtendría un 98.74% de exactitud, pero fracasaría por completo en su objetivo de negocio (detectaría 0 eventos de riesgo).
 - Por lo tanto, se justifica formalmente que la función objetivo y métricas de evaluación para P2 deban ser obligatoriamente:
   1. **Macro F1-Score:** Pondera por igual el desempeño en las clases minoritarias críticas sin permitir que la clase dominante infle artificialmente la métrica.
   2. **PR-AUC (Área bajo la Curva Precision-Recall):** Mide la capacidad del modelo para priorizar estaciones en riesgo minimizando falsas alarmas operativas.
