@@ -169,10 +169,22 @@ def describe_file(path: Path, root: Path) -> dict:
     }
 
 
+def latest_station_catalog(stations_dir: Path) -> Path | None:
+    """Return the newest station catalog in stations_dir, or None if there is none.
+
+    Catalog names carry the year and month, so sorting them picks the same one that
+    ``download`` fetches. Older snapshots in the folder are ignored on purpose: the manifest
+    must not depend on how many snapshots happen to be lying around.
+    """
+    catalogs = sorted(stations_dir.glob("nomenclatura_*.csv"))
+    return catalogs[-1] if catalogs else None
+
+
 def build_manifest(data_dir: Path, stations_dir: Path) -> dict:
-    """Describe every trip Parquet file under data_dir and every station catalog in stations_dir."""
+    """Describe every trip Parquet file under data_dir and the newest station catalog."""
     files = [describe_file(path, data_dir) for path in sorted(data_dir.glob("*/*.parquet"))]
-    stations = [describe_file(path, stations_dir) for path in sorted(stations_dir.glob("*.csv"))]
+    catalog = latest_station_catalog(stations_dir)
+    stations = [describe_file(catalog, stations_dir)] if catalog else []
     # One hash that summarizes all the files; this is the value to log in MLflow.
     # The manifest has no timestamp on purpose: unchanged data gives an identical manifest
     lines = "".join(f"{entry['path']}:{entry['sha256']}\n" for entry in files)
@@ -234,7 +246,9 @@ def download(
     logger.info(f"Station catalog available at {stations_target}")
     older = [path.name for path in stations_dir.glob("*.csv") if path != stations_target]
     if older:
-        logger.warning(f"Older station catalogs are also in {stations_dir}: {older}")
+        logger.warning(
+            f"Older station catalogs are also in {stations_dir} and will be ignored: {older}"
+        )
 
     if failed:
         raise typer.Exit(1)
@@ -291,10 +305,12 @@ def manifest(
         logger.error(f"No Parquet files found in {data_dir}; run the clean command first.")
         raise typer.Exit(1)
     if not current["estaciones"]:
-        logger.error(
-            f"No station catalog found in {stations_dir}; run the download command first."
+        # A missing catalog is not fatal: the manifest exists for the trip data. With --check
+        # the comparison below already reports it, so verification stays strict.
+        logger.warning(
+            f"No station catalog found in {stations_dir}; the manifest will not describe it. "
+            "Run the download command first."
         )
-        raise typer.Exit(1)
 
     if check:
         saved = json.loads(manifest_path.read_text())

@@ -143,11 +143,24 @@ def test_build_manifest_describes_each_file(tmp_path):
     assert manifest["estaciones"][0]["bytes"] == stations.stat().st_size
 
 
+def test_build_manifest_ignores_older_station_catalogs(tmp_path):
+    stations_dir = tmp_path / "estaciones"
+    write_stations(stations_dir, "nomenclatura_2026_09.csv")
+    newest = write_stations(stations_dir, "nomenclatura_2026_10.csv")
+
+    manifest = build_manifest(tmp_path, stations_dir)
+
+    assert [entry["path"] for entry in manifest["estaciones"]] == ["nomenclatura_2026_10.csv"]
+    assert manifest["estaciones"][0]["bytes"] == newest.stat().st_size
+
+
 def test_build_manifest_is_stable_for_unchanged_data(tmp_path):
     write_parquet(tmp_path, "viajes_2021_01.parquet", ISO_ROWS)
     stations_dir = tmp_path / "estaciones"
 
-    assert build_manifest(tmp_path, stations_dir) == build_manifest(tmp_path, stations_dir)
+    manifest = build_manifest(tmp_path, stations_dir)
+    assert manifest["estaciones"] == []  # an absent catalog is not an error
+    assert manifest == build_manifest(tmp_path, stations_dir)
 
 
 def test_build_manifest_version_changes_when_data_changes(tmp_path):
