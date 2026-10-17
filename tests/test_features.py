@@ -229,7 +229,7 @@ def test_cli_end_to_end_and_deterministic_receipt(tmp_path):
         str(tmp_path / "processed"),
     ]
     for problem in ("p1", "p2", "p3"):
-        args = ["--problem", problem, *base]
+        args = ["main", "--problem", problem, *base]
         first = runner.invoke(app, args)
         assert first.exit_code == 0, first.output + str(first.exception)
         target = tmp_path / "processed" / problem
@@ -245,9 +245,9 @@ def test_cli_end_to_end_and_deterministic_receipt(tmp_path):
         assert (target / "X.parquet").is_file() and (target / "keys.parquet").is_file()
         assert (target / "y.parquet").is_file() == (problem != "p3")
     (root / "viajes_2024_12.parquet").unlink()
-    missing = runner.invoke(app, ["--problem", "p1", *base])
+    missing = runner.invoke(app, ["main", "--problem", "p1", *base])
     assert missing.exit_code != 0 and "Missing monthly coverage" in missing.output
-    bad = runner.invoke(app, ["--problem", "p2", *base, "--catalog-known-at", "2026-09-01"])
+    bad = runner.invoke(app, ["main", "--problem", "p2", *base, "--catalog-known-at", "2026-09-01"])
     assert bad.exit_code != 0 and "catalog" in bad.output
 
 

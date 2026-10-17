@@ -52,7 +52,7 @@ Rules that keep the three scripts comparable:
 - Every run logs the data version from the manifest as a parameter.
 - Code, comments, docstrings and file names are written in English; figures and text artifacts are written in Spanish.
 
-The classification artifacts are materialized with `python -m tc5061_proyecto_equipo5.features classification` and the justification figures with `python -m tc5061_proyecto_equipo5.plots classification`.
+The classification artifacts are materialized with `python -m tc5061_proyecto_equipo5.features classification` and the justification figures with `python -m tc5061_proyecto_equipo5.plots classification`. Because the open data portal publishes only the current station catalog, that path assumes capacity is static between 2024 and the catalog snapshot; the assumption is logged and must be reported with the results.
 
 ## Project Organization
 
