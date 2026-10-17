@@ -24,7 +24,7 @@
 - **Horizonte de predicción:** 1 hora hacia adelante ($t+1$).
 - **Formulación matemática del Target ($Y_{s, t+1}$):**
     Definiendo el flujo neto normalizado para la estación $s$ con capacidad física $C_s$:
-    $$\Delta_{s, t+1} = \frac{\text{Llegadas}_{s, [t, t+1]} - \text{Salidas}_{s, [t, t+1]}}{C_s} \in [-1, 1]$$
+    $$\Delta_{s, t+1} = \frac{\text{Llegadas}_{s, [t, t+1]} - \text{Salidas}_{s, [t, t+1]}}{C_s} \in \mathbb{R}$$
     Con un umbral crítico de estrés operativo $\tau = 0.40$ (déficit o superávit $\ge 40\%$ de la capacidad de anclajes en 1 hora):
     $$Y_{s, t+1} = \begin{cases} 
     \text{Riesgo\_Desabasto} & \text{si } \Delta_{s, t+1} \le -0.40 \quad (\text{Salidas superan a entradas en } \ge 40\% \times C_s) \\
@@ -94,3 +94,6 @@
     - **Métrica Primaria:** **Macro F1-Score** $\ge 0.72$ (pondera por igual las tres clases).
     - **Métrica de Detección:** **Recall en Desabasto** $\ge 85\%$ (minimiza usuarios varados sin bici).
     - **Métrica de Separación:** **PR-AUC Multiclase** $\ge 0.82$.
+
+!!! warning "Contrato temporal implementado"
+    La receta baseline predice `[h,h+1)` a las `h-00:10` y solo usa buckets completos de `h-2` o anteriores. El flujo/capacidad no está acotado a ±1 ni mide inventario. Se requiere capacidad histórica acreditada; el catálogo de 2026 no prueba capacidad de 2024. Ver [contratos de features](../feature-engineering.md).

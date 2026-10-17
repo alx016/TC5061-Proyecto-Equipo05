@@ -27,6 +27,13 @@ To check that your local data matches the committed manifest:
 python tc5061_proyecto_equipo5/dataset.py manifest --check
 ```
 
+## Feature engineering
+
+Un único `features.py` ofrece recetas independientes para demanda, riesgo y clustering,
+con historia causal y preprocesadores sin ajustar para cada estimador. Consulta los
+[contratos, comandos y límites](docs/docs/feature-engineering.md) y la
+[investigación con fuentes primarias](docs/docs/feature-engineering-research.md).
+
 ## Project Organization
 
 ```
