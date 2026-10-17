@@ -186,6 +186,16 @@ def _validate_station_window(data, catalog, catalog_known_at):
                 raise ValueError("Station snapshot does not cover the entire panel")
 
 
+def _require_positive_capacity(capacity: pd.Series) -> None:
+    """Fail when a station lacks capacity or has zero/negative capacity.
+
+    Capacity divides the flow, so a missing value would silently label the row balanced and a
+    zero would turn the flow into +/-inf and label it as risk.
+    """
+    if capacity.isna().any() or not np.isfinite(capacity).all() or (capacity <= 0).any():
+        raise ValueError("Every station needs finite positive historical capacity")
+
+
 def _station_features(data, X, stations, catalog_known_at) -> pd.DataFrame:
     """Static as-of-valid geography plus lagged neighbor pressure in the analyzed network.
 
@@ -360,8 +370,7 @@ def build_risk_features(
         data, stations.set_index("station_id").reindex(data.station_id.unique()), known_at
     )
     capacity = data.station_id.map(catalog.set_index("station_id").capacity)
-    if capacity.isna().any() or not np.isfinite(capacity).all() or (capacity <= 0).any():
-        raise ValueError("Every station needs finite positive historical capacity")
+    _require_positive_capacity(capacity)
     data["net_flow"] = data.arrivals - data.departures
     X = pd.concat(
         [_calendar(data), _lags(data, ["departures", "arrivals", "net_flow"], lags)], axis=1
@@ -1065,6 +1074,7 @@ HOLIDAYS_2024 = pd.to_datetime(
         "2024-03-18",
         "2024-05-01",
         "2024-09-16",
+        "2024-10-01",  # transfer of the Federal Executive (every six years)
         "2024-11-18",
         "2024-12-25",
     ]
@@ -1158,6 +1168,7 @@ def build_classification_panel(
     panel = panel.merge(
         stations[["station_id", "capacity", "latitude", "longitude"]], on="station_id", how="left"
     )
+    _require_positive_capacity(panel["capacity"])
     panel["net_flow"] = (panel["arrivals"] - panel["departures"]) / panel["capacity"]
     panel = panel[PANEL_COLUMNS].sort_values(["station_id", "hour"]).reset_index(drop=True)
     logger.info(

@@ -128,6 +128,23 @@ def test_panel_full_grid():
     assert quiet["arrivals"].item() == 0
 
 
+@pytest.mark.parametrize("capacity", [0, -5])
+def test_panel_rejects_non_positive_capacity(capacity):
+    stations = make_stations()
+    stations.loc[stations["station_id"] == 2, "capacity"] = capacity
+
+    with pytest.raises(ValueError, match="positive historical capacity"):
+        build_classification_panel(make_trips(), stations, YEAR)
+
+
+def test_panel_rejects_station_missing_from_catalog():
+    stations = make_stations()
+    stations = stations[stations["station_id"] == 1]
+
+    with pytest.raises(ValueError, match="positive historical capacity"):
+        build_classification_panel(make_trips(), stations, YEAR)
+
+
 def test_net_flow_formula():
     # Station 1 has capacity 10, 3 departures and 7 arrivals in the 08:00 hour.
     rows = []
@@ -233,14 +250,15 @@ def test_calendar():
             "2024-05-01 12:00",  # Wednesday, Mexican holiday
             "2024-05-04 12:00",  # Saturday
             "2024-05-06 12:00",  # Monday, regular day
+            "2024-10-01 12:00",  # Tuesday, transfer of the Federal Executive
         ]
     )
     panel = make_flow_panel(hours, {1: [0.0] * len(hours)})
 
     calendar = add_calendar(panel)
 
-    assert calendar["is_weekend"].tolist() == [False, True, False]
-    assert calendar["is_holiday"].tolist() == [True, False, False]
+    assert calendar["is_weekend"].tolist() == [False, True, False, False]
+    assert calendar["is_holiday"].tolist() == [True, False, False, True]
     assert {"hour_sin", "hour_cos", "day_of_week"}.issubset(calendar.columns)
 
 
