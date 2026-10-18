@@ -40,3 +40,6 @@ TEST_MONTHS = (12,)
 # Shared station-hour base and the classification feature table
 CLASSIFICATION_PANEL_PATH = PROCESSED_DATA_DIR / "panel_station_hour.parquet"
 CLASSIFICATION_FEATURES_PATH = PROCESSED_DATA_DIR / "classification_features.parquet"
+
+# P1 demand artifacts written by `features main --problem p1 --prepare-ready`
+REGRESSION_FEATURES_DIR = PROCESSED_DATA_DIR / "fe_2024_v4" / "p1"
