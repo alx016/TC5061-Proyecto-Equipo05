@@ -179,6 +179,8 @@ def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monke
     for column in ("train_start", "train_end", "val_start", "val_end", "test_start", "test_end"):
         assert runs[f"params.{column}"].notna().all()
     assert (runs["params.train_end"] < runs["params.val_start"]).all()
+    # The commit is tagged by us, not only by MLflow's own source detection
+    assert runs["tags.git_commit"].str.len().eq(40).all()
     selected = runs["tags.selected"].eq("true")
     assert selected.sum() == 1
     # Only the selected candidate was scored on the December test
