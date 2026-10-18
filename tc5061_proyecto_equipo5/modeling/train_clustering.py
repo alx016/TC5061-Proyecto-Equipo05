@@ -8,9 +8,9 @@ global asymmetry of each station; the frozen preprocessor keeps 46 of those 49 c
 The three splits are the SAME network observed in three disjoint windows (January-September,
 October-November and December), so the evaluation measures temporal stability of the groups, not
 performance on new stations.  A fixed-K K-Means is the reference, the number of groups is chosen on
-the fitting window only (the Canvas asks for the elbow, the silhouette and the Davies-Bouldin index),
-and an agglomerative Ward model is trained for comparison.  Every run goes to the shared MLflow
-experiment with the helpers in modeling/common.py.
+the October-November validation window (the Canvas asks for the elbow, the silhouette and the
+Davies-Bouldin index), and an agglomerative Ward model is trained for comparison.  Every run goes
+to the shared MLflow experiment with the helpers in modeling/common.py.
 """
 
 import json
