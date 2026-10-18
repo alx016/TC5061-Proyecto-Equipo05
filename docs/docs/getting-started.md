@@ -23,7 +23,7 @@ Clone el repositorio oficial del equipo e inicialice el entorno virtual con toda
 
 ```bash
 # Clonar el repositorio
-git clone https://github.com/TC5061-Equipo05/TC5061-Proyecto-Equipo05.git
+git clone https://github.com/alx016/TC5061-Proyecto-Equipo05.git
 cd TC5061-Proyecto-Equipo05
 
 # Sincronizar el entorno virtual desde uv.lock
