@@ -1,20 +1,24 @@
 """Train the regression models for the MiBici station demand question (P1).
 
-The question is how many trips will start at each station during hour h, using only what is known at minute 50 of
-hour h-1.  The rows come from the prepared P1 artifacts (``features main --problem p1 --prepare-ready``): raw X, keys
-and y, never the already-fitted ready matrices, so every candidate fits its own new pipeline on train rows only.
+The question is how many trips will start at each station during hour h, using only what is
+known at minute 50 of hour h-1.  The rows come from the prepared P1 artifacts
+(``features main --problem p1 --prepare-ready``): raw X, keys and y, never the already-fitted
+ready matrices, so every candidate fits its own new pipeline on train rows only.
 
 Protocol (docs/docs/feature-engineering.md, section 4):
 
-* Warm-up rows without complete history are excluded with the same rule as the prepared dataset, never backfilled.
-* Train rows come from ``training_mask`` with a cut-off before the first October scoring (labels still open at 23:50
-  of September 30 are purged).  Validation rows are the labels available before the first December scoring.
-* Candidates are compared on validation WAPE, the primary metric of the ML Canvas.  Only the selected candidate is
-  scored on the December test, once, and no refit is done.
-* Predictions are clipped at zero inside the logged model, so offline metrics and scoring use the same policy.
+* Warm-up rows without complete history are excluded with the same rule as the prepared dataset,
+  never backfilled.
+* Train rows come from ``training_mask`` with a cut-off before the first October scoring (labels
+  still open at 23:50 of September 30 are purged).  Validation rows are the labels available
+  before the first December scoring.
+* Candidates are compared on validation WAPE, the primary metric of the ML Canvas.  Only the
+  selected candidate is scored on the December test, once, and no refit is done.
+* Predictions are clipped at zero inside the logged model, so offline metrics and scoring use the
+  same policy.
 
-All runs use the shared helpers in modeling/common.py (same experiment, data version and Git commit) and the default
-local tracking, so the artifacts stay inside the ignored mlruns/ folder.
+All runs use the shared helpers in modeling/common.py (same experiment, data version and Git
+commit) and the default local tracking, so the artifacts stay inside the ignored mlruns/ folder.
 """
 
 import json
@@ -60,8 +64,9 @@ SEASONAL_COLUMNS = ("station_id", "day_of_week", "hour")
 class SeasonalMeanRegressor(RegressorMixin, BaseEstimator):
     """Baseline of the ML Canvas: mean train demand per station, weekday and hour.
 
-    The mean is learned only from the rows passed to ``fit``.  An unseen combination falls back to the mean of its
-    station and then to the global train mean, so the baseline never needs future data to answer.
+    The mean is learned only from the rows passed to ``fit``.  An unseen combination falls back to
+    the mean of its station and then to the global train mean, so the baseline never needs future
+    data to answer.
     """
 
     def __init__(self, columns=SEASONAL_COLUMNS):
@@ -109,7 +114,8 @@ def load_prepared(folder: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
         raise ValueError("X, keys and y must be aligned row by row")
     if manifest["feature_version"] != FEATURE_VERSION:
         raise ValueError(
-            f"Prepared features are version {manifest['feature_version']}, code expects {FEATURE_VERSION}"
+            f"Prepared features are version {manifest['feature_version']}, "
+            f"code expects {FEATURE_VERSION}"
         )
     logger.info(f"Loaded {len(X):,} rows and {X.shape[1]} columns from {folder}")
     return X, keys, y, manifest
@@ -148,8 +154,8 @@ def split_ranges(keys: pd.DataFrame, masks: dict[str, pd.Series]) -> dict[str, s
 def metrics(y_true, y_pred, prefix: str) -> dict[str, float]:
     """Return MAE, RMSE and WAPE with the given ``val_`` or ``test_`` prefix.
 
-    WAPE divides by the real total demand; when that total is zero the metric is undefined and is left out instead of
-    being patched with an epsilon.
+    WAPE divides by the real total demand; when that total is zero the metric is undefined and is
+    left out instead of being patched with an epsilon.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -267,7 +273,8 @@ def candidates(seed: int) -> dict:
         "regression-baseline-ridge": pipeline(
             "ridge", Ridge(alpha=1.0, solver="lsqr"), numeric_scaling="robust"
         ),
-        # Candidate from the ML Canvas: gradient boosting with a Poisson loss for non-negative counts
+        # Candidate from the ML Canvas: gradient boosting with a Poisson loss for
+        # non-negative counts
         "regression-candidate-lightgbm": pipeline(
             "lightgbm",
             LGBMRegressor(
@@ -295,7 +302,7 @@ def regression(
     features_dir: Path = REGRESSION_FEATURES_DIR,
     seed: int = 42,
 ):
-    """Train the seasonal baseline, Ridge and LightGBM, select on validation and test the winner once."""
+    """Train the three candidates, select on validation WAPE and test the winner once."""
     X, keys, y, manifest = load_prepared(features_dir)
     data = {"X": X, "y": y, "keys": keys, "masks": split_masks(X, keys)}
     # Default local tracking comes from modeling/common.py: one shared experiment for the team
@@ -307,7 +314,8 @@ def regression(
     table = pd.DataFrame(records).set_index("run_name")
     selected = table["val_wape"].idxmin()
     logger.success(f"Selected on validation WAPE: {selected}")
-    # The December test is scored once, for the selected candidate only, after the selection is frozen
+    # The December test is scored once, for the selected candidate only, after the selection is
+    # frozen
     record = table.loc[selected]
     with mlflow.start_run(run_id=record["run_id"]):
         mlflow.set_tag("selected", "true")

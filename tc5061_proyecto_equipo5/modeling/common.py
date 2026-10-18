@@ -2,8 +2,8 @@
 
 Each question has its own training script (P1 regression, P2 classification, P3 clustering) so the
 team can work in parallel without touching the same file, but reproducibility is identical for all
-of them: the same experiment and the same data version.  Those two pieces live here, and each script
-only adds its own model, features and metrics.
+of them: the same experiment and the same data version.  Those two pieces live here, and each
+script only adds its own model, features and metrics.
 
 The MLflow tracking stays local by default (no tracking URI is set), so metadata goes to mlflow.db
 and artifacts stay inside the ignored mlruns/ folder.  MLflow tags the Git commit on its own
