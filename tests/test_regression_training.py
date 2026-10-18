@@ -16,6 +16,7 @@ from tc5061_proyecto_equipo5.modeling import train_regression
 from tc5061_proyecto_equipo5.modeling.train_regression import (
     NonNegativeRegressor,
     SeasonalMeanRegressor,
+    candidates,
     metrics,
     split_masks,
     split_ranges,
@@ -146,6 +147,19 @@ def test_split_ranges_follow_the_rows_that_entered_each_split():
         "test_start": "2024-12-10 08:00:00",
         "test_end": "2024-12-31 23:00:00",
     }
+
+
+def test_logged_params_match_the_trained_estimator():
+    X, _, y = make_prepared(pd.date_range("2024-03-01", periods=48, freq="h"))
+
+    for name, (build, params) in candidates(seed=7).items():
+        if params["model"] == "seasonal_mean":
+            continue
+        model = build(X).fit(X, y)
+        estimator = model.estimator_.steps[-1][1]
+        # Every logged hyperparameter is the one the fitted estimator really used
+        for key, value in estimator.get_params().items():
+            assert params[key] == value, f"{name}: {key}"
 
 
 def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monkeypatch):
