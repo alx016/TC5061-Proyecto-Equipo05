@@ -135,6 +135,16 @@ def split_masks(X: pd.DataFrame, keys: pd.DataFrame) -> dict[str, pd.Series]:
     return masks
 
 
+def split_ranges(keys: pd.DataFrame, masks: dict[str, pd.Series]) -> dict[str, str]:
+    """First and last target hour of every split, as they really entered the run."""
+    ranges = {}
+    for split, prefix in (("train", "train"), ("validation", "val"), ("test", "test")):
+        target_time = keys.loc[masks[split], "target_time"]
+        ranges[f"{prefix}_start"] = str(target_time.min())
+        ranges[f"{prefix}_end"] = str(target_time.max())
+    return ranges
+
+
 def metrics(y_true, y_pred, prefix: str) -> dict[str, float]:
     """Return MAE, RMSE and WAPE with the given ``val_`` or ``test_`` prefix.
 
@@ -205,6 +215,7 @@ def train_and_log(name, model, model_params, data, seed, manifest) -> dict:
         "n_train": int(masks["train"].sum()),
         "n_val": int(masks["validation"].sum()),
         "n_test": int(masks["test"].sum()),
+        **split_ranges(keys, masks),
         "n_features": X.shape[1],
         "data_version": data_version(),
         "features_data_version": manifest["data_version"],

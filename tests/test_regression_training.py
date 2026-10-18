@@ -18,6 +18,7 @@ from tc5061_proyecto_equipo5.modeling.train_regression import (
     SeasonalMeanRegressor,
     metrics,
     split_masks,
+    split_ranges,
 )
 
 
@@ -119,6 +120,34 @@ def test_split_masks_respect_cutoffs_and_warmup():
     assert not warm_masks["train"].iloc[0]
 
 
+def test_split_ranges_follow_the_rows_that_entered_each_split():
+    hours = pd.to_datetime(
+        [
+            "2024-01-01 05:00",  # warm-up row without history, so train starts on the next one
+            "2024-03-01 08:00",
+            "2024-09-30 22:00",  # last train row: its label closes at 23:00, before 23:40
+            "2024-09-30 23:00",  # excluded, its label closes after the fit cut-off
+            "2024-10-15 08:00",
+            "2024-11-30 22:00",
+            "2024-12-10 08:00",
+            "2024-12-31 23:00",
+        ]
+    )
+    X, keys, _ = make_prepared(hours, stations=(1,))
+    X.loc[0, "departures_lag_24"] = np.nan
+
+    ranges = split_ranges(keys, split_masks(X, keys))
+
+    assert ranges == {
+        "train_start": "2024-03-01 08:00:00",
+        "train_end": "2024-09-30 22:00:00",
+        "val_start": "2024-10-15 08:00:00",
+        "val_end": "2024-11-30 22:00:00",
+        "test_start": "2024-12-10 08:00:00",
+        "test_end": "2024-12-31 23:00:00",
+    }
+
+
 def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monkeypatch):
     hours = pd.date_range("2024-09-20", "2024-12-05", freq="6h")
     X, keys, y = make_prepared(hours)
@@ -146,6 +175,10 @@ def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monke
 
     assert len(runs) == 3
     assert runs["metrics.val_wape"].notna().all()
+    # Every run records the hours that really entered each split
+    for column in ("train_start", "train_end", "val_start", "val_end", "test_start", "test_end"):
+        assert runs[f"params.{column}"].notna().all()
+    assert (runs["params.train_end"] < runs["params.val_start"]).all()
     selected = runs["tags.selected"].eq("true")
     assert selected.sum() == 1
     # Only the selected candidate was scored on the December test
