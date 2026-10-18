@@ -129,6 +129,8 @@ def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monke
     y.to_frame().to_parquet(folder / "y.parquet", index=False)
     manifest = {"feature_version": FEATURE_VERSION, "data_version": "synthetic"}
     (folder / "features_manifest.json").write_text(json.dumps(manifest))
+    # MLflow writes artifacts to ./mlruns, so run from tmp_path to keep the repo folder clean
+    monkeypatch.chdir(tmp_path)
     previous_uri = mlflow.get_tracking_uri()
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     monkeypatch.setattr(train_regression, "data_version", lambda: "synthetic")
