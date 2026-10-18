@@ -5,7 +5,7 @@ build-backend = "flit_core.buildapi"
 [project]
 name = "tc5061_proyecto_equipo5"
 version = "0.0.1"
-description = "Dise\u00f1ar, como equipo, una propuesta de soluci\u00f3n de Machine Learning para un conjunto de preguntas sobre el sistema de bicicleta p\u00fablica MiBici, que combine modelos de regresi\u00f3n, clasificaci\u00f3n y clustering. Y earealizar tareas de manipulaci\u00f3n, preparaci\u00f3n, exploraci\u00f3n y preprocesamiento de datos, gestionando grandes vol\u00famenes de datos distribuidos y aplicando t\u00e9cnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning."
+description = "Diseniar, como equipo, una propuesta de solucion de Machine Learning para un conjunto de preguntas sobre el sistema de bicicleta publica MiBici, que combine modelos de regresion, clasificacion y clustering. Y realizar tareas de manipulacion, preparacion, exploracion y preprocesamiento de datos, gestionando grandes volumenes de datos distribuidos y aplicando tecnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning."
 authors = [
   { name = "Equipo 5" },
 ]
