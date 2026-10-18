@@ -249,47 +249,38 @@ def train_and_log(name, model, model_params, data, seed, manifest) -> dict:
 def candidates(seed: int) -> dict:
     """Return the three candidates of the ML Canvas, each with its own new pipeline."""
 
-    def pipeline(estimator, **preprocessing):
+    def pipeline(model_name, estimator, **preprocessing):
         def build(X):
             return NonNegativeRegressor(
                 make_pipeline(make_preprocessor(X, **preprocessing), estimator)
             )
 
-        return build
+        # Params come from the estimator itself, so the run logs exactly what was trained
+        return build, {"model": model_name, **estimator.get_params(), **preprocessing}
 
     return {
         "regression-baseline-seasonal-mean": (
             lambda X: NonNegativeRegressor(SeasonalMeanRegressor()),
             {"model": "seasonal_mean", "group_by": ",".join(SEASONAL_COLUMNS)},
         ),
-        "regression-baseline-ridge": (
-            pipeline(Ridge(alpha=1.0, solver="lsqr", random_state=seed), numeric_scaling="robust"),
-            {"model": "ridge", "alpha": 1.0, "solver": "lsqr", "numeric_scaling": "robust"},
+        # lsqr is deterministic, so Ridge takes no random_state
+        "regression-baseline-ridge": pipeline(
+            "ridge", Ridge(alpha=1.0, solver="lsqr"), numeric_scaling="robust"
         ),
         # Candidate from the ML Canvas: gradient boosting with a Poisson loss for non-negative counts
-        "regression-candidate-lightgbm": (
-            pipeline(
-                LGBMRegressor(
-                    objective="poisson",
-                    n_estimators=300,
-                    learning_rate=0.05,
-                    num_leaves=63,
-                    min_child_samples=100,
-                    random_state=seed,
-                    n_jobs=-1,
-                    verbose=-1,
-                ),
-                numeric_scaling="none",
+        "regression-candidate-lightgbm": pipeline(
+            "lightgbm",
+            LGBMRegressor(
+                objective="poisson",
+                n_estimators=300,
+                learning_rate=0.05,
+                num_leaves=63,
+                min_child_samples=100,
+                random_state=seed,
+                n_jobs=-1,
+                verbose=-1,
             ),
-            {
-                "model": "lightgbm",
-                "objective": "poisson",
-                "n_estimators": 300,
-                "learning_rate": 0.05,
-                "num_leaves": 63,
-                "min_child_samples": 100,
-                "numeric_scaling": "none",
-            },
+            numeric_scaling="none",
         ),
     }
 
