@@ -289,8 +289,8 @@ Las horas son por persona. **Congelamiento de código: viernes 23 a las 21:00.**
 
 | PR | Rama | Autor | Revisor | Día |
 |:---|:---|:---|:---|:---|
-| 1 | `feat/mlflow-project` | Manuel | Fernando | Mar 20 |
-| 2 | `feat/p1-experiments` | Emilio | Oscar | Jue 22 |
+| 1 | `feat/mlflow-project` | Manuel | Oscar | Mar 20 |
+| 2 | `feat/p1-experiments` | Emilio | Fernando | Jue 22 |
 | 3 | `feat/p2-experiments` | Oscar | Emilio | Jue 22 |
 | 4 | `feat/p3-experiments` | Manuel | Emilio | Jue 22 |
 | 5 | `feat/model-registry` | Fernando | Oscar | Jue 22 |
