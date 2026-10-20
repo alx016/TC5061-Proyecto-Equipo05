@@ -32,13 +32,13 @@ from sklearn.metrics import davies_bouldin_score, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances
 import typer
 
-from tc5061_proyecto_equipo5.config import EXTERNAL_DATA_DIR, PROCESSED_DATA_DIR, STUDY_YEAR
+from tc5061_proyecto_equipo5.config import CLUSTERING_FEATURES_DIR, EXTERNAL_DATA_DIR, STUDY_YEAR
 from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
 
 app = typer.Typer()
 
-# Artifacts produced by: python -m tc5061_proyecto_equipo5.features main --problem p3 --prepare-ready
-DEFAULT_BASE_DIR = PROCESSED_DATA_DIR / "fe_2024_v4" / "p3"
+# P3 artifacts, written by `features build --question p3`
+DEFAULT_BASE_DIR = CLUSTERING_FEATURES_DIR
 SPLITS = ("train", "validation", "test")
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
