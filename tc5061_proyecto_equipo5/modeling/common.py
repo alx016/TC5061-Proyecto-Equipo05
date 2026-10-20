@@ -23,6 +23,9 @@ from urllib.request import urlopen
 
 import mlflow
 import mlflow.data
+import mlflow.lightgbm
+from mlflow.models import infer_signature
+import mlflow.sklearn
 import pandas as pd
 
 from tc5061_proyecto_equipo5.config import DATA_MANIFEST_PATH, PROJ_ROOT
@@ -34,6 +37,10 @@ TASKS = {"p1": "regression", "p2": "classification", "p3": "clustering"}
 TEAM = "equipo05"
 # Columns that identify riders; they must never reach a run's inputs or artifacts
 PERSONAL_COLUMNS = {"usuario_id", "genero", "anio_nacimiento"}
+# The model flavors the three questions use: LightGBM's own flavor for P2, sklearn for the rest
+MODEL_FLAVORS = {"sklearn", "lightgbm"}
+# Shipped with every model so the custom estimators load outside the repo
+PACKAGE_DIR = PROJ_ROOT / "tc5061_proyecto_equipo5"
 
 
 def data_version() -> str:
@@ -117,3 +124,23 @@ def log_training_input(df: pd.DataFrame, source: Path, name: str) -> None:
     safe = df.drop(columns=PERSONAL_COLUMNS & set(df.columns))
     dataset = mlflow.data.from_pandas(safe, source=str(source), name=name)
     mlflow.log_input(dataset, context="train")
+
+
+def log_model_with_signature(model, X_example, flavor: str = "sklearn", **kwargs) -> None:
+    """Log the model with its signature, a 5-row input example and our package code.
+
+    Extra keyword arguments go to the flavor's log_model (e.g. P1's serialization_format).
+    """
+    if flavor not in MODEL_FLAVORS:
+        raise ValueError(f"flavor must be one of {sorted(MODEL_FLAVORS)}, got {flavor!r}")
+
+    example = X_example[:5]
+    signature = infer_signature(example, model.predict(example))
+    getattr(mlflow, flavor).log_model(
+        model,
+        name="model",
+        signature=signature,
+        input_example=example,
+        code_paths=[str(PACKAGE_DIR)],
+        **kwargs,
+    )

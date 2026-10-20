@@ -6,6 +6,7 @@ from urllib.error import URLError
 
 import pandas as pd
 import pytest
+from sklearn.linear_model import LinearRegression
 
 from tc5061_proyecto_equipo5.modeling import common
 from tc5061_proyecto_equipo5.modeling.common import base_tags, git_state
@@ -97,3 +98,30 @@ def test_log_training_input_drops_personal_columns(monkeypatch):
     assert len(received) == 1
     assert received[0].schema.input_names() == ["station_id"]
     assert received[0].name == "p1-train"
+
+
+def test_log_model_with_signature_sends_signature_example_and_code(monkeypatch):
+    X = pd.DataFrame({"hour": range(10), "lag_24": range(10, 20)})
+    model = LinearRegression().fit(X, range(10))
+
+    received = {}
+
+    def fake_log_model(model, **kwargs):
+        received["model"] = model
+        received.update(kwargs)
+
+    monkeypatch.setattr(common.mlflow.sklearn, "log_model", fake_log_model)
+
+    common.log_model_with_signature(model, X, serialization_format="cloudpickle")
+
+    assert received["model"] is model
+    assert received["name"] == "model"
+    assert received["signature"].inputs.input_names() == ["hour", "lag_24"]
+    assert len(received["input_example"]) == 5
+    assert received["code_paths"][0].endswith("tc5061_proyecto_equipo5")
+    assert received["serialization_format"] == "cloudpickle"
+
+
+def test_log_model_with_signature_rejects_unknown_flavor():
+    with pytest.raises(ValueError):
+        common.log_model_with_signature(None, None, flavor="lgbm")
