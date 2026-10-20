@@ -349,7 +349,7 @@ def train_and_log(
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("clustering"))
+        mlflow.set_tags(base_tags("p3", name, "baseline"))
         mlflow.log_metrics(metrics)
         with tempfile.TemporaryDirectory() as folder:
             save_artifacts(

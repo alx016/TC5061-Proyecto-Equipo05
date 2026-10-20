@@ -152,7 +152,7 @@ def train_and_log(name, model, model_params, data, seed, flavor="sklearn") -> di
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("classification"))
+        mlflow.set_tags(base_tags("p2", name, "baseline"))
         test_metrics = {}
         for split in ("validation", "test"):
             prefix = "val_" if split == "validation" else "test_"

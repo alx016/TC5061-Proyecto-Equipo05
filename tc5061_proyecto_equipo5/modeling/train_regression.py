@@ -236,7 +236,7 @@ def train_and_log(name, model, model_params, data, seed, manifest) -> dict:
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("regression"))
+        mlflow.set_tags(base_tags("p1", name, "baseline"))
         val_metrics = log_evaluation(
             model, X, y, keys, masks["validation"], "val_", f"{name}, validación"
         )
