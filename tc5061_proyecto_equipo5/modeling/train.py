@@ -1,8 +1,11 @@
 """Train one model of one question: the command behind the MLflow ``train`` entry point.
 
-``mlflow run . -e train -P question=p1 -P model=lightgbm -P learning_rate=0.03`` ends here.  The
+``mlflow run . -e train -P question=p1 -P model=lightgbm -P hp_learning_rate=0.03`` ends here.
 MLproject cannot leave a parameter empty, so every hyperparameter defaults to -1, which means "not
 set": the model keeps its own default and only the values given on the command line override it.
+The MLproject names carry an ``hp_`` prefix because ``mlflow run`` logs them as run params, and
+the training script logs the resolved values (seed=42, learning_rate=0.05...) under the plain
+names; MLflow refuses to change a param that is already logged.
 
 Each question exposes ``train_one(model, stage, seed, hyperparams) -> run_id`` in its own script
 and is listed in ``TRAINERS``.  One call is one run: inside ``mlflow run`` the first

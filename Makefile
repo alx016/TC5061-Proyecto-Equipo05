@@ -70,6 +70,13 @@ data: requirements
 	$(PYTHON_INTERPRETER) tc5061_proyecto_equipo5/dataset.py manifest
 
 
+## Start the MLflow tracking server (metadata in mlflow.db, artifacts in mlartifacts/)
+.PHONY: mlflow-server
+mlflow-server:
+	mlflow server --backend-store-uri sqlite:///mlflow.db \
+		--artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5001
+
+
 #################################################################################
 # Self Documenting Commands                                                     #
 #################################################################################
