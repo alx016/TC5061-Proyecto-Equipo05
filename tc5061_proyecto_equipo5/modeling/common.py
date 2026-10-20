@@ -17,10 +17,13 @@ project root.
 """
 
 import json
+from pathlib import Path
 import subprocess
 from urllib.request import urlopen
 
 import mlflow
+import mlflow.data
+import pandas as pd
 
 from tc5061_proyecto_equipo5.config import DATA_MANIFEST_PATH, PROJ_ROOT
 
@@ -29,6 +32,8 @@ EXPERIMENT_NAME = "mibici-equipo05"
 STAGES = {"baseline", "search", "candidate"}
 TASKS = {"p1": "regression", "p2": "classification", "p3": "clustering"}
 TEAM = "equipo05"
+# Columns that identify riders; they must never reach a run's inputs or artifacts
+PERSONAL_COLUMNS = {"usuario_id", "genero", "anio_nacimiento"}
 
 
 def data_version() -> str:
@@ -92,3 +97,23 @@ def base_tags(question: str, model_family: str, stage: str) -> dict[str, str]:
         "stage_of_work": stage,
         **git_state(),
     }
+
+
+def log_run_context(params: dict) -> None:
+    """Log the data version, the resolved parameters and the project files of the active run."""
+    # log_dict writes JSON, which cannot hold Path objects
+    resolved = {
+        key: str(value) if isinstance(value, Path) else value for key, value in params.items()
+    }
+
+    mlflow.log_artifact(str(DATA_MANIFEST_PATH), artifact_path="data")
+    mlflow.log_dict(resolved, "config/run_config.json")
+    for name in ("MLproject", "python_env.yaml"):
+        mlflow.log_artifact(str(PROJ_ROOT / name), artifact_path="config")
+
+
+def log_training_input(df: pd.DataFrame, source: Path, name: str) -> None:
+    """Record the training set (schema and digest only, no rows) without personal columns."""
+    safe = df.drop(columns=PERSONAL_COLUMNS & set(df.columns))
+    dataset = mlflow.data.from_pandas(safe, source=str(source), name=name)
+    mlflow.log_input(dataset, context="train")

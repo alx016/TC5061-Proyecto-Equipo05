@@ -1,9 +1,12 @@
 """Unit tests for the helpers shared by the training scripts."""
 
+from pathlib import Path
 import subprocess
 from urllib.error import URLError
 
+import pandas as pd
 import pytest
+
 from tc5061_proyecto_equipo5.modeling import common
 from tc5061_proyecto_equipo5.modeling.common import base_tags, git_state
 
@@ -41,14 +44,17 @@ def test_base_tags_carry_the_git_state():
     assert tags["question"] == "p1"
     assert {"git_commit", "git_dirty"} <= tags.keys()
 
+
 def test_base_tags_derive_the_task_from_the_question():
     assert base_tags("p1", "lightgbm", "baseline")["task"] == "regression"
     assert base_tags("p3", "kmeans", "search")["task"] == "clustering"
+
 
 @pytest.mark.parametrize("question, stage", [("p9", "baseline"), ("p1", "final")])
 def test_base_tags_reject_unknown_values(question, stage):
     with pytest.raises(ValueError):
         base_tags(question, "lightgbm", stage)
+
 
 def test_setup_experiment_fails_fast_without_server(monkeypatch):
     def unreachable(url, timeout):
@@ -59,3 +65,35 @@ def test_setup_experiment_fails_fast_without_server(monkeypatch):
 
     with pytest.raises(RuntimeError, match="not reachable"):
         common.setup_experiment()
+
+
+def test_log_run_context_writes_data_and_config(monkeypatch):
+    logged = []
+    monkeypatch.setattr(
+        common.mlflow,
+        "log_artifact",
+        lambda path, artifact_path=None: logged.append((Path(path).name, artifact_path)),
+    )
+    monkeypatch.setattr(common.mlflow, "log_dict", lambda d, file: logged.append((file, d)))
+
+    common.log_run_context({"question": "p1", "features_dir": Path("/tmp/x")})
+
+    assert ("viajes_manifest.json", "data") in logged
+    assert ("MLproject", "config") in logged
+    assert ("python_env.yaml", "config") in logged
+    assert ("config/run_config.json", {"question": "p1", "features_dir": "/tmp/x"}) in logged
+
+
+def test_log_training_input_drops_personal_columns(monkeypatch):
+    df = pd.DataFrame({"station_id": [1], "genero": ["F"], "anio_nacimiento": [1990]})
+    received = []
+
+    def fake_log_input(dataset, context=None):
+        received.append(dataset)
+
+    monkeypatch.setattr(common.mlflow, "log_input", fake_log_input)
+    common.log_training_input(df, Path("/tmp/x.parquet"), "p1-train")
+
+    assert len(received) == 1
+    assert received[0].schema.input_names() == ["station_id"]
+    assert received[0].name == "p1-train"
