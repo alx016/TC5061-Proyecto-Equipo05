@@ -21,6 +21,7 @@ from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
     CLASSIFICATION_PANEL_PATH,
     EXTERNAL_DATA_DIR,
+    FEATURES_DIR,
     INTERIM_DATA_DIR,
     PROCESSED_DATA_DIR,
     RISK_THRESHOLD,
@@ -908,6 +909,28 @@ def prepare_feature_dataset(
         )
         os.replace(target, final_target)
         return receipt
+
+
+@app.command()
+def build(
+    question: Annotated[str, typer.Option(help="p1, p2 or p3")],
+):
+    """Build the features of one question with the paths of config.py (MLflow entry point)."""
+
+    if question not in {"p1", "p2", "p3"}:
+        raise typer.BadParameter("question must be p1, p2 or p3")
+
+    if question == "p2":
+        build_classification_features()
+    else:
+        path = FEATURES_DIR / question
+        if path.exists() and any(path.iterdir()):
+            logger.info(f"Already exists... skipping {path}")
+            return
+        try:
+            prepare_feature_dataset(question, INTERIM_DATA_DIR / "viajes", FEATURES_DIR)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()

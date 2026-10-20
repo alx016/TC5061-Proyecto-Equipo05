@@ -36,6 +36,7 @@ import typer
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
     RISK_THRESHOLD,
+    SEED,
     STUDY_YEAR,
 )
 from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
@@ -151,7 +152,7 @@ def train_and_log(name, model, model_params, data, seed, flavor="sklearn") -> di
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("classification"))
+        mlflow.set_tags(base_tags("p2", name, "baseline"))
         test_metrics = {}
         for split in ("validation", "test"):
             prefix = "val_" if split == "validation" else "test_"
@@ -186,7 +187,7 @@ def main():
 @app.command()
 def classification(
     features_path: Path = CLASSIFICATION_FEATURES_PATH,
-    seed: int = 42,
+    seed: int = SEED,
 ):
     """Train the two baselines and the LightGBM candidate, and log them in MLflow."""
     frame = load_rows(features_path)

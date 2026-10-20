@@ -20,6 +20,7 @@ from tc5061_proyecto_equipo5.modeling.train_regression import (
     metrics,
     split_masks,
     split_ranges,
+    with_hyperparams,
 )
 
 
@@ -55,6 +56,19 @@ def make_prepared(hours, stations=(1, 2)):
     )
     y = pd.Series(rng.poisson(3, len(rows)), name="demand")
     return X, keys, y
+
+
+def write_prepared(tmp_path):
+    """Write synthetic prepared P1 artifacts that cover train, validation and test."""
+    X, keys, y = make_prepared(pd.date_range("2024-09-20", "2024-12-05", freq="6h"))
+    folder = tmp_path / "p1"
+    folder.mkdir()
+    X.to_parquet(folder / "X.parquet", index=False)
+    keys.to_parquet(folder / "keys.parquet", index=False)
+    y.to_frame().to_parquet(folder / "y.parquet", index=False)
+    manifest = {"feature_version": FEATURE_VERSION, "data_version": "synthetic"}
+    (folder / "features_manifest.json").write_text(json.dumps(manifest))
+    return folder
 
 
 def test_seasonal_mean_uses_train_means_and_falls_back():
@@ -163,15 +177,7 @@ def test_logged_params_match_the_trained_estimator():
 
 
 def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monkeypatch):
-    hours = pd.date_range("2024-09-20", "2024-12-05", freq="6h")
-    X, keys, y = make_prepared(hours)
-    folder = tmp_path / "p1"
-    folder.mkdir()
-    X.to_parquet(folder / "X.parquet", index=False)
-    keys.to_parquet(folder / "keys.parquet", index=False)
-    y.to_frame().to_parquet(folder / "y.parquet", index=False)
-    manifest = {"feature_version": FEATURE_VERSION, "data_version": "synthetic"}
-    (folder / "features_manifest.json").write_text(json.dumps(manifest))
+    folder = write_prepared(tmp_path)
     # MLflow writes artifacts to ./mlruns, so run from tmp_path to keep the repo folder clean
     monkeypatch.chdir(tmp_path)
     previous_uri = mlflow.get_tracking_uri()
@@ -200,3 +206,64 @@ def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monke
     # Only the selected candidate was scored on the December test
     assert runs.loc[selected, "metrics.test_wape"].notna().all()
     assert runs.loc[~selected, "metrics.test_wape"].isna().all()
+
+
+def lightgbm_candidate():
+    return next(spec for spec in candidates(seed=7).values() if spec[1]["model"] == "lightgbm")
+
+
+def test_with_hyperparams_overrides_the_estimator_and_the_logged_params():
+    X, _, _ = make_prepared(pd.date_range("2024-03-01", periods=48, freq="h"))
+    build, params = lightgbm_candidate()
+
+    model, logged = with_hyperparams(build(X), params, {"learning_rate": 0.03, "num_leaves": 15})
+
+    estimator = model.estimator.steps[-1][1]
+    assert estimator.learning_rate == 0.03
+    assert estimator.num_leaves == 15
+    assert logged["learning_rate"] == 0.03
+    assert logged["num_leaves"] == 15
+
+
+def test_with_hyperparams_rejects_what_the_model_does_not_have():
+    X, _, _ = make_prepared(pd.date_range("2024-03-01", periods=48, freq="h"))
+    build, params = lightgbm_candidate()
+    with pytest.raises(ValueError):
+        with_hyperparams(build(X), params, {"alpha": 2.0})
+
+    seasonal = next(s for s in candidates(seed=7).values() if s[1]["model"] == "seasonal_mean")
+    with pytest.raises(ValueError, match="takes no hyperparameters"):
+        with_hyperparams(seasonal[0](X), seasonal[1], {"alpha": 2.0})
+
+
+def test_train_one_logs_a_single_run_with_context_and_signature(tmp_path, monkeypatch):
+    folder = write_prepared(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(train_regression, "REGRESSION_FEATURES_DIR", folder)
+    monkeypatch.setattr(train_regression, "data_version", lambda: "synthetic")
+    previous_uri = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+
+    try:
+        run_id = train_regression.train_one("ridge", "candidate", 7, {"alpha": 2.0})
+        runs = mlflow.search_runs(experiment_names=["mibici-equipo05"])
+        artifacts = {a.path for a in mlflow.MlflowClient().list_artifacts(run_id)}
+        config = {a.path for a in mlflow.MlflowClient().list_artifacts(run_id, "config")}
+        model_info = mlflow.models.get_model_info(f"runs:/{run_id}/model")
+        inputs = mlflow.get_run(run_id).inputs.dataset_inputs
+    finally:
+        mlflow.set_tracking_uri(previous_uri)
+
+    assert len(runs) == 1
+    run = runs.iloc[0]
+    assert run["tags.mlflow.runName"] == "p1-candidate-ridge"
+    assert run["tags.question"] == "p1"
+    assert run["tags.model_family"] == "ridge"
+    assert run["tags.stage_of_work"] == "candidate"
+    assert run["params.alpha"] == "2.0"
+    # The test split is scored later, only for the selected model
+    assert "metrics.test_wape" not in runs.columns or pd.isna(run["metrics.test_wape"])
+    assert {"data", "config"} <= artifacts
+    assert {"config/run_config.json", "config/MLproject", "config/python_env.yaml"} <= config
+    assert model_info.signature is not None
+    assert [i.dataset.name for i in inputs] == ["p1-train"]

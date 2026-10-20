@@ -41,5 +41,11 @@ TEST_MONTHS = (12,)
 CLASSIFICATION_PANEL_PATH = PROCESSED_DATA_DIR / "panel_station_hour.parquet"
 CLASSIFICATION_FEATURES_PATH = PROCESSED_DATA_DIR / "classification_features.parquet"
 
-# P1 demand artifacts written by `features main --problem p1 --prepare-ready`
-REGRESSION_FEATURES_DIR = PROCESSED_DATA_DIR / "fe_2024_v4" / "p1"
+# Prepared P1 and P3 artifacts, written by `features build --question p1|p3`
+FEATURES_DIR = PROCESSED_DATA_DIR / "fe_2024_v4"
+
+REGRESSION_FEATURES_DIR = FEATURES_DIR / "p1"
+CLUSTERING_FEATURES_DIR = FEATURES_DIR / "p3"
+
+# Shared seed for every model and split, so runs are repeatable
+SEED = 42

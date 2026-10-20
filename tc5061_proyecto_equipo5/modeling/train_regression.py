@@ -17,8 +17,9 @@ Protocol (docs/docs/feature-engineering.md, section 4):
 * Predictions are clipped at zero inside the logged model, so offline metrics and scoring use the
   same policy.
 
-All runs use the shared helpers in modeling/common.py (same experiment, data version and Git
-commit) and the default local tracking, so the artifacts stay inside the ignored mlruns/ folder.
+All runs use the shared helpers in modeling/common.py: same experiment, tags, data version and
+run context, and a model logged with its signature.  ``regression`` trains the three candidates
+in one go; ``train_one`` trains a single model per run for the MLflow ``train`` entry point.
 """
 
 import json
@@ -38,9 +39,16 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import make_pipeline
 import typer
 
-from tc5061_proyecto_equipo5.config import REGRESSION_FEATURES_DIR, STUDY_YEAR
+from tc5061_proyecto_equipo5.config import REGRESSION_FEATURES_DIR, SEED, STUDY_YEAR
 from tc5061_proyecto_equipo5.features import FEATURE_VERSION, make_preprocessor, training_mask
-from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
+from tc5061_proyecto_equipo5.modeling.common import (
+    base_tags,
+    data_version,
+    log_model_with_signature,
+    log_run_context,
+    log_training_input,
+    setup_experiment,
+)
 
 # matplotlib has to switch to a non-interactive backend before pyplot is imported
 matplotlib.use("Agg")
@@ -211,10 +219,11 @@ def log_evaluation(model, X, y, keys, mask, prefix: str, title: str) -> dict[str
     return split_metrics
 
 
-def train_and_log(name, model, model_params, data, seed, manifest) -> dict:
+def train_and_log(name, model, model_params, data, seed, manifest, stage="baseline") -> dict:
     """Fit one candidate on train rows, evaluate it on validation and log the run in MLflow."""
     X, y, keys, masks = data["X"], data["y"], data["keys"], data["masks"]
-    model.fit(X.loc[masks["train"]], y.loc[masks["train"]])
+    X_train = X.loc[masks["train"]]
+    model.fit(X_train, y.loc[masks["train"]])
     params = {
         "study_year": STUDY_YEAR,
         "seed": seed,
@@ -236,15 +245,17 @@ def train_and_log(name, model, model_params, data, seed, manifest) -> dict:
     }
     with mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("regression"))
+        mlflow.set_tags(base_tags("p1", model_params["model"], stage))
+        log_run_context(params)
+        log_training_input(X_train, data["source"], "p1-train")
         val_metrics = log_evaluation(
             model, X, y, keys, masks["validation"], "val_", f"{name}, validación"
         )
         # skops rejects the custom estimators and the station-text function of make_preprocessor;
         # the bundle is loaded only from our own trusted runs (feature-engineering.md, section 6)
-        mlflow.sklearn.log_model(
+        log_model_with_signature(
             model,
-            name="model",
+            X_train,
             serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
         )
         run_id = run.info.run_id
@@ -292,6 +303,48 @@ def candidates(seed: int) -> dict:
     }
 
 
+def with_hyperparams(model, model_params: dict, hyperparams: dict) -> tuple:
+    """Override hyperparameters of the final estimator; the logged params follow the change."""
+    pipeline = model.estimator
+    if not hasattr(pipeline, "steps"):
+        raise ValueError(f"{model_params['model']} takes no hyperparameters")
+    step, estimator = pipeline.steps[-1]
+    # LightGBM's set_params accepts any name and ignores the unknown ones, so check them here
+    unknown = set(hyperparams) - set(estimator.get_params())
+    if unknown:
+        raise ValueError(f"{model_params['model']} has no hyperparameter {sorted(unknown)}")
+    model.set_params(**{f"estimator__{step}__{key}": value for key, value in hyperparams.items()})
+    return model, {**model_params, **hyperparams}
+
+
+def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
+    """Train and log one P1 model in one run: the unit of the MLflow ``train`` entry point.
+
+    Unlike ``regression``, it does not score the test: the selection happens later, across runs.
+    """
+    specs = {params["model"]: (build, params) for build, params in candidates(seed).values()}
+    if model not in specs:
+        raise ValueError(f"model must be one of {sorted(specs)}, got {model!r}")
+    # Before loading 2M rows, so a stopped tracking server fails at once
+    setup_experiment()
+    X, keys, y, manifest = load_prepared(REGRESSION_FEATURES_DIR)
+    data = {
+        "X": X,
+        "y": y,
+        "keys": keys,
+        "masks": split_masks(X, keys),
+        "source": REGRESSION_FEATURES_DIR / "X.parquet",
+    }
+    build, model_params = specs[model]
+    estimator = build(X)
+    if hyperparams:
+        estimator, model_params = with_hyperparams(estimator, model_params, hyperparams)
+    record = train_and_log(
+        f"p1-{stage}-{model}", estimator, model_params, data, seed, manifest, stage
+    )
+    return record["run_id"]
+
+
 @app.callback()
 def main():
     """Train the MiBici regression baselines (keeps ``regression`` a subcommand)."""
@@ -300,12 +353,18 @@ def main():
 @app.command()
 def regression(
     features_dir: Path = REGRESSION_FEATURES_DIR,
-    seed: int = 42,
+    seed: int = SEED,
 ):
     """Train the three candidates, select on validation WAPE and test the winner once."""
     X, keys, y, manifest = load_prepared(features_dir)
-    data = {"X": X, "y": y, "keys": keys, "masks": split_masks(X, keys)}
-    # Default local tracking comes from modeling/common.py: one shared experiment for the team
+    data = {
+        "X": X,
+        "y": y,
+        "keys": keys,
+        "masks": split_masks(X, keys),
+        "source": features_dir / "X.parquet",
+    }
+    # The tracking server and the shared experiment come from modeling/common.py
     setup_experiment()
     records = []
     for name, (build, model_params) in candidates(seed).items():

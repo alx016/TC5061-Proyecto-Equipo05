@@ -1,0 +1,36 @@
+name: mibici-equipo05
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command: >-
+      python tc5061_proyecto_equipo5/dataset.py download &&
+      python tc5061_proyecto_equipo5/dataset.py clean &&
+      python tc5061_proyecto_equipo5/dataset.py manifest
+
+  features:
+    parameters:
+      question: {type: string}
+    command: "python -m tc5061_proyecto_equipo5.features build --question {question}"
+
+  # One model of one question per run.  The hp_ prefix keeps these requests apart from the
+  # params the script logs (seed, learning_rate...) with the values that really trained; -1 means
+  # "not set": the model keeps its default and the seed comes from config.py
+  train:
+    parameters:
+      question: {type: string}
+      model: {type: string}
+      stage: {type: string, default: candidate}
+      hp_seed: {type: float, default: -1}
+      hp_n_estimators: {type: float, default: -1}
+      hp_learning_rate: {type: float, default: -1}
+      hp_num_leaves: {type: float, default: -1}
+      hp_alpha: {type: float, default: -1}
+      hp_C: {type: float, default: -1}
+      hp_n_clusters: {type: float, default: -1}
+    command: >-
+      python -m tc5061_proyecto_equipo5.modeling.train
+      --question {question} --model {model} --stage {stage} --seed={hp_seed}
+      --n-estimators={hp_n_estimators} --learning-rate={hp_learning_rate}
+      --num-leaves={hp_num_leaves} --alpha={hp_alpha} --c={hp_C} --n-clusters={hp_n_clusters}
