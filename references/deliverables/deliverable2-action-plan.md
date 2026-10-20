@@ -5,7 +5,7 @@
 - **Capacidad real:** unas 4 h/día por integrante de lunes a viernes, compartidas con otras
   materias. Se planea con **~2.5 h efectivas por persona entre semana** y ~5 h el sábado. El
   domingo es colchón: revisión final y envío, sin trabajo nuevo.
-- **Requisitos:** [entrega2-requerimientos.md](entrega2-requerimientos.md).
+- **Requisitos:** [deliverable2-requirements.md](deliverable2-requirements.md).
 
 ## Registro de decisiones
 
