@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
+import tomllib
 import unittest
+
+import yaml
 
 
 class TestProjectDependencies(unittest.TestCase):
@@ -21,6 +24,20 @@ class TestProjectDependencies(unittest.TestCase):
             [],
             f"Floating dependencies found without exact version pinning ('=='): {unpinned}",
         )
+
+    def test_python_env_matches_pyproject(self):
+        root = Path(__file__).resolve().parent.parent
+
+        # loads the pinned dependencies of pyproject.toml
+        with open(root / "pyproject.toml", "rb") as f:
+            pyproject_deps = set(tomllib.load(f)["project"]["dependencies"])
+
+        # loads the dependencies of python_env.yaml, without the line that installs our own package
+        env = yaml.safe_load((root / "python_env.yaml").read_text(encoding="utf-8"))
+        env_deps = set(env["dependencies"]) - {"-e ."}
+
+        # checks that both match
+        self.assertSetEqual(env_deps, pyproject_deps)
 
 
 if __name__ == "__main__":
