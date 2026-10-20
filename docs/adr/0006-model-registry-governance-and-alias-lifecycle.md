@@ -1,0 +1,3 @@
+# Gobernanza en Model Registry mediante Esquema de Aliases y Pre-flight Smoke Test
+
+Para desacoplar el consumo de inferencia del versionado numérico y habilitar despliegues continuos tipo champion/challenger, se decide registrar los modelos elegidos de P1, P2 y P3 bajo nombres canónicos (`mibici-equipo05-p1-demanda`, `mibici-equipo05-p2-riesgo`, `mibici-equipo05-p3-grupos`) gestionados exclusivamente mediante el esquema moderno de aliases (`@champion`). Toda versión registrada debe conservar linaje auditable (`run_id`, `git_commit`, `data_version`, descripción formal) y certificar su operabilidad mediante un pre-flight smoke test que resuelva la URI `models:/<nombre>@champion` y ejecute una inferencia sobre el ejemplo de entrada antes de finalizar la promoción.

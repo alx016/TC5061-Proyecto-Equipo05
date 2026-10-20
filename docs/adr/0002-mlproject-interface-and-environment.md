@@ -1,0 +1,3 @@
+# Empaquetado Declarativo de Entorno y Puntos de Entrada con MLproject
+
+Para garantizar la reproducibilidad estricta con un solo comando en clones limpios y compatibilidad con el gestor local `uv`, se decide estructurar la raíz del repositorio con un archivo `MLproject` respaldado por `python_env.yaml` (anclado a las versiones de `pyproject.toml` en Python 3.13). Se exponen dos puntos de entrada principales: `ingest` (que ejecuta la descarga y validación del manifiesto en `dataset.py`) y `train` (que delega a un CLI unificado `tc5061_proyecto_equipo5.modeling.train`), recibiendo parámetros fuertemente tipados con valores predeterminados centralizados en `config.py`.

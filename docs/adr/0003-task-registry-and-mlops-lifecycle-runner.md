@@ -1,0 +1,3 @@
+# Arquitectura de Entrenamiento mediante Task Registry y MLOps Lifecycle Runner
+
+Para desacoplar el punto de entrada unificado de `MLproject` (`train`) de los pipelines de modelado específicos y evitar bloques procedimentales frágiles (`if/elif`), se decide implementar un Task Registry con Strategy Pattern (`BaseTrainer`) para P1, P2 y P3 en `tc5061_proyecto_equipo5/modeling/train.py`. Los aspectos transversales de MLflow (gestión de context managers, recolección de metadatos Git, linaje de datos, cálculo de firmas y volcado organizado de artefactos) se abstraen en un MLOps Lifecycle Runner reutilizable, garantizando cumplimiento del Principio de Responsabilidad Única (SRP) y Abierto/Cerrado (OCP).

@@ -1,0 +1,3 @@
+# Estandarización de Servidor de Tracking y Backend Store en MLflow
+
+Para habilitar el Model Registry en desarrollo local y evitar colisiones de puertos en macOS (donde el puerto 5000 está ocupado por AirPlay), se decide configurar el servidor de tracking de MLflow con backend SQLite (`sqlite:///mlflow.db`) y raíz de artefactos en `./mlartifacts` sobre el puerto 5001. La resolución en código (`common.py`) leerá `MLFLOW_TRACKING_URI` con valor predeterminado a `http://127.0.0.1:5001` e incluirá un fallback resiliente a `sqlite:///mlflow.db` directo para permitir ejecuciones de pruebas y scripts cuando el servidor HTTP no esté activo.

@@ -1,0 +1,3 @@
+# Jerarquía Semántica de Artefactos, Firmas y Contrato Zero-PII
+
+Para garantizar cumplimiento de privacidad de datos, trazabilidad auditable y prevención de fallos de esquema en inferencia, se decide estandarizar el registro de artefactos en el MLOps Lifecycle Runner bajo tres directrices: empaquetar modelos con firma inferida estricta (`ModelSignature`) y ejemplo ejecutable (`input_example`); organizar diagnósticos en subcarpetas semánticas (`plots/` para curvas y matrices, `data/` para manifiesto de versión y partición, `config/` para hiperparámetros); y aplicar una compuerta programática Zero-PII que certifique la ausencia total de identificadores personales (`Usuario_Id`, `Genero`, `Anio_de_nacimiento`) antes de persistir entradas o artefactos en MLflow.

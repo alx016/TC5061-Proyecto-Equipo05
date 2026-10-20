@@ -1,0 +1,3 @@
+# Contrato Golden Path para Reproducibilidad desde Clon Limpio
+
+Para garantizar cero fricción en la evaluación del repositorio y cumplimiento estricto del criterio de reproducibilidad sin pasos manuales, se decide establecer un Golden Path determinista de 4 comandos documentado en el README. Este flujo sincroniza dependencias con `uv`, arranca el servidor de tracking local con SQLite (`sqlite:///mlflow.db`) en el puerto 5001 y ejecuta la ingesta y el entrenamiento de los modelos campeones exclusivamente a través de `mlflow run .`, respaldado por un target de verificación automatizado en el Makefile.
