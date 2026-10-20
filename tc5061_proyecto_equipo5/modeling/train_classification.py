@@ -36,6 +36,7 @@ import typer
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
     RISK_THRESHOLD,
+    SEED,
     STUDY_YEAR,
 )
 from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
@@ -186,7 +187,7 @@ def main():
 @app.command()
 def classification(
     features_path: Path = CLASSIFICATION_FEATURES_PATH,
-    seed: int = 42,
+    seed: int = SEED,
 ):
     """Train the two baselines and the LightGBM candidate, and log them in MLflow."""
     frame = load_rows(features_path)

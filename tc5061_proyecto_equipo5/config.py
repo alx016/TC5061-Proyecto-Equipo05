@@ -46,3 +46,6 @@ FEATURES_DIR = PROCESSED_DATA_DIR / "fe_2024_v4"
 
 REGRESSION_FEATURES_DIR = FEATURES_DIR / "p1"
 CLUSTERING_FEATURES_DIR = FEATURES_DIR / "p3"
+
+# Shared seed for every model and split, so runs are repeatable
+SEED = 42

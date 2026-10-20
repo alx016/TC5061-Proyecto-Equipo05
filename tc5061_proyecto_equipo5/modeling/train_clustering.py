@@ -32,7 +32,12 @@ from sklearn.metrics import davies_bouldin_score, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances
 import typer
 
-from tc5061_proyecto_equipo5.config import CLUSTERING_FEATURES_DIR, EXTERNAL_DATA_DIR, STUDY_YEAR
+from tc5061_proyecto_equipo5.config import (
+    CLUSTERING_FEATURES_DIR,
+    EXTERNAL_DATA_DIR,
+    SEED,
+    STUDY_YEAR,
+)
 from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
 
 app = typer.Typer()
@@ -373,7 +378,7 @@ def main() -> None:
 @app.command()
 def clustering(
     base_dir: Path = DEFAULT_BASE_DIR,
-    seed: int = 42,
+    seed: int = SEED,
 ):
     """Train the fixed-K reference, the best-K candidate and the Ward comparison."""
     # One shared experiment for the team, from modeling/common.py

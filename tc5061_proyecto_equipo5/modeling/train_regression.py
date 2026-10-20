@@ -38,7 +38,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import make_pipeline
 import typer
 
-from tc5061_proyecto_equipo5.config import REGRESSION_FEATURES_DIR, STUDY_YEAR
+from tc5061_proyecto_equipo5.config import REGRESSION_FEATURES_DIR, SEED, STUDY_YEAR
 from tc5061_proyecto_equipo5.features import FEATURE_VERSION, make_preprocessor, training_mask
 from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
 
@@ -300,7 +300,7 @@ def main():
 @app.command()
 def regression(
     features_dir: Path = REGRESSION_FEATURES_DIR,
-    seed: int = 42,
+    seed: int = SEED,
 ):
     """Train the three candidates, select on validation WAPE and test the winner once."""
     X, keys, y, manifest = load_prepared(features_dir)
