@@ -1,0 +1,10 @@
+name: mibici-equipo05
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command:  >-
+      python tc5061_proyecto_equipo5/dataset.py download && 
+      python tc5061_proyecto_equipo5/dataset.py clean && 
+      python tc5061_proyecto_equipo5/dataset.py manifest

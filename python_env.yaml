@@ -1,0 +1,5 @@
+python: "3.13"
+build_dependencies:
+  - pip
+dependencies:
+  - mlflow==3.17.1
