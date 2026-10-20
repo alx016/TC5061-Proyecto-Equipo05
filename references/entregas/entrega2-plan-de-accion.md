@@ -7,8 +7,25 @@
   domingo es colchón: revisión final y envío, sin trabajo nuevo.
 - **Requisitos:** [entrega2-requerimientos.md](entrega2-requerimientos.md).
 
-> La asignación de responsables es una propuesta que sigue lo que cada quien hizo en la
-> entrega 1 (ver la tabla de integrantes del README). Ajústenla en el kickoff del lunes.
+## Registro de decisiones
+
+Reunión de arranque del lunes 19 de octubre
+([agenda](entrega2-agenda-kickoff.md), sección 2).
+
+| # | Decisión | Detalle |
+|:---|:---|:---|
+| 2.1 | ✅ **Un host de evidencia** | Cada quien desarrolla y prueba en su servidor local. Las corridas que cuentan como evidencia se lanzan en una sola máquina desde `main` limpio, para que todo quede en un solo `mlflow.db`. Persona: *por confirmar* |
+| 2.2 | ✅ **Los baselines se vuelven a correr** | Se relanzan con `mlflow run` y `stage_of_work=baseline` (mismo código, partición y `data_version`). Los 9 runs de la entrega 1 se quedan con el tag `stage_of_work=legacy_e1`, y el reporte muestra que las métricas coinciden |
+| — | ✅ **Reasignación** | WP-P1 (demanda) pasa a **Emilio**; WP-P3 (grupos) pasa a **Manuel** |
+| 2.3 | ⏳ Pendiente | Stages o aliases en el Registry (propuesta: aliases) |
+| 2.4 | ⏳ Pendiente | Uso de validación y test para elegir en P1 y P2 (propuesta: elegir solo con validación y registrar test en todas las candidatas) |
+| 2.5 | ⏳ Pendiente | Ward en P3 (propuesta: envolverlo con `predict`) |
+| 2.6 | ⏳ Pendiente | Formato del reporte |
+| 2.7 | ⏳ Pendiente | Tag `question`, entry points y borrado de ramas |
+
+Carga resultante: Manuel tiene WP-A y WP-P3 (~9 h), además de ser el host de evidencia si se
+confirma la propuesta original. Si el host es otra persona, conviene que sea alguien con el
+viernes y el sábado libres.
 
 ---
 
@@ -51,11 +68,11 @@ Revisión del repositorio al 19 de octubre (rama `docs/readme`, último merge #1
    `log_model` (o instalar el paquete en el entorno) y **verificar la carga desde otra carpeta**.
 4. **Un solo tracking para el equipo.** Con un servidor local en cada laptop, las corridas
    quedan repartidas en cuatro `mlflow.db`, y la comparación, el Registry y las capturas necesitan
-   una sola base. Decisión propuesta: **un integrante es el "host de evidencia"** (propuesta:
-   Manuel). Cada quien desarrolla y prueba en su servidor local, y las corridas finales se lanzan
-   en la máquina host desde `main` limpio (`git_dirty=false`).
-5. **Baselines.** Para que *todas* las corridas de esta entrega salgan de `mlflow run` y tengan
-   los mismos tags y artefactos, se vuelven a lanzar los baselines con `stage_of_work=baseline`
+   una sola base. **Decidido (2.1): un integrante es el "host de evidencia".** Cada quien
+   desarrolla y prueba en su servidor local, y las corridas finales se lanzan en la máquina host
+   desde `main` limpio (`git_dirty=false`).
+5. **Baselines.** **Decidido (2.2).** Para que *todas* las corridas de esta entrega salgan de
+   `mlflow run` y tengan los mismos tags y artefactos, se vuelven a lanzar los baselines con `stage_of_work=baseline`
    (mismo código, misma partición, mismo `data_version`). Los 9 runs viejos se quedan como
    referencia con el tag `stage_of_work=legacy_e1`. El reporte muestra que las métricas
    coinciden.
@@ -119,7 +136,7 @@ Rama: `feat/mlflow-project`.
 - **Hecho cuando:** `mlflow run . -e train -P question=p1 -P model=seasonal_mean --env-manager local`
   aparece en la UI con tags, `data/`, `config/` y un modelo con firma.
 
-### WP-P1 · Experimentación P1 demanda (Manuel, o Emilio si Manuel se satura · ~5 h)
+### WP-P1 · Experimentación P1 demanda (Emilio · ~5 h)
 Rama: `feat/p1-experiments`.
 - [ ] Parametrizar `train_regression.py`: una corrida = un modelo (`seasonal_mean`, `ridge`,
       `lightgbm`, `hist_gb` o `random_forest`) con sus hiperparámetros desde la CLI.
@@ -152,7 +169,7 @@ Rama: `feat/p2-experiments`.
 - [ ] Métrica de negocio explícita: recall de desabasto y de saturación con la precisión
       mínima aceptable. Esto alimenta la justificación.
 
-### WP-P3 · Experimentación P3 grupos (Emilio · ~4 h)
+### WP-P3 · Experimentación P3 grupos (Manuel · ~4 h)
 Rama: `feat/p3-experiments`.
 - [ ] Parametrizar `train_clustering.py` (`model` = `kmeans`, `ward`, `gmm` o `minibatch_kmeans`,
       con `n_clusters`).
@@ -213,7 +230,8 @@ Las horas son por persona. **Congelamiento de código: viernes 23 a las 21:00.**
 - Manuel: abre `feat/mlflow-project`, levanta el servidor y crea el esqueleto del `MLproject` y
   de `python_env.yaml`.
 - Fernando: instala `pyenv` con 3.13 y prepara la prueba del entorno declarado.
-- Oscar y Emilio: leen sus scripts y anotan los cambios de parámetros que necesitan.
+- Oscar y Emilio: leen sus scripts (`train_classification.py` y `train_regression.py`) y anotan los
+  cambios de parámetros que necesitan. Manuel hace lo mismo con `train_clustering.py`.
 - Todos: `git pull`, `uv sync`, verificar que tienen datos (`manifest --check`) y features.
 
 ### Martes 20 · Infraestructura lista (~2.5 h)
@@ -233,7 +251,7 @@ Las horas son por persona. **Congelamiento de código: viernes 23 a las 21:00.**
 
 ### Jueves 22 · PRs y revisiones (~2.5 h)
 - Abren PRs: `feat/p1-experiments` (revisa Oscar), `feat/p2-experiments` (revisa Emilio),
-  `feat/p3-experiments` (revisa Manuel) y `feat/model-registry` (revisa Oscar).
+  `feat/p3-experiments` (revisa Emilio) y `feat/model-registry` (revisa Oscar).
 - Correcciones de revisión. `make lint` y `uv run pytest` en verde antes de pedir revisión.
 - Fernando: README con los comandos (rama `docs/readme-entrega2`, todavía sin resultados).
 - **Hito:** cada integrante abrió ≥1 PR y revisó ≥1.
@@ -272,9 +290,9 @@ Las horas son por persona. **Congelamiento de código: viernes 23 a las 21:00.**
 | PR | Rama | Autor | Revisor | Día |
 |:---|:---|:---|:---|:---|
 | 1 | `feat/mlflow-project` | Manuel | Fernando | Mar 20 |
-| 2 | `feat/p1-experiments` | Manuel / Emilio | Oscar | Jue 22 |
+| 2 | `feat/p1-experiments` | Emilio | Oscar | Jue 22 |
 | 3 | `feat/p2-experiments` | Oscar | Emilio | Jue 22 |
-| 4 | `feat/p3-experiments` | Emilio | Manuel | Jue 22 |
+| 4 | `feat/p3-experiments` | Manuel | Emilio | Jue 22 |
 | 5 | `feat/model-registry` | Fernando | Oscar | Jue 22 |
 | 6 | `docs/readme-entrega2` | Fernando | Manuel | Sáb 24 |
 | 7 | `docs/experiment-report` | Emilio / Oscar | Fernando | Dom 25 |
@@ -353,11 +371,11 @@ construye el entorno de `python_env.yaml`.)
 |:---|:---|:---|
 | PR #1 (infraestructura) se atrasa y bloquea a todos | Media | Es lo primero que se hace. Los demás trabajan en ramas basadas en la de Manuel desde el martes |
 | La búsqueda de P1 tarda demasiado | Baja | La entrega 1 sugiere ~12 s por LightGBM (problema técnico 9). Confirmar con `fit_seconds` en la primera corrida. Si no cabe: grid ≤9 combinaciones, `n_jobs=-1` y lanzarla de noche |
-| Corridas en 4 servidores distintos | Alta si no se decide | Un host de evidencia (decisión 4) |
+| Corridas en 4 servidores distintos | Baja | Decidido: un host de evidencia (decisión 2.1) |
 | El modelo de P1 no carga desde el Registry (clases propias) | Media | `code_paths` y prueba de carga fuera del repo el miércoles |
 | El entorno `python_env.yaml` no se construye (pyenv o LightGBM con libomp) | Media | Probarlo el miércoles. README con el requisito `brew install libomp`. Fallback documentado con `--env-manager local` |
 | Corridas con `git_dirty=true` | Media | Congelamiento a las 21:00 del viernes y `git status` antes de lanzar |
-| Otra materia absorbe a un integrante | Alta | Cada WP tiene un respaldo: P1 ↔ Emilio, P2 ↔ Manuel, P3 ↔ Oscar, Registry ↔ Manuel |
+| Otra materia absorbe a un integrante | Alta | Cada WP tiene un respaldo: WP-A ↔ Fernando, P1 ↔ Manuel (autor del script original), P2 ↔ Emilio, P3 ↔ Oscar (autor del script original), Registry ↔ Oscar |
 | Capturas tomadas antes de tener los aliases finales | Baja | Tomarlas al final del sábado, después del registro |
 
 ---
