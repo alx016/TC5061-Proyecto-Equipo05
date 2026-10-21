@@ -30,15 +30,12 @@ TRAINERS = {
 }
 # The "not set" value of every numeric option (seeds and hyperparameters are never negative)
 UNSET = -1
-# MLflow passes every numeric value as text; these ones must reach sklearn as integers.
-INTEGER_PARAMS = {
-    "n_estimators",
-    "num_leaves",
-    "min_child_samples",
-    "max_depth",
-    "min_samples_leaf",
-    "max_leaf_nodes",
-    "n_clusters",
+# MLproject cannot pass a nested dict, so the entry point exposes one flat option per
+# hyperparameter.  Each question owns the names that must reach its estimator as integers; the
+# dispatcher only applies the cast before calling train_one.
+INTEGER_HYPERPARAMS = {
+    "p1": train_regression.INTEGER_HYPERPARAMS,
+    "p2": train_classification.INTEGER_HYPERPARAMS,
 }
 
 
@@ -79,11 +76,17 @@ def main(
         "C": c,
         "n_clusters": n_clusters,
     }
-    hyperparams = {
-        name: int(value) if name in INTEGER_PARAMS else value
-        for name, value in given.items()
-        if value != UNSET
-    }
+    integer_names = INTEGER_HYPERPARAMS.get(question, set())
+    hyperparams = {}
+    for name, value in given.items():
+        if value == UNSET:
+            continue
+        if name in integer_names:
+            if not float(value).is_integer():
+                raise typer.BadParameter(f"{name} must be an integer, got {value}")
+            hyperparams[name] = int(value)
+        else:
+            hyperparams[name] = value
     run_seed = SEED if seed == UNSET else int(seed)
 
     logger.info(f"Training {question} {model} ({stage}) with {hyperparams or 'its defaults'}")

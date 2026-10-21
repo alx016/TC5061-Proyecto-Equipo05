@@ -63,6 +63,8 @@ def test_choose_run_applies_the_recall_and_precision_guardrails():
                 "run_id": "best-f1",
                 "tags.question": "p2",
                 "tags.stage_of_work": "candidate",
+                "tags.git_dirty": "false",
+                "tags.git_commit": "abc123",
                 "metrics.val_macro_f1": 0.95,
                 "metrics.val_recall_shortage": 0.40,
                 "metrics.val_precision_shortage": 0.90,
@@ -72,6 +74,8 @@ def test_choose_run_applies_the_recall_and_precision_guardrails():
                 "run_id": "good-enough",
                 "tags.question": "p2",
                 "tags.stage_of_work": "candidate",
+                "tags.git_dirty": "false",
+                "tags.git_commit": "abc123",
                 "metrics.val_macro_f1": 0.80,
                 "metrics.val_recall_shortage": 0.90,
                 "metrics.val_precision_shortage": 0.60,
@@ -81,6 +85,8 @@ def test_choose_run_applies_the_recall_and_precision_guardrails():
                 "run_id": "other-question",
                 "tags.question": "p1",
                 "tags.stage_of_work": "candidate",
+                "tags.git_dirty": "false",
+                "tags.git_commit": "abc123",
                 "metrics.val_macro_f1": 0.99,
                 "metrics.val_recall_shortage": 1.0,
                 "metrics.val_precision_shortage": 1.0,
@@ -101,6 +107,8 @@ def test_choose_run_falls_back_to_the_best_macro_f1():
                 "run_id": "best-f1",
                 "tags.question": "p2",
                 "tags.stage_of_work": "baseline",
+                "tags.git_dirty": "false",
+                "tags.git_commit": "abc123",
                 "metrics.val_macro_f1": 0.60,
                 "metrics.val_recall_shortage": 0.10,
                 "metrics.val_precision_shortage": 0.10,
@@ -110,6 +118,8 @@ def test_choose_run_falls_back_to_the_best_macro_f1():
                 "run_id": "second",
                 "tags.question": "p2",
                 "tags.stage_of_work": "candidate",
+                "tags.git_dirty": "false",
+                "tags.git_commit": "abc123",
                 "metrics.val_macro_f1": 0.50,
                 "metrics.val_recall_shortage": 0.10,
                 "metrics.val_precision_shortage": 0.10,
@@ -123,6 +133,55 @@ def test_choose_run_falls_back_to_the_best_macro_f1():
     assert chosen["run_id"] == "best-f1"
 
 
+def test_choose_run_ignores_dirty_and_other_commit_runs():
+    def candidate(run_id, dirty, commit, f1):
+        return {
+            "run_id": run_id,
+            "tags.question": "p2",
+            "tags.stage_of_work": "candidate",
+            "tags.git_dirty": dirty,
+            "tags.git_commit": commit,
+            "metrics.val_macro_f1": f1,
+            "metrics.val_recall_shortage": 0.90,
+            "metrics.val_precision_shortage": 0.60,
+            "metrics.val_precision_saturation": 0.60,
+        }
+
+    runs = pd.DataFrame(
+        [
+            candidate("dirty-best", "true", "abc123", 0.95),
+            candidate("other-commit", "false", "def456", 0.90),
+            candidate("clean-head", "false", "abc123", 0.80),
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs, git_commit="abc123")
+
+    assert chosen["run_id"] == "clean-head"
+
+
+def test_choose_run_allows_dirty_runs_for_local_work():
+    runs = pd.DataFrame(
+        [
+            {
+                "run_id": "dirty-best",
+                "tags.question": "p2",
+                "tags.stage_of_work": "candidate",
+                "tags.git_dirty": "true",
+                "tags.git_commit": "abc123",
+                "metrics.val_macro_f1": 0.95,
+                "metrics.val_recall_shortage": 0.90,
+                "metrics.val_precision_shortage": 0.60,
+                "metrics.val_precision_saturation": 0.60,
+            }
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs, allow_dirty=True)
+
+    assert chosen["run_id"] == "dirty-best"
+
+
 def test_persistence_baseline_uses_the_lag_two_ratio():
     X = pd.DataFrame(
         {
@@ -134,3 +193,47 @@ def test_persistence_baseline_uses_the_lag_two_ratio():
 
     assert model.predict(X).tolist() == [1, 2, 0, 0]
     assert model.predict_proba(X).shape == (4, 3)
+
+
+def test_persistence_baseline_accepts_arrays_in_feature_column_order():
+    X = pd.DataFrame(
+        {column: [0.0, 0.0, 0.0, 0.0] for column in train_classification.FEATURE_COLUMNS}
+    )
+    X["capacity"] = 10.0
+    X["net_flow_lag2"] = [-5.0, 5.0, 0.0, 3.0]
+    model = train_classification.PersistenceRiskClassifier(tau=0.4).fit(X, [0, 0, 0, 0])
+
+    assert model.predict(X.to_numpy()).tolist() == [1, 2, 0, 0]
+
+
+def test_persistence_baseline_rejects_a_missing_column():
+    X = pd.DataFrame({"capacity": [10.0]})
+    model = train_classification.PersistenceRiskClassifier(tau=0.4).fit(X, [0])
+
+    with pytest.raises(ValueError, match="net_flow_lag2"):
+        model.predict(X)
+
+
+@pytest.mark.parametrize("value", [None, "", "none", "NONE", " none "])
+def test_normalize_run_id_maps_mlflow_placeholders_to_none(value):
+    assert train_classification.normalize_run_id(value) is None
+
+
+def test_normalize_run_id_keeps_a_real_run_id():
+    assert train_classification.normalize_run_id("abc123") == "abc123"
+
+
+def test_split_masks_ignore_rows_without_a_split():
+    frame = pd.DataFrame(
+        {
+            "station_id": [1, 1],
+            "target_time": pd.to_datetime(["2024-12-01 00:00", "2024-12-02 00:00"]),
+            "label_available_at": pd.to_datetime(["2024-12-01 01:00", "2024-12-02 01:00"]),
+            "split": pd.Series(["test", pd.NA], dtype="string"),
+        }
+    )
+
+    masks = train_classification.split_masks(frame)
+
+    # A row without a target has no split; it must not raise or land in test.
+    assert masks["test"].tolist() == [True, False]

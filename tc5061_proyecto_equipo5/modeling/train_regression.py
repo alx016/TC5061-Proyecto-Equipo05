@@ -67,6 +67,15 @@ POSTPROCESSING = "clip predictions at zero; target unchanged"
 SERIES_HOURS = 14 * 24
 # The seasonal baseline groups by station, weekday and hour (the first column is the station)
 SEASONAL_COLUMNS = ("station_id", "day_of_week", "hour")
+# MLflow sends every numeric parameter as text; these must reach LightGBM as integers.
+INTEGER_HYPERPARAMS = {
+    "n_estimators",
+    "num_leaves",
+    "min_child_samples",
+    "max_depth",
+    "min_samples_leaf",
+    "max_leaf_nodes",
+}
 
 
 class SeasonalMeanRegressor(RegressorMixin, BaseEstimator):

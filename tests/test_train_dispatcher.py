@@ -52,6 +52,31 @@ def test_integer_options_are_cast_from_mlflow_floats(monkeypatch):
     assert calls == [("lightgbm", "candidate", SEED, {"n_estimators": 300, "max_depth": 6})]
 
 
+def test_p1_declares_its_own_integer_parameters(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p1", fake_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p1", "--model", "lightgbm", "--num-leaves=31.0"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("lightgbm", "candidate", SEED, {"num_leaves": 31})]
+
+
+def test_fractional_integer_option_is_rejected(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p2", fake_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--n-estimators=300.5"]
+    )
+
+    assert result.exit_code != 0
+    assert "n_estimators must be an integer" in result.output
+    assert calls == []
+
+
 def test_unknown_question_stage_or_missing_trainer_is_rejected(monkeypatch):
     monkeypatch.setitem(train.TRAINERS, "p1", fake_trainer([]))
 

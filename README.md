@@ -100,7 +100,7 @@ uv run mlflow run . -e train -P question=p2 -P model=lightgbm \
 uv run mlflow run . -e train -P question=p2 -P model=lightgbm_unweighted \
   -P stage=candidate --env-manager local
 uv run mlflow run . -e search -P question=p2 -P model=lightgbm --env-manager local
-uv run python -m tc5061_proyecto_equipo5.modeling.train_classification select --question p2
+uv run mlflow run . -e select -P question=p2 --env-manager local
 
 uv run python -m tc5061_proyecto_equipo5.modeling.train_clustering clustering
 
@@ -115,14 +115,16 @@ puerto 5000 lo ocupa AirPlay, por eso se usa el 5001.
 | Pregunta | Script | Candidatos | Selección |
 |:---|:---|:---|:---|
 | P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson | Menor WAPE de validación; solo el run `selected=true` se evalúa en test |
-| P2 | `modeling/train_classification.py` | Persistencia, clase mayoritaria, regresión logística, LightGBM balanceado y sin balancear, HistGradientBoosting y Random Forest | Mayor macro-F1 de validación con guardrails de recall de desabasto (`>= 0.85`) y precisión mínima; solo el run `selected=true` se evalúa en test |
+| P2 | `modeling/train_classification.py` | Persistencia, clase mayoritaria, regresión logística, LightGBM balanceado y sin balancear, HistGradientBoosting y Random Forest | Mayor macro-F1 de validación con guardrails de recall de desabasto (`>= 0.85`) y precisión mínima; si ninguno los cumple, se elige el mayor macro-F1 y se marca `selection_fallback=true`. Solo el run `selected=true` se evalúa en test |
 | P3 | `modeling/train_clustering.py` | K-Means con K=4 de referencia, K-Means con el mejor K, Ward | K con la mayor silhouette de validación |
 
 P2 no usa `predict` directamente: entrena con `predict_proba`, calibra un umbral para
 desabasto y otro para saturación usando **solo validación**, y aplica esos umbrales antes de
 calcular las métricas. `train` y `search` nunca tocan diciembre; `select` carga el modelo
 elegido, evalúa test una sola vez y guarda las matrices de confusión, las curvas PR y el
-`classification_report.txt` en `plots/test/`.
+`classification_report.txt` en `plots/test/`. `select` se ejecuta como entry point para que la
+corrida quede registrada como proyecto MLflow; rechaza runs con `git_dirty=true`, así que las
+pruebas locales sobre un árbol sucio deben usar el módulo directo con `--allow-dirty`.
 
 Reglas comunes a los tres scripts:
 

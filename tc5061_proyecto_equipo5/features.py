@@ -1302,7 +1302,12 @@ def add_target(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_split(panel: pd.DataFrame, study_year: int = STUDY_YEAR) -> pd.DataFrame:
-    """Assign each row to train, validation or test by the target hour."""
+    """Assign each row to train, validation or test by the target hour.
+
+    Rows whose target hour falls outside the study year (the last hour of the panel) have no
+    label, so their split is missing (``pd.NA``): they are neither trained nor scored, and are
+    never counted as test.
+    """
     panel = panel.copy()
     target_time = panel["hour"] + pd.Timedelta(hours=1)
     target_month = target_time.dt.month
@@ -1314,8 +1319,9 @@ def add_split(panel: pd.DataFrame, study_year: int = STUDY_YEAR) -> pd.DataFrame
     unknown = (panel["split"] == "unknown") & panel["target"].notna()
     if unknown.any():
         raise ValueError("Some rows fall outside the train/validation/test months")
-    panel.loc[panel["split"] == "unknown", "split"] = "test"
-    logger.info(f"Split counts: {panel['split'].value_counts().to_dict()}")
+    # The remaining rows have no target; a missing split is honest and keeps them out of test.
+    panel.loc[panel["split"] == "unknown", "split"] = pd.NA
+    logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
     return panel
 
 

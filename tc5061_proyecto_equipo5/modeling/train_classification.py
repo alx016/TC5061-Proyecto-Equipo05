@@ -18,6 +18,7 @@ and the decision thresholds are frozen.
 import hashlib
 import itertools
 import json
+import os
 from pathlib import Path
 import tempfile
 import time
@@ -65,6 +66,7 @@ from tc5061_proyecto_equipo5.modeling.common import (
     EXPERIMENT_NAME,
     base_tags,
     data_version,
+    git_state,
     log_model_with_signature,
     log_run_context,
     log_training_input,
@@ -83,6 +85,15 @@ SPLITS = ("train", "validation", "test")
 CLASS_NAMES_ES = ["Balanceado", "Riesgo_Desabasto", "Riesgo_Saturacion"]
 # Models from the first delivery; they are rerun as the baseline of this delivery.
 BASELINES = {"persistence", "dummy_most_frequent", "logistic_regression", "lightgbm"}
+# MLflow sends every numeric parameter as text; these must reach the tree estimators as integers.
+INTEGER_HYPERPARAMS = {
+    "n_estimators",
+    "num_leaves",
+    "min_child_samples",
+    "max_depth",
+    "min_samples_leaf",
+    "max_leaf_nodes",
+}
 
 # Anti-leakage decision point: the forecast is made at minute 50 of hour t, so the departures,
 # arrivals and net_flow of the current hour are not fully known yet and are never used as
@@ -113,7 +124,9 @@ class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
     """Simple baseline: reuse the risk implied by the flow of two hours ago.
 
     The feature table already has ``net_flow_lag2`` and ``capacity``; the ratio is compared with
-    the same ``tau`` used for the target, so there are no learned parameters.
+    the same ``tau`` used for the target, so there are no learned parameters.  ``X`` may be a
+    DataFrame with those columns or an array whose columns follow ``FEATURE_COLUMNS``, so
+    scikit-learn utilities that pass arrays can use the estimator too.
     """
 
     def __init__(self, tau: float = RISK_THRESHOLD):
@@ -123,8 +136,27 @@ class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
         self.classes_ = np.array([0, 1, 2], dtype=np.int8)
         return self
 
+    def _flow_ratio(self, X) -> np.ndarray:
+        """Return net_flow_lag2 / capacity for a DataFrame or a FEATURE_COLUMNS array."""
+        if isinstance(X, pd.DataFrame):
+            missing = {"capacity", "net_flow_lag2"} - set(X.columns)
+            if missing:
+                raise ValueError(f"X is missing columns: {sorted(missing)}")
+            flow = X["net_flow_lag2"].to_numpy(dtype=float)
+            capacity = X["capacity"].to_numpy(dtype=float)
+        else:
+            values = np.asarray(X, dtype=float)
+            if values.ndim != 2 or values.shape[1] != len(FEATURE_COLUMNS):
+                raise ValueError(
+                    f"X must be a DataFrame or an array with {len(FEATURE_COLUMNS)} columns "
+                    "in FEATURE_COLUMNS order"
+                )
+            flow = values[:, FEATURE_COLUMNS.index("net_flow_lag2")]
+            capacity = values[:, FEATURE_COLUMNS.index("capacity")]
+        return flow / capacity
+
     def predict(self, X):
-        ratio = X["net_flow_lag2"].to_numpy(dtype=float) / X["capacity"].to_numpy(dtype=float)
+        ratio = self._flow_ratio(X)
         prediction = np.zeros(len(ratio), dtype=np.int8)
         prediction[ratio <= -self.tau] = 1
         prediction[ratio >= self.tau] = 2
@@ -161,7 +193,7 @@ def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
     return {
         "train": training_mask(keys, fit_as_of=P2_FIT_AS_OF, splits=("train",)),
         "validation": training_mask(keys, fit_as_of=P2_SELECTION_AS_OF, splits=("validation",)),
-        "test": keys["split"].eq("test"),
+        "test": keys["split"].eq("test").fillna(False).astype(bool),
     }
 
 
@@ -582,16 +614,33 @@ def choose_run(
     min_recall_shortage: float = P2_MIN_RECALL_SHORTAGE,
     min_precision_shortage: float = P2_MIN_PRECISION_SHORTAGE,
     min_precision_saturation: float = P2_MIN_PRECISION_SATURATION,
+    allow_dirty: bool = False,
+    git_commit: str | None = None,
 ) -> pd.Series:
-    """Pick the best validation run, applying the recall and precision guardrails."""
+    """Pick the best validation run, applying the guardrails and the evidence filters.
+
+    Unless ``allow_dirty`` is set, only runs trained from a clean tree are eligible.  When
+    ``git_commit`` is given, runs from other commits are excluded, so a clean run from another
+    branch cannot become the selected evidence by accident.
+    """
     if "tags.question" not in runs.columns or "tags.stage_of_work" not in runs.columns:
         raise ValueError("No P2 baseline or candidate runs found")
+    if not allow_dirty and "tags.git_dirty" not in runs.columns:
+        raise ValueError("Runs are missing the git_dirty tag")
+    if git_commit is not None and "tags.git_commit" not in runs.columns:
+        raise ValueError("Runs are missing the git_commit tag")
     candidates_frame = runs[
         (runs["tags.question"] == "p2")
         & (runs["tags.stage_of_work"].isin(["baseline", "candidate"]))
     ].copy()
+    if not allow_dirty:
+        candidates_frame = candidates_frame[candidates_frame["tags.git_dirty"] == "false"]
+        if git_commit is not None:
+            candidates_frame = candidates_frame[candidates_frame["tags.git_commit"] == git_commit]
     if candidates_frame.empty:
-        raise ValueError("No P2 baseline or candidate runs found")
+        clean = "clean " if not allow_dirty else ""
+        commit_note = f" from {git_commit[:7]}" if git_commit else ""
+        raise ValueError(f"No {clean}P2 baseline or candidate runs found{commit_note}")
     if "metrics.val_macro_f1" not in candidates_frame:
         candidates_frame["metrics.val_macro_f1"] = 0.0
     candidates_frame = candidates_frame.sort_values(
@@ -703,6 +752,17 @@ def classification(
     print(table[columns].to_string(index=False))
 
 
+def normalize_run_id(run_id: str | None) -> str | None:
+    """Map MLflow's placeholder for an omitted run id to ``None``.
+
+    MLflow project parameters cannot be empty, so the ``select`` entry point passes ``none``
+    when the user does not choose a run.  Direct CLI use can omit the option entirely.
+    """
+    if run_id is None or run_id.strip().lower() in {"", "none"}:
+        return None
+    return run_id
+
+
 @app.command()
 def select(
     question: str = "p2",
@@ -713,18 +773,25 @@ def select(
     if question != "p2":
         raise typer.BadParameter("select is implemented for p2 only")
 
+    run_id = normalize_run_id(run_id)
+    # MLflow sets this variable for the project run opened by ``mlflow run``.  Keep it to link
+    # the select run with the candidate that holds the test metrics.
+    selection_run_id = os.environ.get("MLFLOW_RUN_ID")
+
     setup_experiment()
     frame = load_rows(CLASSIFICATION_FEATURES_PATH)
     data = build_data(frame, CLASSIFICATION_FEATURES_PATH)
 
     if run_id is None:
         runs = mlflow.search_runs(experiment_names=[EXPERIMENT_NAME])
-        chosen = choose_run(runs)
+        chosen = choose_run(runs, allow_dirty=allow_dirty, git_commit=git_state()["git_commit"])
         run_id = chosen["run_id"]
 
     run = mlflow.get_run(run_id)
     if run.data.tags.get("selected") == "true":
         logger.info(f"Run {run_id} is already selected; test was already evaluated once.")
+        if selection_run_id and selection_run_id != run_id:
+            mlflow.MlflowClient().set_tag(selection_run_id, "selected_run_id", run_id)
         return
     if run.data.tags.get("git_dirty") == "true" and not allow_dirty:
         raise RuntimeError(
@@ -755,8 +822,9 @@ def select(
     )
 
     with mlflow.start_run(run_id=run_id):
-        mlflow.set_tag("selected", "true")
         mlflow.set_tag("selection_fallback", str(fallback).lower())
+        if selection_run_id and selection_run_id != run_id:
+            mlflow.set_tag("selection_run_id", selection_run_id)
         mlflow.log_metrics(test_metrics)
         with tempfile.TemporaryDirectory() as folder:
             save_plots(
@@ -778,6 +846,12 @@ def select(
             },
             "config/selection.json",
         )
+        if selection_run_id and selection_run_id != run_id:
+            client = mlflow.MlflowClient()
+            client.set_tag(selection_run_id, "selected_run_id", run_id)
+            client.set_tag(selection_run_id, "selection_fallback", str(fallback).lower())
+        # Mark the run only after all test evidence is logged, so a failure keeps it retryable.
+        mlflow.set_tag("selected", "true")
 
     logger.success(f"Selected run {run_id}")
     print(pd.Series(test_metrics).to_string())

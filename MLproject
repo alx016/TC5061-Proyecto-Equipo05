@@ -47,3 +47,9 @@ entry_points:
       question: {type: string}
       model: {type: string}
     command: "python -m tc5061_proyecto_equipo5.modeling.search --question {question} --model {model}"
+
+  select:
+    parameters:
+      question: {type: string, default: p2}
+      run_id: {type: string, default: "none"}
+    command: "python -m tc5061_proyecto_equipo5.modeling.train_classification select --question {question} --run-id {run_id}"
