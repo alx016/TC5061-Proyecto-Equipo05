@@ -16,11 +16,13 @@ to the shared MLflow experiment with the helpers in modeling/common.py.
 import json
 from pathlib import Path
 import tempfile
+from time import perf_counter
 
 from loguru import logger
 import matplotlib
 
 matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.sklearn
@@ -38,12 +40,17 @@ from tc5061_proyecto_equipo5.config import (
     SEED,
     STUDY_YEAR,
 )
-from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
+from tc5061_proyecto_equipo5.modeling.common import (
+    base_tags,
+    data_version,
+    log_model_with_signature,
+    log_run_context,
+    log_training_input,
+    setup_experiment,
+)
 
 app = typer.Typer()
 
-# P3 artifacts, written by `features build --question p3`
-DEFAULT_BASE_DIR = CLUSTERING_FEATURES_DIR
 SPLITS = ("train", "validation", "test")
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
@@ -318,38 +325,46 @@ def train_and_log(
     model_params: dict,
     figure_title: str,
     log_model: bool,
+    stage: str = "baseline",
 ) -> dict:
     """Fit one model on train, evaluate every split and log the run in MLflow."""
-    labels = labels_for_splits(model, data["matrices"], kind)
-    metrics = {}
-    for split in SPLITS:
-        prefix = "val_" if split == "validation" else f"{split}_"
-        metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
-    params = {
-        "study_year": STUDY_YEAR,
-        "seed": seed,
-        "model": kind,
-        "n_clusters": len(set(labels["train"].tolist())),
-        "n_train": data["matrices"]["train"].shape[0],
-        "n_val": data["matrices"]["validation"].shape[0],
-        "n_test": data["matrices"]["test"].shape[0],
-        "n_features": data["matrices"]["train"].shape[1],
-        "train_window": data["windows"]["train"],
-        "val_window": data["windows"]["validation"],
-        "test_window": data["windows"]["test"],
-        "feature_set": "station_profiles",
-        "feature_version": data["manifest"]["feature_version"],
-        "feature_data_version": data["manifest"]["data_version"],
-        "data_version": data_version(),
-        "k_selection": "validation silhouette; December never used"
-        if kind == "kmeans"
-        else "inherited from the K-Means choice",
-        "assignment": "predict" if kind == "kmeans" else "nearest train cluster mean",
-        **model_params,
-    }
     with mlflow.start_run(run_name=name) as run:
+        start = perf_counter()
+        labels = labels_for_splits(model, data["matrices"], kind)
+        # Includes the validation and test assignment; fit alone is not separable inside labels_for_splits
+        fit_seconds = perf_counter() - start
+        mlflow.log_metric("fit_seconds", fit_seconds)
+        metrics = {}
+        for split in SPLITS:
+            prefix = "val_" if split == "validation" else f"{split}_"
+            metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
+        params = {
+            "study_year": STUDY_YEAR,
+            "seed": seed,
+            "model": kind,
+            "n_clusters": len(set(labels["train"].tolist())),
+            "n_train": data["matrices"]["train"].shape[0],
+            "n_val": data["matrices"]["validation"].shape[0],
+            "n_test": data["matrices"]["test"].shape[0],
+            "n_features": data["matrices"]["train"].shape[1],
+            "train_window": data["windows"]["train"],
+            "val_window": data["windows"]["validation"],
+            "test_window": data["windows"]["test"],
+            "feature_set": "station_profiles",
+            "feature_version": data["manifest"]["feature_version"],
+            "feature_data_version": data["manifest"]["data_version"],
+            "data_version": data_version(),
+            "k_selection": "validation silhouette; December never used"
+            if kind == "kmeans"
+            else "inherited from the K-Means choice",
+            "assignment": "predict" if kind == "kmeans" else "nearest train cluster mean",
+            **model_params,
+        }
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("p3", name, "baseline"))
+        mlflow.set_tags(base_tags("p3", kind, stage))
+        log_run_context(params)
+        train = pd.DataFrame(data["matrices"]["train"], columns=data["names"])
+        log_training_input(train, data["source"], "p3-train")
         mlflow.log_metrics(metrics)
         with tempfile.TemporaryDirectory() as folder:
             save_artifacts(
@@ -364,7 +379,11 @@ def train_and_log(
             data["k_table"].to_csv(Path(folder) / "k_selection.csv", index=False)
             mlflow.log_artifacts(folder)
         if log_model:
-            mlflow.sklearn.log_model(model, name="model")
+            log_model_with_signature(
+                model,
+                data["matrices"]["train"],
+                serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+            )
         run_id = run.info.run_id
     logger.success(f"{name}: run {run_id} logged")
     return {"run_id": run_id, "run_name": name, **metrics}
@@ -375,14 +394,8 @@ def main() -> None:
     """Train the MiBici clustering models (keeps ``clustering`` a subcommand)."""
 
 
-@app.command()
-def clustering(
-    base_dir: Path = DEFAULT_BASE_DIR,
-    seed: int = SEED,
-):
-    """Train the fixed-K reference, the best-K candidate and the Ward comparison."""
-    # One shared experiment for the team, from modeling/common.py
-    setup_experiment()
+def load_data(base_dir: Path) -> dict:
+    """Load the manifest, the three splits, their windows and the station catalog."""
     manifest = load_manifest(base_dir)
     data = {
         "manifest": manifest,
@@ -390,10 +403,25 @@ def clustering(
         "matrices": {},
         "keys": {},
         "stations": load_stations(),
+        "source": base_dir / "ready" / "train",
     }
     for split in SPLITS:
         data["keys"][split], data["matrices"][split] = load_split(base_dir, split)
     data["windows"] = {split: window_labels(keys) for split, keys in data["keys"].items()}
+
+    return data
+
+
+@app.command()
+def clustering(
+    base_dir: Path = CLUSTERING_FEATURES_DIR,
+    seed: int = SEED,
+):
+    """Train the fixed-K reference, the best-K candidate and the Ward comparison."""
+    # One shared experiment for the team, from modeling/common.py
+    setup_experiment()
+
+    data = load_data(base_dir)
 
     best_k, k_table = choose_k(
         data["matrices"]["train"], data["matrices"]["validation"], K_VALUES, seed
@@ -411,6 +439,7 @@ def clustering(
             model_params={"n_init": 10, "init": "k-means++"},
             figure_title=f"Perfiles horarios medios por clúster — K-Means, K={REFERENCE_K} (ventana de ajuste)",
             log_model=True,
+            stage="candidate",
         )
     ]
     records.append(
@@ -423,6 +452,7 @@ def clustering(
             model_params={"n_init": 10, "init": "k-means++"},
             figure_title=f"Perfiles horarios medios por clúster — K-Means, K={best_k} (ventana de ajuste)",
             log_model=True,
+            stage="candidate",
         )
     )
     # Same K as the candidate so the comparison is like for like; Ward has no predict method,
