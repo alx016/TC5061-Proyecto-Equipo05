@@ -85,7 +85,7 @@ uv run python -m tc5061_proyecto_equipo5.features classification
 uv run python -m tc5061_proyecto_equipo5.features main --problem p3 --prepare-ready \
   --input-dir data/interim/viajes --output-dir data/processed/fe_2024_v4
 
-# 2. Entrenamiento (tres runs por pregunta)
+# 2. Entrenamiento (catálogo de cada pregunta)
 uv run python -m tc5061_proyecto_equipo5.modeling.train_regression regression
 uv run python -m tc5061_proyecto_equipo5.modeling.train_classification classification
 uv run python -m tc5061_proyecto_equipo5.modeling.train_clustering clustering
@@ -100,9 +100,32 @@ puerto 5000 lo ocupa AirPlay, por eso se usa el 5001.
 
 | Pregunta | Script | Candidatos | Selección |
 |:---|:---|:---|:---|
-| P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson | Menor WAPE de validación; solo el run `selected=true` se evalúa en test |
+| P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson, LightGBM Tweedie, HistGradientBoosting Poisson | `regression` elige por WAPE de validación y evalúa solo su finalista en test |
 | P2 | `modeling/train_classification.py` | Clase mayoritaria, regresión logística, LightGBM | Comparación de macro-F1 y PR-AUC |
 | P3 | `modeling/train_clustering.py` | K-Means con K=4 de referencia, K-Means con el mejor K, Ward | K con la mayor silhouette de validación |
+
+### Etapas de experimentación P1
+
+El catálogo de `regression` conserva promedio estacional, Ridge y LightGBM Poisson como
+referencias de la Entrega 1, con `stage_of_work=baseline`. La referencia LightGBM se llama
+`regression-baseline-lightgbm`.
+
+El entrypoint `train` ejecuta una configuración por corrida y usa `stage=candidate` por
+defecto. Para repetir la referencia LightGBM sin ajustar hiperparámetros:
+
+```bash
+uv run mlflow run . -e train -P question=p1 -P model=lightgbm -P stage=baseline \
+  --env-manager local
+```
+
+Esa corrida se llama `p1-baseline-lightgbm`. Para una variante ajustada, usar
+`-P stage=candidate` junto con los parámetros `hp_*`; no etiquetarla como baseline.
+
+En `search`, todas las Trials conservan `stage_of_work=search`. Solo la ganadora recibe
+`selected=true`, en correspondencia con `best_run_id` de la Study y la fila seleccionada
+del CSV. Para localizarla, filtrar por `question=p1`, `stage_of_work=search` y la Study
+(`mlflow.parentRunId`), además de `selected=true`. Este tag indica el mínimo WAPE del grid:
+no equivale a seleccionar el finalista entre familias, evaluar diciembre o promover un champion.
 
 Reglas comunes a los tres scripts:
 

@@ -34,3 +34,11 @@ entry_points:
       --question {question} --model {model} --stage {stage} --seed={hp_seed}
       --n-estimators={hp_n_estimators} --learning-rate={hp_learning_rate}
       --num-leaves={hp_num_leaves} --alpha={hp_alpha} --c={hp_C} --n-clusters={hp_n_clusters}
+
+  search:
+    parameters:
+      question: {type: string}
+      model: {type: string, default: lightgbm}
+    command: >-
+      python -m tc5061_proyecto_equipo5.modeling.search
+      --question {question} --model {model}
