@@ -24,7 +24,6 @@ from tc5061_proyecto_equipo5.modeling.common import STAGES, TASKS
 
 app = typer.Typer()
 
-# P3 joins when its experiment work package adds train_one to its script
 TRAINERS = {
     "p1": train_regression.train_one,
     "p2": train_classification.train_one,

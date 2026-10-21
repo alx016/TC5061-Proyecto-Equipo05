@@ -241,8 +241,6 @@ def test_split_months():
 
     split = add_split(panel)["split"].tolist()
 
-    # The split follows the TARGET hour (feature hour + 1), so the last hour of each month
-    # belongs to the next split.  The last row has no target and is left in test.
     assert split == ["train", "validation", "validation", "test", "test", "test"]
 
 

@@ -1,8 +1,4 @@
-"""Small dispatcher for the MLflow ``search`` entry point.
-
-Only P2 has a nested search for now.  P1 and P3 can add their own function here when their
-experiment work packages need it.
-"""
+"""Run the P2 hyperparameter search through the MLflow entry point."""
 
 import typer
 
@@ -15,7 +11,7 @@ def main(
 ) -> None:
     """Run the nested search of one question and model."""
     if question != "p2":
-        raise typer.BadParameter("search is implemented for p2 only")
+        raise typer.BadParameter("question must be p2")
     train_classification.search(model)
 
 

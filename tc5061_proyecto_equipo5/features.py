@@ -1302,13 +1302,7 @@ def add_target(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_split(panel: pd.DataFrame, study_year: int = STUDY_YEAR) -> pd.DataFrame:
-    """Assign each row to train, validation or test by the target hour's month.
-
-    The target is the NEXT hour, so partitioning by the feature hour would put the last
-    hour of September in train while its label belongs to October.  The target hour is the
-    one that must be out-of-time.  The last hour of the year has no target; it is left in
-    test so the training loader can drop it explicitly.
-    """
+    """Assign each row to train, validation or test by the target hour."""
     panel = panel.copy()
     target_time = panel["hour"] + pd.Timedelta(hours=1)
     target_month = target_time.dt.month
