@@ -131,9 +131,9 @@ def log_model_with_signature(
 ) -> None:
     """Log the model with its signature, a 5-row input example and our package code.
 
-    The signature is inferred from ``predict_fn`` (``predict`` by default; P2 uses
-    ``predict_proba`` so the registered model returns probabilities).  Extra keyword
-    arguments go to the flavor's log_model.
+    The signature comes from ``predict_fn``; P2 passes ``predict_proba`` so the registered model
+    returns probabilities, while P1 keeps the default. Extra keyword arguments go to the
+    flavor's ``log_model``.
     """
     if flavor not in MODEL_FLAVORS:
         raise ValueError(f"flavor must be one of {sorted(MODEL_FLAVORS)}, got {flavor!r}")

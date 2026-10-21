@@ -112,8 +112,8 @@ FEATURE_COLUMNS = [
 class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
     """Simple baseline: reuse the risk implied by the flow of two hours ago.
 
-    The feature table already has ``net_flow_lag2`` and ``capacity``.  The ratio is compared
-    with the same ``tau`` used to build the target, so this model has no learned parameters.
+    The feature table already has ``net_flow_lag2`` and ``capacity``; the ratio is compared with
+    the same ``tau`` used for the target, so there are no learned parameters.
     """
 
     def __init__(self, tau: float = RISK_THRESHOLD):
@@ -143,8 +143,7 @@ def load_rows(path: Path) -> pd.DataFrame:
     frame["hour"] = pd.to_datetime(frame["hour"])
     logger.info(f"Loaded {len(frame):,} rows from {path}")
 
-    # The last hour of the year has no next hour, and the first hours of January have empty
-    # lags (warm-up); both are dropped, never filled.
+    # The last hour of the year has no next hour and January starts with empty lags, so both are dropped.
     frame = frame.dropna(subset=["target"]).dropna(subset=FEATURE_COLUMNS)
     frame["target_time"] = frame["hour"] + pd.Timedelta(hours=1)
     frame["label_available_at"] = frame["target_time"] + pd.Timedelta(hours=1)
@@ -155,8 +154,8 @@ def load_rows(path: Path) -> pd.DataFrame:
 def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
     """Return the train, validation and test masks under the temporal protocol.
 
-    ``training_mask`` removes labels that were not closed before the first scoring of the next
-    split.  Test is not passed through it because it is never used for training or selection.
+    ``training_mask`` removes labels that were not closed before the next split starts; test is
+    never passed through it because it is not used for training or selection.
     """
     keys = frame[["station_id", "target_time", "label_available_at", "split"]]
     return {
@@ -187,8 +186,7 @@ def build_data(frame: pd.DataFrame, source: Path) -> dict:
 def candidates(seed: int) -> dict:
     """Return the baseline and candidate models, each with the parameters that built it.
 
-    Every value is ``(builder, params)``.  The builder returns a new unfitted estimator so a
-    search can create one model per run without reusing fitted state.
+    Every value is ``(builder, params)``; the builder returns a new unfitted estimator for each run.
     """
     return {
         "persistence": (
@@ -378,9 +376,8 @@ def apply_thresholds(proba, classes, thresholds: dict[int, float]) -> np.ndarray
 def metrics(y_true, y_pred, proba, classes, prefix: str) -> dict[str, float]:
     """Return the P2 metrics with the ``val_`` or ``test_`` prefix.
 
-    The probability columns are mapped with ``model.classes_``; never assume that class 1 is
-    column 1.  PR-AUC is reported one-vs-rest and as a macro average of the classes that have
-    positive examples in the split.
+    The probability columns are mapped with ``model.classes_``; never assume class 1 is column 1.
+    PR-AUC is one-vs-rest and macro-averaged over the classes with positive examples.
     """
     positions = {int(cls): index for index, cls in enumerate(classes)}
     y_true = np.asarray(y_true)
