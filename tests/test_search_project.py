@@ -69,6 +69,9 @@ def test_project_entrypoint_is_the_study_with_eight_trials(tmp_path, monkeypatch
         assert study.data.params["model"] == "lightgbm"
         assert study.data.params["seed"] == str(SEED)
         assert study.data.tags["best_run_id"] in {run.info.run_id for run in children}
+        assert {
+            run.info.run_id for run in children if run.data.tags.get("selected") == "true"
+        } == {study.data.tags["best_run_id"]}
         assert all(run.info.status == "FINISHED" for run in children)
         assert all(not any(key.startswith("test_") for key in run.data.metrics) for run in runs)
         assert client.list_artifacts(study.info.run_id, "search")

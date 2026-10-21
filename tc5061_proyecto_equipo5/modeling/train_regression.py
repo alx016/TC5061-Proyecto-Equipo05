@@ -415,9 +415,8 @@ def candidates(seed: int) -> dict:
         "regression-baseline-ridge": pipeline(
             "ridge", Ridge(alpha=1.0, solver="lsqr"), numeric_scaling="robust"
         ),
-        # Candidate from the ML Canvas: gradient boosting with a Poisson loss for
-        # non-negative counts
-        "regression-candidate-lightgbm": pipeline(
+        # Delivery 1 reference: gradient boosting with a Poisson loss for non-negative counts.
+        "regression-baseline-lightgbm": pipeline(
             "lightgbm",
             LGBMRegressor(
                 objective="poisson",
@@ -659,6 +658,8 @@ def search(model: str = "lightgbm", seed: int = SEED) -> str:
                 logger.exception("Could not persist partial P1 search table")
             raise
         _log_search_results(rows)
+        # Mark the grid winner without reopening its finished Trial or promoting a champion.
+        mlflow.MlflowClient().set_tag(winner["run_id"], "selected", "true")
         return study.info.run_id
 
 

@@ -75,6 +75,9 @@ def test_search_logs_eight_complete_trials_and_selects_first_tie(training_store,
     assert table.val_wape.nunique() == 1
     assert table.selected.tolist() == [True, False, False, False, False, False, False, False]
     assert study.data.tags["best_run_id"] == table.run_id.iloc[0]
+    assert {
+        trial.info.run_id for trial in trials if trial.data.tags.get("selected") == "true"
+    } == {table.run_id.iloc[0]}
     assert study.data.metrics["best_val_wape"] == pytest.approx(table.val_wape.iloc[0])
     assert study.data.tags["mlflow.runName"] == "p1-search-lightgbm"
     assert study.data.tags["objective"] == "minimize val_wape"
@@ -125,6 +128,9 @@ def test_search_fails_without_fictitious_winner_when_wape_is_undefined(
     assert not np.isfinite(table.val_wape).any()
     assert not table.selected.any()
     assert table.status.eq(status).all()
+    assert all(
+        client.get_run(run_id).data.tags.get("selected") != "true" for run_id in table.run_id
+    )
     assert mlflow.active_run() is None
 
 
@@ -152,6 +158,9 @@ def test_search_aborts_failed_fit_and_preserves_partial_table(training_store, mo
     assert table.run_id.tolist() == calls
     assert table.status.tolist() == ["FINISHED", "FINISHED", "FAILED"]
     assert table.selected.tolist() == [False, False, False]
+    assert all(
+        client.get_run(run_id).data.tags.get("selected") != "true" for run_id in table.run_id
+    )
     assert pd.isna(table.val_wape.iloc[2])
     assert client.get_run(calls[-1]).info.status == "FAILED"
     assert study.info.status == "FAILED"
@@ -269,6 +278,7 @@ def test_search_selects_lowest_wape_when_trials_differ(training_store):
     assert table.val_wape.nunique() > 1
     (selected,) = table.loc[table.selected, "run_id"]
     assert selected == study.data.tags["best_run_id"]
+    assert client.get_run(selected).data.tags["selected"] == "true"
     assert client.get_run(selected).data.metrics["val_wape"] == pytest.approx(table.val_wape.min())
     assert study.data.metrics["best_val_wape"] == pytest.approx(table.val_wape.min())
 

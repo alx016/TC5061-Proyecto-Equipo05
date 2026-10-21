@@ -212,6 +212,7 @@ def test_cli_trains_catalog_and_tests_only_the_selected(tmp_path, monkeypatch):
     ridge = runs.loc[runs["params.model"].eq("ridge")].iloc[0]
     assert ridge["params.alpha"] == "1.0"
     poisson = runs.loc[runs["params.model"].eq("lightgbm")].iloc[0]
+    assert poisson["tags.mlflow.runName"] == "regression-baseline-lightgbm"
     assert poisson["params.objective"] == "poisson"
     assert poisson["params.n_estimators"] == "300"
     assert runs["metrics.val_wape"].notna().all()
