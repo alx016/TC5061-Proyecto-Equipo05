@@ -18,13 +18,17 @@ Protocol (docs/docs/feature-engineering.md, section 4):
   same policy.
 
 All runs use the shared helpers in modeling/common.py: same experiment, tags, data version and
-run context, and a model logged with its signature.  ``regression`` trains the three candidates
+run context, and a model logged with its signature.  ``regression`` trains the catalog
 in one go; ``train_one`` trains a single model per run for the MLflow ``train`` entry point.
 """
 
+from contextlib import contextmanager, nullcontext
+from itertools import product
 import json
+import os
 from pathlib import Path
 import tempfile
+from time import perf_counter
 
 from lightgbm import LGBMRegressor
 from loguru import logger
@@ -34,14 +38,24 @@ import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import FunctionTransformer, OrdinalEncoder
 import typer
 
 from tc5061_proyecto_equipo5.config import REGRESSION_FEATURES_DIR, SEED, STUDY_YEAR
-from tc5061_proyecto_equipo5.features import FEATURE_VERSION, make_preprocessor, training_mask
+from tc5061_proyecto_equipo5.features import (
+    FEATURE_VERSION,
+    _category_text,
+    make_preprocessor,
+    training_mask,
+)
 from tc5061_proyecto_equipo5.modeling.common import (
+    EXPERIMENT_NAME,
     base_tags,
     data_version,
     log_model_with_signature,
@@ -205,9 +219,43 @@ def save_series_figure(path: Path, keys: pd.DataFrame, y_true, y_pred, title: st
     plt.close(figure)
 
 
-def log_evaluation(model, X, y, keys, mask, prefix: str, title: str) -> dict[str, float]:
-    """Score one split, log its metrics and its real-vs-predicted figure in the active run."""
-    predicted = model.predict(X.loc[mask])
+def _save_residual_figures(folder: Path, y_true, y_pred, prefix: str, title: str) -> None:
+    """Draw station-hour residuals, using all rows in split order (no sampling).
+
+    Arrays deliberately discard the pandas index: predictions are in input row order,
+    including when the split keeps a non-consecutive index from the prepared dataset.
+    """
+    predicted = np.asarray(y_pred, dtype=float)
+    residuals = np.asarray(y_true, dtype=float) - predicted
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    try:
+        axis.scatter(predicted, residuals, s=8, alpha=0.25, rasterized=True)
+        axis.axhline(0, color="black", linewidth=1, linestyle="--")
+        axis.set_title(f"Residuales vs. predicción ({title})")
+        axis.set_xlabel("Predicción de viajes iniciados")
+        axis.set_ylabel("Residual (real − predicho)")
+        figure.tight_layout()
+        figure.savefig(folder / f"{prefix}residuals_vs_predicted.png", bbox_inches="tight")
+    finally:
+        plt.close(figure)
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    try:
+        axis.hist(residuals, bins=50, color="tab:blue", edgecolor="white")
+        axis.set_title(f"Distribución de residuales ({title})")
+        axis.set_xlabel("Residual (real − predicho)")
+        axis.set_ylabel("Frecuencia")
+        figure.tight_layout()
+        figure.savefig(folder / f"{prefix}residuals_histogram.png", bbox_inches="tight")
+    finally:
+        plt.close(figure)
+
+
+def log_evaluation(
+    model, X, y, keys, mask, prefix: str, title: str, *, predicted=None
+) -> dict[str, float]:
+    """Score one split and log coherent metrics and diagnostics in the active run."""
+    if predicted is None:
+        predicted = model.predict(X.loc[mask])
     split_metrics = metrics(y.loc[mask], predicted, prefix)
     mlflow.log_metrics(split_metrics)
     if f"{prefix}wape" not in split_metrics:
@@ -215,15 +263,22 @@ def log_evaluation(model, X, y, keys, mask, prefix: str, title: str) -> dict[str
     with tempfile.TemporaryDirectory() as folder:
         figure = Path(folder) / f"{prefix}real_vs_predicted.png"
         save_series_figure(figure, keys.loc[mask], y.loc[mask], predicted, title)
-        mlflow.log_artifact(str(figure))
+        _save_residual_figures(Path(folder), y.loc[mask], predicted, prefix, title)
+        mlflow.log_artifacts(folder, artifact_path="plots")
     return split_metrics
 
 
-def train_and_log(name, model, model_params, data, seed, manifest, stage="baseline") -> dict:
+def train_and_log(
+    name, model, model_params, data, seed, manifest, stage="baseline", *, _run=None
+) -> dict:
     """Fit one candidate on train rows, evaluate it on validation and log the run in MLflow."""
     X, y, keys, masks = data["X"], data["y"], data["keys"], data["masks"]
+    for split in ("train", "validation"):
+        if not masks[split].any():
+            raise ValueError(f"{split} split is empty after temporal eligibility filtering")
     X_train = X.loc[masks["train"]]
-    model.fit(X_train, y.loc[masks["train"]])
+    y_train = y.loc[masks["train"]]
+    X_validation = X.loc[masks["validation"]]
     params = {
         "study_year": STUDY_YEAR,
         "seed": seed,
@@ -241,15 +296,40 @@ def train_and_log(name, model, model_params, data, seed, manifest, stage="baseli
         "warmup_policy": WARMUP_POLICY,
         "postprocessing": POSTPROCESSING,
         "refit": False,
+        "predict_batch_size": len(X_validation),
+        "cost_measurement_protocol": (
+            "perf_counter; one full pipeline fit on train; one full pipeline predict on "
+            "validation; predict_ms_per_1k = seconds * 1000000 / validation rows; "
+            "excludes data loading, logging, plots and signature inference; no warm-up"
+        ),
         **model_params,
     }
-    with mlflow.start_run(run_name=name) as run:
+    # The search owns its Trial context; individual training owns its own run.
+    with nullcontext(_run) if _run is not None else mlflow.start_run(run_name=name) as run:
         mlflow.log_params(params)
         mlflow.set_tags(base_tags("p1", model_params["model"], stage))
         log_run_context(params)
         log_training_input(X_train, data["source"], "p1-train")
+        fit_started = perf_counter()
+        model.fit(X_train, y_train)
+        fit_seconds = perf_counter() - fit_started
+        predict_started = perf_counter()
+        predicted = model.predict(X_validation)
+        predict_seconds = perf_counter() - predict_started
+        costs = {
+            "fit_seconds": fit_seconds,
+            "predict_ms_per_1k": predict_seconds * 1_000_000 / len(X_validation),
+        }
+        mlflow.log_metrics(costs)
         val_metrics = log_evaluation(
-            model, X, y, keys, masks["validation"], "val_", f"{name}, validación"
+            model,
+            X,
+            y,
+            keys,
+            masks["validation"],
+            "val_",
+            f"{name}, validación",
+            predicted=predicted,
         )
         # skops rejects the custom estimators and the station-text function of make_preprocessor;
         # the bundle is loaded only from our own trusted runs (feature-engineering.md, section 6)
@@ -260,11 +340,52 @@ def train_and_log(name, model, model_params, data, seed, manifest, stage="baseli
         )
         run_id = run.info.run_id
     logger.success(f"{name}: run {run_id} logged")
-    return {"run_id": run_id, "run_name": name, "model": model, **val_metrics}
+    return {"run_id": run_id, "run_name": name, "model": model, **val_metrics, **costs}
+
+
+def _nominal_categories(frame):
+    """Preserve ordinal codes as nominal labels, not a numeric station ordering."""
+    return frame.astype("category")
+
+
+def _hist_preprocessor(X):
+    """Train-only, bounded-width representation local to histogram boosting.
+
+    Native categorical splits avoid a dense station one-hot matrix. When a feature has
+    more than 255 categories, infrequent train categories share the last bin; unseen
+    categories encode to -1 and are handled as missing by histogram boosting.
+    """
+    categorical = [
+        column
+        for column in X
+        if column in {"station_id", "municipality"}
+        or pd.api.types.is_string_dtype(X[column].dtype)
+        or isinstance(X[column].dtype, pd.CategoricalDtype)
+    ]
+    numeric = [column for column in X if column not in categorical]
+    return ColumnTransformer(
+        [
+            ("numeric", SimpleImputer(strategy="median", keep_empty_features=True), numeric),
+            (
+                "categorical",
+                make_pipeline(
+                    FunctionTransformer(_category_text, feature_names_out="one-to-one"),
+                    OrdinalEncoder(
+                        handle_unknown="use_encoded_value",
+                        unknown_value=-1,
+                        max_categories=255,
+                    ),
+                    FunctionTransformer(_nominal_categories, feature_names_out="one-to-one"),
+                ),
+                categorical,
+            ),
+        ],
+        remainder="drop",
+    ).set_output(transform="pandas")
 
 
 def candidates(seed: int) -> dict:
-    """Return the three candidates of the ML Canvas, each with its own new pipeline."""
+    """Return reference configurations and additional families, with fresh pipelines."""
 
     def pipeline(model_name, estimator, **preprocessing):
         def build(X):
@@ -275,6 +396,15 @@ def candidates(seed: int) -> dict:
         # Params come from the estimator itself, so the run logs exactly what was trained
         return build, {"model": model_name, **estimator.get_params(), **preprocessing}
 
+    def build_hist(X):
+        return NonNegativeRegressor(make_pipeline(_hist_preprocessor(X), hist_estimator))
+
+    hist_estimator = HistGradientBoostingRegressor(
+        loss="poisson",
+        random_state=seed,
+        early_stopping=False,
+        categorical_features="from_dtype",
+    )
     return {
         "regression-baseline-seasonal-mean": (
             lambda X: NonNegativeRegressor(SeasonalMeanRegressor()),
@@ -300,6 +430,32 @@ def candidates(seed: int) -> dict:
             ),
             numeric_scaling="none",
         ),
+        "regression-candidate-lightgbm-tweedie": pipeline(
+            "lightgbm_tweedie",
+            LGBMRegressor(
+                objective="tweedie",
+                tweedie_variance_power=1.5,
+                n_estimators=300,
+                learning_rate=0.05,
+                num_leaves=63,
+                min_child_samples=100,
+                random_state=seed,
+                n_jobs=-1,
+                verbose=-1,
+            ),
+            numeric_scaling="none",
+        ),
+        "regression-candidate-hist-gradient-boosting": (
+            build_hist,
+            {
+                "model": "hist_gradient_boosting",
+                **hist_estimator.get_params(),
+                "numeric_scaling": "none",
+                "categorical_encoding": "ordinal_native",
+                "categorical_max_categories": 255,
+                "categorical_unknown_value": -1,
+            },
+        ),
     }
 
 
@@ -317,6 +473,19 @@ def with_hyperparams(model, model_params: dict, hyperparams: dict) -> tuple:
     return model, {**model_params, **hyperparams}
 
 
+def _prepared_data(features_dir: Path) -> tuple[dict, dict]:
+    """Assemble the shared prepared rows, temporal masks and manifest."""
+    X, keys, y, manifest = load_prepared(features_dir)
+    data = {
+        "X": X,
+        "y": y,
+        "keys": keys,
+        "masks": split_masks(X, keys),
+        "source": features_dir / "X.parquet",
+    }
+    return data, manifest
+
+
 def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
     """Train and log one P1 model in one run: the unit of the MLflow ``train`` entry point.
 
@@ -327,22 +496,154 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
         raise ValueError(f"model must be one of {sorted(specs)}, got {model!r}")
     # Before loading 2M rows, so a stopped tracking server fails at once
     setup_experiment()
-    X, keys, y, manifest = load_prepared(REGRESSION_FEATURES_DIR)
-    data = {
-        "X": X,
-        "y": y,
-        "keys": keys,
-        "masks": split_masks(X, keys),
-        "source": REGRESSION_FEATURES_DIR / "X.parquet",
-    }
+    data, manifest = _prepared_data(REGRESSION_FEATURES_DIR)
     build, model_params = specs[model]
-    estimator = build(X)
+    estimator = build(data["X"])
     if hyperparams:
         estimator, model_params = with_hyperparams(estimator, model_params, hyperparams)
     record = train_and_log(
         f"p1-{stage}-{model}", estimator, model_params, data, seed, manifest, stage
     )
     return record["run_id"]
+
+
+@contextmanager
+def _search_study():
+    """Adopt the project run, retaining ownership of a caller's active context."""
+    active = mlflow.active_run()
+    project_id = os.environ.get("MLFLOW_RUN_ID")
+    if active is not None and project_id not in {None, active.info.run_id}:
+        raise ValueError("Active run does not match the MLflow Project run")
+    existing = active or (mlflow.get_run(project_id) if project_id else None)
+    if existing is not None:
+        expected = mlflow.get_experiment_by_name(EXPERIMENT_NAME).experiment_id
+        if existing.info.experiment_id != expected:
+            raise ValueError("Study must belong to the shared experiment")
+        tags = existing.data.tags
+        identity = {
+            "question": "p1",
+            "model_family": "lightgbm",
+            "stage_of_work": "search",
+        }
+        identified_study = all(tags.get(key) == value for key, value in identity.items())
+        if (
+            "mlflow.parentRunId" in tags
+            or any(tags.get(key, value) != value for key, value in identity.items())
+            or (project_id is None and not identified_study)
+        ):
+            raise ValueError("Active/project run is not a compatible P1 Study")
+    if active is None:
+        # start_run consumes MLFLOW_RUN_ID when MLflow Project supplied it, so the
+        # following nested starts create Trials rather than resuming the Study.
+        with mlflow.start_run(run_name="p1-search-lightgbm") as study:
+            yield study
+    else:
+        # A caller may already have activated the project run without consuming the
+        # environment hint. Hide it from the nested starts, then restore caller state.
+        inherited = os.environ.pop("MLFLOW_RUN_ID", None)
+        try:
+            yield active
+        except Exception:
+            mlflow.MlflowClient().set_terminated(active.info.run_id, status="FAILED")
+            raise
+        finally:
+            if inherited is not None:
+                os.environ["MLFLOW_RUN_ID"] = inherited
+
+
+def _log_search_results(rows):
+    columns = [
+        "run_id",
+        "status",
+        "learning_rate",
+        "num_leaves",
+        "n_estimators",
+        "val_mae",
+        "val_rmse",
+        "val_wape",
+        "fit_seconds",
+        "predict_ms_per_1k",
+        "selected",
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        table_path = Path(folder) / "search_results.csv"
+        pd.DataFrame(rows, columns=columns).to_csv(table_path, index=False)
+        mlflow.log_artifact(str(table_path), artifact_path="search")
+
+
+def search(model: str = "lightgbm", seed: int = SEED) -> str:
+    """Compare eight Poisson Trials on validation, returning the Study run identifier.
+
+    Models are logged in their Trials, not retained or refitted for selection. December
+    is never scored by search; winning this grid does not promote a champion.
+    """
+    if model != "lightgbm":
+        raise ValueError(f"P1 search supports only 'lightgbm', got {model!r}")
+    setup_experiment()
+    data, manifest = _prepared_data(REGRESSION_FEATURES_DIR)
+    build, reference_params = next(
+        spec for spec in candidates(seed).values() if spec[1]["model"] == model
+    )
+    space = {"learning_rate": [0.03, 0.05], "num_leaves": [31, 63], "n_estimators": [200, 300]}
+    rows = []
+    with _search_study() as study:
+        mlflow.set_tags(
+            {
+                **base_tags("p1", model, "search"),
+                "mlflow.runName": "p1-search-lightgbm",
+                "hypothesis": "Poisson tree complexity and learning rate improve validation WAPE",
+                "objective": "minimize val_wape",
+            }
+        )
+        mlflow.log_params({"seed": seed, "search_space": json.dumps(space)})
+        try:
+            for index, values in enumerate(product(*space.values()), start=1):
+                hyperparams = dict(zip(space, values))
+                estimator, params = with_hyperparams(
+                    build(data["X"]), reference_params, hyperparams
+                )
+                name = f"p1-search-lightgbm-trial-{index:02d}"
+                with mlflow.start_run(
+                    run_name=name, nested=True, parent_run_id=study.info.run_id
+                ) as trial:
+                    try:
+                        record = train_and_log(
+                            name, estimator, params, data, seed, manifest, "search", _run=trial
+                        )
+                    except Exception:
+                        rows.append(
+                            {
+                                "run_id": trial.info.run_id,
+                                "status": "FAILED",
+                                **hyperparams,
+                                "selected": False,
+                            }
+                        )
+                        raise
+                # Do not retain fitted pipelines while comparing scalar results.
+                del estimator
+                record.pop("model")
+                record.pop("run_name")
+                if "val_wape" not in record:
+                    status = "WAPE_UNDEFINED"
+                else:
+                    status = "FINISHED" if np.isfinite(record["val_wape"]) else "WAPE_NONFINITE"
+                rows.append({**record, "status": status, **hyperparams, "selected": False})
+            selectable = [row for row in rows if row["status"] == "FINISHED"]
+            if not selectable:
+                raise ValueError("P1 search has no selectable Trial with finite validation WAPE")
+            winner = min(selectable, key=lambda row: row["val_wape"])
+            winner["selected"] = True
+            mlflow.log_metric("best_val_wape", winner["val_wape"])
+            mlflow.set_tag("best_run_id", winner["run_id"])
+        except Exception:
+            try:
+                _log_search_results(rows)
+            except Exception:  # noqa: BLE001 - Diagnostics must not replace the training error.
+                logger.exception("Could not persist partial P1 search table")
+            raise
+        _log_search_results(rows)
+        return study.info.run_id
 
 
 @app.callback()
@@ -355,21 +656,20 @@ def regression(
     features_dir: Path = REGRESSION_FEATURES_DIR,
     seed: int = SEED,
 ):
-    """Train the three candidates, select on validation WAPE and test the winner once."""
-    X, keys, y, manifest = load_prepared(features_dir)
-    data = {
-        "X": X,
-        "y": y,
-        "keys": keys,
-        "masks": split_masks(X, keys),
-        "source": features_dir / "X.parquet",
-    }
+    """Train the catalog, select on validation WAPE and test the winner once."""
+    data, manifest = _prepared_data(features_dir)
+    X, y, keys = data["X"], data["y"], data["keys"]
     # The tracking server and the shared experiment come from modeling/common.py
     setup_experiment()
     records = []
     for name, (build, model_params) in candidates(seed).items():
         logger.info(f"Training {name}")
-        records.append(train_and_log(name, build(X), model_params, data, seed, manifest))
+        stage = (
+            "baseline"
+            if model_params["model"] in {"seasonal_mean", "ridge", "lightgbm"}
+            else "candidate"
+        )
+        records.append(train_and_log(name, build(X), model_params, data, seed, manifest, stage))
     table = pd.DataFrame(records).set_index("run_name")
     selected = table["val_wape"].idxmin()
     logger.success(f"Selected on validation WAPE: {selected}")

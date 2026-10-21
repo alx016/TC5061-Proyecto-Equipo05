@@ -176,7 +176,7 @@ def test_logged_params_match_the_trained_estimator():
             assert params[key] == value, f"{name}: {key}"
 
 
-def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monkeypatch):
+def test_cli_trains_catalog_and_tests_only_the_selected(tmp_path, monkeypatch):
     folder = write_prepared(tmp_path)
     # MLflow writes artifacts to ./mlruns, so run from tmp_path to keep the repo folder clean
     monkeypatch.chdir(tmp_path)
@@ -193,7 +193,27 @@ def test_cli_trains_three_candidates_and_tests_only_the_selected(tmp_path, monke
     finally:
         mlflow.set_tracking_uri(previous_uri)
 
-    assert len(runs) == 3
+    assert len(runs) == 5
+    assert set(runs["params.model"]) == {
+        "seasonal_mean",
+        "ridge",
+        "lightgbm",
+        "lightgbm_tweedie",
+        "hist_gradient_boosting",
+    }
+    assert runs.set_index("params.model")["tags.stage_of_work"].to_dict() == {
+        "seasonal_mean": "baseline",
+        "ridge": "baseline",
+        "lightgbm": "baseline",
+        "lightgbm_tweedie": "candidate",
+        "hist_gradient_boosting": "candidate",
+    }
+    # Reference configurations remain unchanged when adding families.
+    ridge = runs.loc[runs["params.model"].eq("ridge")].iloc[0]
+    assert ridge["params.alpha"] == "1.0"
+    poisson = runs.loc[runs["params.model"].eq("lightgbm")].iloc[0]
+    assert poisson["params.objective"] == "poisson"
+    assert poisson["params.n_estimators"] == "300"
     assert runs["metrics.val_wape"].notna().all()
     # Every run records the hours that really entered each split
     for column in ("train_start", "train_end", "val_start", "val_end", "test_start", "test_end"):
