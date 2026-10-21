@@ -19,7 +19,11 @@ from loguru import logger
 import typer
 
 from tc5061_proyecto_equipo5.config import SEED
-from tc5061_proyecto_equipo5.modeling import train_classification, train_regression
+from tc5061_proyecto_equipo5.modeling import (
+    train_classification,
+    train_clustering,
+    train_regression,
+)
 from tc5061_proyecto_equipo5.modeling.common import STAGES, TASKS
 
 app = typer.Typer()
@@ -27,6 +31,7 @@ app = typer.Typer()
 TRAINERS = {
     "p1": train_regression.train_one,
     "p2": train_classification.train_one,
+    "p3": train_clustering.train_one,
 }
 # The "not set" value of every numeric option (seeds and hyperparameters are never negative)
 UNSET = -1
