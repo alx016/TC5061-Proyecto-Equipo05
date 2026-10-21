@@ -45,8 +45,10 @@ entry_points:
   search:
     parameters:
       question: {type: string}
-      model: {type: string}
-    command: "python -m tc5061_proyecto_equipo5.modeling.search --question {question} --model {model}"
+      model: {type: string, default: lightgbm}
+    command: >-
+      python -m tc5061_proyecto_equipo5.modeling.search
+      --question {question} --model {model}
 
   select:
     parameters:

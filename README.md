@@ -114,7 +114,7 @@ puerto 5000 lo ocupa AirPlay, por eso se usa el 5001.
 
 | Pregunta | Script | Candidatos | Selección |
 |:---|:---|:---|:---|
-| P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson | Menor WAPE de validación; solo el run `selected=true` se evalúa en test |
+| P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson, LightGBM Tweedie, HistGradientBoosting Poisson | `regression` elige por WAPE de validación y evalúa solo su finalista en test |
 | P2 | `modeling/train_classification.py` | Persistencia, clase mayoritaria, regresión logística, LightGBM balanceado y sin balancear, HistGradientBoosting y Random Forest | Mayor macro-F1 de validación con guardrails de recall de desabasto (`>= 0.85`) y precisión mínima; si ninguno los cumple, se elige el mayor macro-F1 y se marca `selection_fallback=true`. Solo el run `selected=true` se evalúa en test |
 | P3 | `modeling/train_clustering.py` | K-Means con K=4 de referencia, K-Means con el mejor K, Ward | K con la mayor silhouette de validación |
 
@@ -125,6 +125,29 @@ elegido, evalúa test una sola vez y guarda las matrices de confusión, las curv
 `classification_report.txt` en `plots/test/`. `select` se ejecuta como entry point para que la
 corrida quede registrada como proyecto MLflow; rechaza runs con `git_dirty=true`, así que las
 pruebas locales sobre un árbol sucio deben usar el módulo directo con `--allow-dirty`.
+
+### Etapas de experimentación P1
+
+El catálogo de `regression` conserva promedio estacional, Ridge y LightGBM Poisson como
+referencias de la Entrega 1, con `stage_of_work=baseline`. La referencia LightGBM se llama
+`regression-baseline-lightgbm`.
+
+El entrypoint `train` ejecuta una configuración por corrida y usa `stage=candidate` por
+defecto. Para repetir la referencia LightGBM sin ajustar hiperparámetros:
+
+```bash
+uv run mlflow run . -e train -P question=p1 -P model=lightgbm -P stage=baseline \
+  --env-manager local
+```
+
+Esa corrida se llama `p1-baseline-lightgbm`. Para una variante ajustada, usar
+`-P stage=candidate` junto con los parámetros `hp_*`; no etiquetarla como baseline.
+
+En `search`, todas las Trials conservan `stage_of_work=search`. Solo la ganadora recibe
+`selected=true`, en correspondencia con `best_run_id` de la Study y la fila seleccionada
+del CSV. Para localizarla, filtrar por `question=p1`, `stage_of_work=search` y la Study
+(`mlflow.parentRunId`), además de `selected=true`. Este tag indica el mínimo WAPE del grid:
+no equivale a seleccionar el finalista entre familias, evaluar diciembre o promover un champion.
 
 Reglas comunes a los tres scripts:
 

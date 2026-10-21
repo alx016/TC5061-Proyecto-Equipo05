@@ -1,26 +1,37 @@
-"""Run the hyperparameter search of one question through the MLflow entry point."""
+"""Dispatch one question's search; the selected module owns its Study and Trials."""
 
+from typing import Annotated
+
+from loguru import logger
 import typer
 
-from tc5061_proyecto_equipo5.modeling import train_classification
+from tc5061_proyecto_equipo5.modeling import train_classification, train_regression
+from tc5061_proyecto_equipo5.modeling.common import TASKS
 
-# Each question registers its search implementation here, as ``train.py`` does with TRAINERS.
-SEARCHERS = {
-    "p2": train_classification.search,
-}
+app = typer.Typer()
+
+SEARCHERS = {"p1": train_regression.search}
+# Classification joins as soon as its experiment work package provides the searcher.
+if callable(getattr(train_classification, "search", None)):
+    SEARCHERS["p2"] = train_classification.search
 
 
+@app.command()
 def main(
-    question: str = typer.Option(..., help="p1, p2 or p3"),
-    model: str = typer.Option("lightgbm", help="Model name"),
-) -> None:
-    """Run the nested search of one question and model."""
+    question: Annotated[str, typer.Option(help="Question to search (p1 or p2)")],
+    model: Annotated[str, typer.Option(help="Model family to search")] = "lightgbm",
+):
+    """Run a search with the selected question's own configuration and seed defaults."""
+    if question not in TASKS:
+        raise typer.BadParameter(f"question must be one of {sorted(TASKS)}, got {question!r}")
     if question not in SEARCHERS:
-        raise typer.BadParameter(
-            f"search is not implemented for {question!r}; available: {sorted(SEARCHERS)}"
-        )
-    SEARCHERS[question](model)
+        raise typer.BadParameter(f"{question} has no search available (its experiment WP adds it)")
+    try:
+        run_id = SEARCHERS[question](model=model)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    logger.success(f"Study {run_id} logged")
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    app()
