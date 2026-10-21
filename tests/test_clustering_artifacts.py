@@ -7,9 +7,13 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy import sparse
-from sklearn.cluster import KMeans
+from sklearn.base import clone
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.exceptions import NotFittedError
+from sklearn.metrics.pairwise import euclidean_distances
 
 from tc5061_proyecto_equipo5.modeling.train_clustering import (
+    WardClusterer,
     choose_k,
     cluster_metrics,
     column_names,
@@ -125,3 +129,68 @@ def test_load_split_rejects_a_matrix_with_the_wrong_row_count(tmp_path):
 
     with pytest.raises(ValueError, match="rows but"):
         load_split(tmp_path, "train")
+
+
+def three_blobs() -> np.ndarray:
+    """Return 3 tight groups of 30 points around (0, 0), (5, 5) and (10, 0)."""
+    rng = np.random.default_rng(0)
+    return np.vstack(
+        [rng.normal(center, 0.1, size=(30, 2)) for center in ([0, 0], [5, 5], [10, 0])]
+    )
+
+
+def test_ward_clusterer_keeps_the_labels_of_ward():
+    X = three_blobs()
+
+    model = WardClusterer(n_clusters=3).fit(X)
+
+    expected = AgglomerativeClustering(n_clusters=3, linkage="ward").fit_predict(X)
+    np.testing.assert_array_equal(model.labels_, expected)
+    assert model.n_features_in_ == 2
+
+
+def test_ward_clusterer_centroids_are_the_train_cluster_means():
+    X = three_blobs()
+
+    model = WardClusterer(n_clusters=3).fit(X)
+
+    assert model.cluster_centers_.shape == (3, 2)
+    for group in range(3):
+        np.testing.assert_allclose(
+            model.cluster_centers_[group], X[model.labels_ == group].mean(axis=0)
+        )
+
+
+def test_ward_clusterer_predicts_the_label_of_the_nearest_blob():
+    X = three_blobs()
+    model = WardClusterer(n_clusters=3).fit(X)
+    centers = np.array([[0, 0], [5, 5], [10, 0]])
+
+    labels = model.predict(centers)
+
+    # Ward does not promise which number each blob gets, so compare with the train labels
+    np.testing.assert_array_equal(labels, model.labels_[[0, 30, 60]])
+
+
+def test_ward_clusterer_predict_before_fit_raises():
+    with pytest.raises(NotFittedError):
+        WardClusterer(n_clusters=3).predict(three_blobs())
+
+
+def test_ward_clusterer_supports_clone_and_get_params():
+    model = clone(WardClusterer(n_clusters=5))
+
+    assert model.get_params() == {"n_clusters": 5}
+
+
+def test_ward_clusterer_predict_matches_the_nearest_mean_rule():
+    X = three_blobs()
+    model = WardClusterer(n_clusters=3).fit(X)
+    new = np.random.default_rng(1).normal(5, 4, size=(50, 2))
+
+    labels = model.predict(new)
+
+    # The rule labels_for_splits used for Ward before the wrapper existed
+    ward_labels = AgglomerativeClustering(n_clusters=3, linkage="ward").fit_predict(X)
+    means = np.vstack([X[ward_labels == group].mean(axis=0) for group in range(3)])
+    np.testing.assert_array_equal(labels, euclidean_distances(new, means).argmin(axis=1))

@@ -29,9 +29,11 @@ import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from scipy import sparse
+from sklearn.base import BaseEstimator, ClusterMixin
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.metrics import davies_bouldin_score, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.utils.validation import check_is_fitted
 import typer
 
 from tc5061_proyecto_equipo5.config import (
@@ -58,6 +60,39 @@ K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
 REFERENCE_K = 4
 VALID_HYPERPARAMETERS = {"n_clusters"}
+
+
+class WardClusterer(ClusterMixin, BaseEstimator):
+    """Agglomerative Ward clustering with a ``predict`` method, so it can be logged and registered.
+
+    ``AgglomerativeClustering`` only labels the rows it was fitted on.  This wrapper keeps Ward's
+    train labels and assigns new stations (validation, December, production) to the nearest train
+    cluster mean, the same rule K-Means uses, so both models are compared like for like.  Because
+    Ward groups by hierarchy, ``predict`` on the train rows can disagree with ``labels_`` for a few
+    border stations.  Ward needs O(n^2) memory: fine for a few hundred stations, not for P1 rows.
+    """
+
+    def __init__(self, n_clusters=REFERENCE_K):
+        self.n_clusters = n_clusters
+
+    def fit(self, X: np.ndarray, y=None):
+        """Cluster the train rows with Ward and keep the mean of each cluster as its centroid.
+
+        ``y`` is ignored; it is accepted only to follow the scikit-learn API.
+        """
+        self.model_ = AgglomerativeClustering(n_clusters=self.n_clusters, linkage="ward")
+        self.labels_ = self.model_.fit_predict(X, y)
+        self.n_features_in_ = X.shape[1]
+
+        self.cluster_centers_ = np.vstack(
+            [X[self.labels_ == group].mean(axis=0) for group in sorted(set(self.labels_.tolist()))]
+        )
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Return the label of the nearest train centroid (Euclidean distance) for every row."""
+        check_is_fitted(self)
+        return euclidean_distances(X, self.cluster_centers_).argmin(axis=1)
 
 
 def load_manifest(base_dir: Path) -> dict:
