@@ -49,3 +49,21 @@ CLUSTERING_FEATURES_DIR = FEATURES_DIR / "p3"
 
 # Shared seed for every model and split, so runs are repeatable
 SEED = 42
+
+# P2 temporal protocol: labels must be closed before the first scoring of the next split.
+# The 10 minutes before the scoring are the budget to fit the model.
+P2_FIT_AS_OF = "2024-09-30 23:40"
+P2_SELECTION_AS_OF = "2024-11-30 23:40"
+
+# P2 selection guardrails. The canvas asks for recall_shortage >= 0.85; the precision
+# floors are a first, documented choice for the operational alerts.
+P2_MIN_RECALL_SHORTAGE = 0.85
+P2_MIN_PRECISION_SHORTAGE = 0.50
+P2_MIN_PRECISION_SATURATION = 0.50
+
+# Small grid for the nested LightGBM search: 3 x 3 x 1 = 9 child runs.
+P2_SEARCH_GRID = {
+    "learning_rate": (0.03, 0.05, 0.1),
+    "num_leaves": (31, 63, 127),
+    "min_child_samples": (100,),
+}

@@ -19,15 +19,28 @@ from loguru import logger
 import typer
 
 from tc5061_proyecto_equipo5.config import SEED
-from tc5061_proyecto_equipo5.modeling import train_regression
+from tc5061_proyecto_equipo5.modeling import train_classification, train_regression
 from tc5061_proyecto_equipo5.modeling.common import STAGES, TASKS
 
 app = typer.Typer()
 
-# P2 and P3 join when their experiment work packages add train_one to their scripts
-TRAINERS = {"p1": train_regression.train_one}
+# P3 joins when its experiment work package adds train_one to its script
+TRAINERS = {
+    "p1": train_regression.train_one,
+    "p2": train_classification.train_one,
+}
 # The "not set" value of every numeric option (seeds and hyperparameters are never negative)
 UNSET = -1
+# MLflow passes every numeric value as text; these ones must reach sklearn as integers.
+INTEGER_PARAMS = {
+    "n_estimators",
+    "num_leaves",
+    "min_child_samples",
+    "max_depth",
+    "min_samples_leaf",
+    "max_leaf_nodes",
+    "n_clusters",
+}
 
 
 @app.command()
@@ -36,12 +49,16 @@ def main(
     model: Annotated[str, typer.Option(help="Model name, e.g. seasonal_mean or lightgbm")],
     stage: Annotated[str, typer.Option(help="baseline, search or candidate")] = "candidate",
     seed: int = UNSET,
-    n_estimators: int = UNSET,
+    n_estimators: float = UNSET,
     learning_rate: float = UNSET,
-    num_leaves: int = UNSET,
+    num_leaves: float = UNSET,
+    min_child_samples: float = UNSET,
+    max_depth: float = UNSET,
+    min_samples_leaf: float = UNSET,
+    max_leaf_nodes: float = UNSET,
     alpha: float = UNSET,
     c: Annotated[float, typer.Option("--c", help="Inverse regularization (C)")] = UNSET,
-    n_clusters: int = UNSET,
+    n_clusters: float = UNSET,
 ):
     """Train and log one model of one question in its own MLflow run."""
     if question not in TASKS:
@@ -55,12 +72,20 @@ def main(
         "n_estimators": n_estimators,
         "learning_rate": learning_rate,
         "num_leaves": num_leaves,
+        "min_child_samples": min_child_samples,
+        "max_depth": max_depth,
+        "min_samples_leaf": min_samples_leaf,
+        "max_leaf_nodes": max_leaf_nodes,
         "alpha": alpha,
         "C": c,
         "n_clusters": n_clusters,
     }
-    hyperparams = {name: value for name, value in given.items() if value != UNSET}
-    run_seed = SEED if seed == UNSET else seed
+    hyperparams = {
+        name: int(value) if name in INTEGER_PARAMS else value
+        for name, value in given.items()
+        if value != UNSET
+    }
+    run_seed = SEED if seed == UNSET else int(seed)
 
     logger.info(f"Training {question} {model} ({stage}) with {hyperparams or 'its defaults'}")
     run_id = TRAINERS[question](model, stage, run_seed, hyperparams)

@@ -237,11 +237,13 @@ def test_split_months():
             "2024-12-31 23:00",
         ]
     )
-    panel = make_flow_panel(hours, {1: [0.0] * len(hours)})
+    panel = add_target(make_flow_panel(hours, {1: [0.0] * len(hours)}))
 
     split = add_split(panel)["split"].tolist()
 
-    assert split == ["train", "train", "validation", "validation", "test", "test"]
+    # The split follows the TARGET hour (feature hour + 1), so the last hour of each month
+    # belongs to the next split.  The last row has no target and is left in test.
+    assert split == ["train", "validation", "validation", "test", "test", "test"]
 
 
 def test_calendar():
