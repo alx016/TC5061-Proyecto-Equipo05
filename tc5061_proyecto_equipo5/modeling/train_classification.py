@@ -661,7 +661,12 @@ def choose_run(
 
 
 def search(model: str = "lightgbm", seed: int = SEED) -> str:
-    """Run a small nested grid search over LightGBM hyperparameters."""
+    """Run a small nested grid search and promote its winner to a candidate.
+
+    Trials compare configurations on validation only and do not keep a model.  The winning
+    combination is rebuilt with the same seed and trained once more as a ``candidate`` run that
+    logs its model, so ``select`` can compare it like any other candidate.
+    """
     available = candidates(seed)
     if model not in available:
         raise ValueError(f"model must be one of {sorted(available)}, got {model!r}")
@@ -677,6 +682,8 @@ def search(model: str = "lightgbm", seed: int = SEED) -> str:
         mlflow.set_tags(base_tags("p2", model, "search"))
         mlflow.log_param("search_space", json.dumps(P2_SEARCH_GRID))
         mlflow.log_param("n_trials", len(combinations))
+        mlflow.log_param("data_version", data_version())
+        parent_id = parent.info.run_id
 
         records = []
         for index, values in enumerate(combinations):
@@ -693,7 +700,7 @@ def search(model: str = "lightgbm", seed: int = SEED) -> str:
                 nested=True,
                 log_model=False,
             )
-            records.append(record)
+            records.append({**record, "hyperparams": hyperparams})
 
         table = pd.DataFrame(records)
         with tempfile.TemporaryDirectory() as folder:
@@ -704,9 +711,29 @@ def search(model: str = "lightgbm", seed: int = SEED) -> str:
         best = table.sort_values("val_macro_f1", ascending=False).iloc[0]
         mlflow.log_metric("best_val_macro_f1", float(best["val_macro_f1"]))
         mlflow.log_param("best_run_id", best["run_id"])
-        parent_id = parent.info.run_id
 
-    logger.success(f"Search finished in run {parent_id}; best child {best['run_id']}")
+        # Retrain the winning configuration as a selectable candidate (validation only).
+        estimator, model_params = build_model(model, seed, best["hyperparams"])
+        candidate = train_and_log(
+            name=f"p2-candidate-{model}-search-winner",
+            model=estimator,
+            model_params=model_params,
+            data=data,
+            seed=seed,
+            stage="candidate",
+            model_family=model,
+            nested=True,
+            log_model=True,
+        )
+        client = mlflow.MlflowClient()
+        client.set_tag(candidate["run_id"], "search_parent_run_id", parent_id)
+        client.set_tag(candidate["run_id"], "source_trial_run_id", best["run_id"])
+        mlflow.log_param("best_candidate_run_id", candidate["run_id"])
+
+    logger.success(
+        f"Search finished in run {parent_id}; best child {best['run_id']} "
+        f"promoted to candidate {candidate['run_id']}"
+    )
     return parent_id
 
 
