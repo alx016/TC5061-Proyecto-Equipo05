@@ -52,10 +52,12 @@ from tc5061_proyecto_equipo5.modeling.common import (
 app = typer.Typer()
 
 SPLITS = ("train", "validation", "test")
+MODELS = ("kmeans",)
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
 REFERENCE_K = 4
+VALID_HYPERPARAMETERS = {"n_clusters"}
 
 
 def load_manifest(base_dir: Path) -> dict:
@@ -410,6 +412,49 @@ def load_data(base_dir: Path) -> dict:
     data["windows"] = {split: window_labels(keys) for split, keys in data["keys"].items()}
 
     return data
+
+
+def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
+    """Train and log one P3 model in one run: the unit of the MLflow ``train`` entry point."""
+
+    if model not in MODELS:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}")
+
+    diff_hip = set(hyperparams) - set(VALID_HYPERPARAMETERS)
+    if diff_hip:
+        raise ValueError(
+            f"P3 models only accept {sorted(VALID_HYPERPARAMETERS)}, got {sorted(diff_hip)}"
+        )
+
+    setup_experiment()
+    data = load_data(CLUSTERING_FEATURES_DIR)
+    best_k, k_table = choose_k(
+        data["matrices"]["train"], data["matrices"]["validation"], K_VALUES, seed
+    )
+    data["k_table"] = k_table
+
+    if "n_clusters" in hyperparams:
+        k_selection = "given on CLI"
+        k = hyperparams["n_clusters"]
+    else:
+        k_selection = "validation silhouette; December never used"
+        k = best_k
+
+    estimator = KMeans(n_clusters=k, n_init=10, random_state=seed)
+
+    result = train_and_log(
+        f"p3-{stage}-{model}-k{k}",
+        estimator,
+        model,
+        data,
+        seed,
+        model_params={"n_init": 10, "init": "k-means++", "k_selection": k_selection},
+        figure_title=f"Perfiles horarios medios por clúster — K-Means, K={k} (ventana de ajuste)",
+        log_model=True,
+        stage=stage,
+    )
+
+    return result["run_id"]
 
 
 @app.command()
