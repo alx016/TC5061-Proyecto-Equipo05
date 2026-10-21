@@ -44,6 +44,41 @@ def test_calibrate_thresholds_meets_the_recall_floor_and_returns_no_fallback():
     assert thresholds[2] in train_classification.P2_THRESHOLD_GRID
 
 
+def test_calibrate_thresholds_matches_a_brute_force_search():
+    rng = np.random.default_rng(7)
+    y_true = rng.choice([0, 1, 2], size=200, p=[0.7, 0.15, 0.15])
+    proba = rng.dirichlet([1.0, 0.3, 0.3], size=200)
+    classes = np.array([0, 1, 2])
+
+    expected_best = None
+    for threshold_shortage in train_classification.P2_THRESHOLD_GRID:
+        for threshold_saturation in train_classification.P2_THRESHOLD_GRID:
+            prediction = train_classification.apply_thresholds(
+                proba,
+                classes,
+                {1: threshold_shortage, 2: threshold_saturation},
+            )
+            macro = train_classification.f1_score(
+                y_true, prediction, labels=[0, 1, 2], average="macro", zero_division=0
+            )
+            recall = train_classification.recall_score(
+                y_true == 1, prediction == 1, zero_division=0
+            )
+            if recall >= train_classification.P2_MIN_RECALL_SHORTAGE:
+                if expected_best is None or macro > expected_best[0]:
+                    expected_best = (
+                        macro,
+                        threshold_shortage,
+                        threshold_saturation,
+                    )
+
+    thresholds, fallback = train_classification.calibrate_thresholds(y_true, proba, classes)
+
+    assert fallback is (expected_best is None)
+    if expected_best is not None:
+        assert thresholds == {1: expected_best[1], 2: expected_best[2]}
+
+
 def test_calibrate_thresholds_falls_back_when_recall_is_unreachable():
     # No probability ever crosses the grid, so no pair can recall the shortage class.
     y_true = np.array([1] * 10 + [2] * 10 + [0] * 40)

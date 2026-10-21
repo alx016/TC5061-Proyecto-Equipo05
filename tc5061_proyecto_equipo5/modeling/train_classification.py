@@ -388,34 +388,53 @@ def calibrate_thresholds(
     y = np.asarray(y_true)
     shortage = np.asarray(proba)[:, positions[1]]
     saturation = np.asarray(proba)[:, positions[2]]
-    has_shortage = bool((y == 1).any())
+    grid = np.asarray(P2_THRESHOLD_GRID, dtype=float)
 
-    best_any = None
-    best_constrained = None
-    for threshold_shortage in P2_THRESHOLD_GRID:
-        above_shortage = shortage >= threshold_shortage
-        for threshold_saturation in P2_THRESHOLD_GRID:
-            prediction = _labels_from_masks(
-                shortage,
-                saturation,
-                above_shortage,
-                saturation >= threshold_saturation,
-            )
-            macro_f1 = f1_score(y, prediction, labels=[0, 1, 2], average="macro", zero_division=0)
-            recall_shortage = (
-                recall_score(y == 1, prediction == 1, zero_division=0) if has_shortage else 0.0
-            )
-            rank = (float(macro_f1), float(recall_shortage))
-            if best_any is None or rank > best_any[0]:
-                best_any = (rank, threshold_shortage, threshold_saturation)
-            if recall_shortage >= min_recall_shortage and (
-                best_constrained is None or rank > best_constrained[0]
-            ):
-                best_constrained = (rank, threshold_shortage, threshold_saturation)
+    # Evaluate all 19 x 19 threshold pairs at once.  A prediction is shortage when the
+    # shortage score crosses its threshold and the saturation score does not (or both cross
+    # and shortage is at least as probable); saturation is symmetric; balanced is neither.
+    above_shortage = shortage[:, None] >= grid[None, :]
+    above_saturation = saturation[:, None] >= grid[None, :]
+    shortage_wins_ties = shortage >= saturation
+    shortage_condition = (~above_saturation) | shortage_wins_ties[:, None]
+    saturation_condition = (~above_shortage) | (~shortage_wins_ties)[:, None]
 
-    fallback = best_constrained is None
-    _, threshold_shortage, threshold_saturation = best_constrained or best_any
-    return {1: float(threshold_shortage), 2: float(threshold_saturation)}, fallback
+    truth = {cls: (y == cls)[:, None] for cls in (0, 1, 2)}
+
+    def intersection(mask, condition) -> np.ndarray:
+        """Count mask[:, i] & condition[:, j] for every threshold pair."""
+        return mask.astype(np.int32).T @ condition.astype(np.int32)
+
+    true_positive = {
+        1: intersection(above_shortage & truth[1], shortage_condition),
+        2: intersection(above_saturation & truth[2], saturation_condition).T,
+        0: intersection((~above_shortage) & truth[0], ~above_saturation),
+    }
+    false_positive = {
+        1: intersection(above_shortage & ~truth[1], shortage_condition),
+        2: intersection(above_saturation & ~truth[2], saturation_condition).T,
+        0: intersection((~above_shortage) & ~truth[0], ~above_saturation),
+    }
+    support = np.bincount(y, minlength=3).astype(float)
+
+    def f1(tp, fp, false_negative):
+        denominator = 2 * tp + fp + false_negative
+        return np.divide(
+            2 * tp, denominator, out=np.zeros_like(tp, dtype=float), where=denominator > 0
+        )
+
+    scores = [
+        f1(true_positive[cls], false_positive[cls], support[cls] - true_positive[cls])
+        for cls in (0, 1, 2)
+    ]
+    macro_f1 = np.mean(scores, axis=0)
+    recall_shortage = true_positive[1] / support[1] if support[1] > 0 else np.zeros_like(macro_f1)
+
+    constrained = np.where(recall_shortage >= min_recall_shortage, macro_f1, -np.inf)
+    fallback = not np.isfinite(constrained).any()
+    best = int(np.argmax(constrained if not fallback else macro_f1))
+    index_shortage, index_saturation = np.unravel_index(best, macro_f1.shape)
+    return {1: float(grid[index_shortage]), 2: float(grid[index_saturation])}, fallback
 
 
 def metrics(y_true, y_pred, proba, classes, prefix: str) -> dict[str, float]:
