@@ -182,16 +182,17 @@ def test_choose_run_allows_dirty_runs_for_local_work():
     assert chosen["run_id"] == "dirty-best"
 
 
-def test_persistence_baseline_uses_the_lag_two_ratio():
+def test_persistence_baseline_uses_the_normalized_lag_two_flow():
+    # net_flow_lag2 is already divided by capacity in features.py; capacity must not be used again.
     X = pd.DataFrame(
         {
-            "capacity": [10, 10, 10, 10],
-            "net_flow_lag2": [-5, 5, 0, 3],
+            "capacity": [20, 20, 20, 20],
+            "net_flow_lag2": [-0.5, 0.0, 0.5, 0.39],
         }
     )
     model = train_classification.PersistenceRiskClassifier(tau=0.4).fit(X, [0, 0, 0, 0])
 
-    assert model.predict(X).tolist() == [1, 2, 0, 0]
+    assert model.predict(X).tolist() == [1, 0, 2, 0]
     assert model.predict_proba(X).shape == (4, 3)
 
 
@@ -199,15 +200,15 @@ def test_persistence_baseline_accepts_arrays_in_feature_column_order():
     X = pd.DataFrame(
         {column: [0.0, 0.0, 0.0, 0.0] for column in train_classification.FEATURE_COLUMNS}
     )
-    X["capacity"] = 10.0
-    X["net_flow_lag2"] = [-5.0, 5.0, 0.0, 3.0]
+    X["capacity"] = 20.0
+    X["net_flow_lag2"] = [-0.5, 0.0, 0.5, 0.39]
     model = train_classification.PersistenceRiskClassifier(tau=0.4).fit(X, [0, 0, 0, 0])
 
-    assert model.predict(X.to_numpy()).tolist() == [1, 2, 0, 0]
+    assert model.predict(X.to_numpy()).tolist() == [1, 0, 2, 0]
 
 
-def test_persistence_baseline_rejects_a_missing_column():
-    X = pd.DataFrame({"capacity": [10.0]})
+def test_persistence_baseline_requires_the_normalized_flow_column():
+    X = pd.DataFrame({"capacity": [20.0]})
     model = train_classification.PersistenceRiskClassifier(tau=0.4).fit(X, [0])
 
     with pytest.raises(ValueError, match="net_flow_lag2"):

@@ -123,9 +123,9 @@ FEATURE_COLUMNS = [
 class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
     """Simple baseline: reuse the risk implied by the flow of two hours ago.
 
-    The feature table already has ``net_flow_lag2`` and ``capacity``; the ratio is compared with
-    the same ``tau`` used for the target, so there are no learned parameters.  ``X`` may be a
-    DataFrame with those columns or an array whose columns follow ``FEATURE_COLUMNS``, so
+    ``net_flow_lag2`` is already normalized by capacity in ``features.py``, so it is compared
+    directly with the same ``tau`` used for the target; there are no learned parameters.  ``X``
+    may be a DataFrame with that column or an array whose columns follow ``FEATURE_COLUMNS``, so
     scikit-learn utilities that pass arrays can use the estimator too.
     """
 
@@ -136,14 +136,12 @@ class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
         self.classes_ = np.array([0, 1, 2], dtype=np.int8)
         return self
 
-    def _flow_ratio(self, X) -> np.ndarray:
-        """Return net_flow_lag2 / capacity for a DataFrame or a FEATURE_COLUMNS array."""
+    def _normalized_flow(self, X) -> np.ndarray:
+        """Return ``net_flow_lag2`` for a DataFrame or a FEATURE_COLUMNS array."""
         if isinstance(X, pd.DataFrame):
-            missing = {"capacity", "net_flow_lag2"} - set(X.columns)
-            if missing:
-                raise ValueError(f"X is missing columns: {sorted(missing)}")
+            if "net_flow_lag2" not in X.columns:
+                raise ValueError("X is missing columns: ['net_flow_lag2']")
             flow = X["net_flow_lag2"].to_numpy(dtype=float)
-            capacity = X["capacity"].to_numpy(dtype=float)
         else:
             values = np.asarray(X, dtype=float)
             if values.ndim != 2 or values.shape[1] != len(FEATURE_COLUMNS):
@@ -152,14 +150,13 @@ class PersistenceRiskClassifier(BaseEstimator, ClassifierMixin):
                     "in FEATURE_COLUMNS order"
                 )
             flow = values[:, FEATURE_COLUMNS.index("net_flow_lag2")]
-            capacity = values[:, FEATURE_COLUMNS.index("capacity")]
-        return flow / capacity
+        return flow
 
     def predict(self, X):
-        ratio = self._flow_ratio(X)
-        prediction = np.zeros(len(ratio), dtype=np.int8)
-        prediction[ratio <= -self.tau] = 1
-        prediction[ratio >= self.tau] = 2
+        flow = self._normalized_flow(X)
+        prediction = np.zeros(len(flow), dtype=np.int8)
+        prediction[flow <= -self.tau] = 1
+        prediction[flow >= self.tau] = 2
         return prediction
 
     def predict_proba(self, X):
