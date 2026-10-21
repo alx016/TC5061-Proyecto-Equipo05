@@ -402,8 +402,12 @@ def calibrate_thresholds(
     truth = {cls: (y == cls)[:, None] for cls in (0, 1, 2)}
 
     def intersection(mask, condition) -> np.ndarray:
-        """Count mask[:, i] & condition[:, j] for every threshold pair."""
-        return mask.astype(np.int32).T @ condition.astype(np.int32)
+        """Count mask[:, i] & condition[:, j] for every threshold pair.
+
+        float32 keeps the integer counts exact (validation has fewer than 2**24 rows) and uses
+        BLAS instead of the slow integer matmul path.
+        """
+        return mask.astype(np.float32).T @ condition.astype(np.float32)
 
     true_positive = {
         1: intersection(above_shortage & truth[1], shortage_condition),
