@@ -1,6 +1,9 @@
 # Data
 /data/
 
+# Local-only scratch files (never committed)
+/local/
+
 # Mac OS-specific storage files
 .DS_Store
 
