@@ -55,3 +55,13 @@ entry_points:
       question: {type: string, default: p2}
       run_id: {type: string, default: "none"}
     command: "python -m tc5061_proyecto_equipo5.modeling.train_classification select --question {question} --run-id {run_id}"
+
+  # Runs select first and then register; registration only accepts selected, clean runs.
+  register:
+    parameters:
+      question: {type: string}
+      run_id: {type: string, default: ""}
+      alias: {type: string, default: champion}
+    command: >-
+      python -m tc5061_proyecto_equipo5.modeling.registry
+      --question {question} --run-id {run_id} --alias {alias}

@@ -26,19 +26,36 @@ def test_apply_thresholds_maps_classes_by_value_not_by_position():
     assert prediction.tolist() == [1, 2, 1, 0]
 
 
-def test_calibrate_thresholds_respects_the_precision_floor():
+def test_calibrate_thresholds_meets_the_recall_floor_and_returns_no_fallback():
     y_true = np.array([1] * 20 + [2] * 20 + [0] * 60)
     proba = np.zeros((100, 3))
-    proba[:20, 1] = 0.9
-    proba[20:40, 2] = 0.9
-    proba[40:, 0] = 0.9
+    proba[:20, 1] = np.linspace(0.98, 0.30, 20)
+    proba[20:40, 2] = np.linspace(0.98, 0.30, 20)
+    proba[40:, 0] = 0.99
 
-    thresholds = train_classification.calibrate_thresholds(
+    thresholds, fallback = train_classification.calibrate_thresholds(
+        y_true, proba, classes=np.array([0, 1, 2])
+    )
+    prediction = train_classification.apply_thresholds(proba, np.array([0, 1, 2]), thresholds)
+
+    assert fallback is False
+    assert (prediction == 1).sum() >= 17  # at least the configured 85% of the 20 shortages
+    assert thresholds[1] in train_classification.P2_THRESHOLD_GRID
+    assert thresholds[2] in train_classification.P2_THRESHOLD_GRID
+
+
+def test_calibrate_thresholds_falls_back_when_recall_is_unreachable():
+    # No probability ever crosses the grid, so no pair can recall the shortage class.
+    y_true = np.array([1] * 10 + [2] * 10 + [0] * 40)
+    proba = np.zeros((60, 3))
+    proba[:, 0] = 1.0
+
+    thresholds, fallback = train_classification.calibrate_thresholds(
         y_true, proba, classes=np.array([0, 1, 2])
     )
 
-    assert 0.05 <= thresholds[1] <= 0.95
-    assert 0.05 <= thresholds[2] <= 0.95
+    assert fallback is True
+    assert thresholds == {1: 0.05, 2: 0.05}
 
 
 def test_metrics_use_the_class_order_of_the_estimator():
@@ -56,83 +73,85 @@ def test_metrics_use_the_class_order_of_the_estimator():
     assert result["val_recall_saturation"] == pytest.approx(0.5)
     assert "val_pr_auc_shortage" in result
     assert "val_pr_auc_macro" in result
+    assert result["val_pr_auc_minority_mean"] == pytest.approx(
+        (result["val_pr_auc_shortage"] + result["val_pr_auc_saturation"]) / 2
+    )
 
 
-def test_choose_run_applies_the_recall_and_precision_guardrails():
+def _run(run_id, minority_ap, macro_f1, *, question="p2", stage="candidate", dirty="false"):
+    return {
+        "run_id": run_id,
+        "tags.question": question,
+        "tags.stage_of_work": stage,
+        "tags.git_dirty": dirty,
+        "metrics.val_pr_auc_minority_mean": minority_ap,
+        "metrics.val_macro_f1": macro_f1,
+    }
+
+
+def test_choose_run_ranks_clean_candidates_by_minority_ap():
     runs = pd.DataFrame(
         [
-            {
-                "run_id": "best-f1",
-                "tags.question": "p2",
-                "tags.stage_of_work": "candidate",
-                "tags.git_dirty": "false",
-                "tags.git_commit": "abc123",
-                "metrics.val_macro_f1": 0.95,
-                "metrics.val_recall_shortage": 0.40,
-                "metrics.val_precision_shortage": 0.90,
-                "metrics.val_precision_saturation": 0.90,
-            },
-            {
-                "run_id": "good-enough",
-                "tags.question": "p2",
-                "tags.stage_of_work": "candidate",
-                "tags.git_dirty": "false",
-                "tags.git_commit": "abc123",
-                "metrics.val_macro_f1": 0.80,
-                "metrics.val_recall_shortage": 0.90,
-                "metrics.val_precision_shortage": 0.60,
-                "metrics.val_precision_saturation": 0.60,
-            },
-            {
-                "run_id": "other-question",
-                "tags.question": "p1",
-                "tags.stage_of_work": "candidate",
-                "tags.git_dirty": "false",
-                "tags.git_commit": "abc123",
-                "metrics.val_macro_f1": 0.99,
-                "metrics.val_recall_shortage": 1.0,
-                "metrics.val_precision_shortage": 1.0,
-                "metrics.val_precision_saturation": 1.0,
-            },
+            _run("dirty-best", 0.60, 0.90, dirty="true"),
+            _run("search-child", 0.55, 0.80, stage="search"),
+            _run("other-question", 0.54, 0.70, question="p1"),
+            _run("clean-best-ap", 0.40, 0.45),
+            _run("clean-best-f1", 0.35, 0.90),
         ]
     )
 
     chosen = train_classification.choose_run(runs)
 
-    assert chosen["run_id"] == "good-enough"
+    assert chosen["run_id"] == "clean-best-ap"
 
 
-def test_choose_run_falls_back_to_the_best_macro_f1():
+def test_choose_run_breaks_minority_ap_ties_with_macro_f1():
     runs = pd.DataFrame(
         [
-            {
-                "run_id": "best-f1",
-                "tags.question": "p2",
-                "tags.stage_of_work": "baseline",
-                "tags.git_dirty": "false",
-                "tags.git_commit": "abc123",
-                "metrics.val_macro_f1": 0.60,
-                "metrics.val_recall_shortage": 0.10,
-                "metrics.val_precision_shortage": 0.10,
-                "metrics.val_precision_saturation": 0.10,
-            },
-            {
-                "run_id": "second",
-                "tags.question": "p2",
-                "tags.stage_of_work": "candidate",
-                "tags.git_dirty": "false",
-                "tags.git_commit": "abc123",
-                "metrics.val_macro_f1": 0.50,
-                "metrics.val_recall_shortage": 0.10,
-                "metrics.val_precision_shortage": 0.10,
-                "metrics.val_precision_saturation": 0.10,
-            },
+            _run("lower-f1", 0.40, 0.45),
+            _run("higher-f1", 0.40, 0.50),
         ]
     )
 
     chosen = train_classification.choose_run(runs)
 
-    assert chosen["run_id"] == "best-f1"
+    assert chosen["run_id"] == "higher-f1"
+
+
+def test_choose_run_rejects_a_frame_without_clean_runs():
+    runs = pd.DataFrame([_run("dirty", 0.60, 0.90, dirty="true")])
+
+    with pytest.raises(ValueError, match="No clean P2"):
+        train_classification.choose_run(runs)
+
+
+def test_selection_summary_counts_alerts_and_per_day_rate():
+    test_metrics = {
+        "test_recall_shortage": 0.80,
+        "test_precision_shortage": 0.20,
+        "test_recall_saturation": 0.70,
+        "test_precision_saturation": 0.30,
+        "test_macro_f1": 0.55,
+        "test_pr_auc_minority_mean": 0.35,
+    }
+    prediction = np.array([0, 1, 2, 0, 1, 0])
+
+    summary = train_classification.selection_summary(
+        run_id="run-1",
+        thresholds={1: 0.2, 2: 0.3},
+        fallback=False,
+        test_metrics=test_metrics,
+        prediction=prediction,
+        n_test_dates=2,
+    )
+
+    assert summary["run_id"] == "run-1"
+    assert summary["n_alerts"] == 3
+    assert summary["alerts_per_day"] == pytest.approx(1.5)
+    assert summary["thresholds"] == {"shortage": 0.2, "saturation": 0.3}
+    assert summary["threshold_fallback"] is False
+    assert summary["pr_auc_minority_mean"] == pytest.approx(0.35)
+    assert summary["recall_shortage"] == pytest.approx(0.80)
 
 
 def test_choose_run_ignores_dirty_and_other_commit_runs():
@@ -305,6 +324,9 @@ class _FakeTracking:
     def log_artifact(self, path, artifact_path=None):
         self.tables[artifact_path] = pd.read_csv(path)
 
+    def log_dict(self, dictionary, artifact_file):
+        self.tables[artifact_file] = dictionary
+
     def MlflowClient(self):
         return SimpleNamespace(set_tag=self.set_tag)
 
@@ -371,6 +393,7 @@ def _install_fake_tracking(monkeypatch):
             tracking.log_metrics(
                 {
                     "val_macro_f1": val_macro_f1,
+                    "val_pr_auc_minority_mean": val_macro_f1,
                     "val_recall_shortage": 0.90,
                     "val_precision_shortage": 0.60,
                     "val_precision_saturation": 0.60,
@@ -380,8 +403,10 @@ def _install_fake_tracking(monkeypatch):
             "run_id": run.info.run_id,
             "run_name": name,
             "model": model,
-            "thresholds": {},
+            "thresholds": {1: 0.5, 2: 0.5},
+            "threshold_fallback": False,
             "val_macro_f1": val_macro_f1,
+            "val_pr_auc_minority_mean": val_macro_f1,
             "val_recall_shortage": 0.90,
             "val_precision_shortage": 0.60,
             "val_precision_saturation": 0.60,
@@ -409,7 +434,16 @@ def _install_fake_tracking(monkeypatch):
     monkeypatch.setattr(train_classification, "build_model", build_model)
     monkeypatch.setattr(train_classification, "train_and_log", train_and_log)
     monkeypatch.setattr(train_classification, "data_version", lambda: "synthetic-v1")
-    for attribute in ("start_run", "set_tags", "log_param", "log_metric", "log_artifact"):
+    for attribute in (
+        "start_run",
+        "set_tags",
+        "log_param",
+        "log_params",
+        "log_metric",
+        "log_metrics",
+        "log_artifact",
+        "log_dict",
+    ):
         monkeypatch.setattr(train_classification.mlflow, attribute, getattr(tracking, attribute))
     monkeypatch.setattr(train_classification.mlflow, "MlflowClient", tracking.MlflowClient)
     return tracking, calls
