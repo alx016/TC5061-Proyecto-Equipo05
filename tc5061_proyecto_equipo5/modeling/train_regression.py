@@ -34,6 +34,7 @@ from lightgbm import LGBMRegressor
 from loguru import logger
 import matplotlib
 import mlflow
+from mlflow.entities import ViewType
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
@@ -509,12 +510,14 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
 
 @contextmanager
 def _search_study():
-    """Adopt the project run, retaining ownership of a caller's active context."""
+    """Adopt only an unused Study, retaining ownership of a caller's active context."""
     active = mlflow.active_run()
     project_id = os.environ.get("MLFLOW_RUN_ID")
     if active is not None and project_id not in {None, active.info.run_id}:
         raise ValueError("Active run does not match the MLflow Project run")
-    existing = active or (mlflow.get_run(project_id) if project_id else None)
+    existing_id = active.info.run_id if active is not None else project_id
+    # ActiveRun metadata is a snapshot; fetch tags/metrics written since start_run.
+    existing = mlflow.get_run(existing_id) if existing_id else None
     if existing is not None:
         expected = mlflow.get_experiment_by_name(EXPERIMENT_NAME).experiment_id
         if existing.info.experiment_id != expected:
@@ -532,6 +535,18 @@ def _search_study():
             or (project_id is None and not identified_study)
         ):
             raise ValueError("Active/project run is not a compatible P1 Study")
+        # A prior attempt must keep its own winner and immutable Trial history.
+        # Include deleted Trials: deleting them does not make a Study unused.
+        client = mlflow.MlflowClient()
+        trials = client.search_runs(
+            [expected],
+            f"tags.mlflow.parentRunId = '{existing.info.run_id}'",
+            run_view_type=ViewType.ALL,
+            max_results=1,
+        )
+        has_selection = "best_run_id" in tags or "best_val_wape" in existing.data.metrics
+        if trials or has_selection or client.list_artifacts(existing.info.run_id, "search"):
+            raise ValueError("Study already contains Trials or results; start a new Study")
     if active is None:
         # start_run consumes MLFLOW_RUN_ID when MLflow Project supplied it, so the
         # following nested starts create Trials rather than resuming the Study.
@@ -576,6 +591,7 @@ def search(model: str = "lightgbm", seed: int = SEED) -> str:
 
     Models are logged in their Trials, not retained or refitted for selection. December
     is never scored by search; winning this grid does not promote a champion.
+    An existing Study must have no Trials or previous search results.
     """
     if model != "lightgbm":
         raise ValueError(f"P1 search supports only 'lightgbm', got {model!r}")

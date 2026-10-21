@@ -1,8 +1,11 @@
 """Search contracts observed through P1 search and a real temporary Backend Store."""
 
 import json
+import os
+from pathlib import Path
 
 import mlflow
+from mlflow.entities import ViewType
 import numpy as np
 import pandas as pd
 import pytest
@@ -268,3 +271,104 @@ def test_search_selects_lowest_wape_when_trials_differ(training_store):
     assert selected == study.data.tags["best_run_id"]
     assert client.get_run(selected).data.metrics["val_wape"] == pytest.approx(table.val_wape.min())
     assert study.data.metrics["best_val_wape"] == pytest.approx(table.val_wape.min())
+
+
+def test_search_rejects_used_study_without_changing_its_winner_or_results(training_store):
+    _, client, _, _ = training_store
+    study_id = train_regression.search(seed=7)
+    original_csv = Path(
+        client.download_artifacts(study_id, "search/search_results.csv")
+    ).read_bytes()
+    with mlflow.start_run(run_id=study_id):
+        original = client.get_run(study_id)
+        original_trials = {
+            run.info.run_id
+            for run in client.search_runs(
+                [original.info.experiment_id], f"tags.mlflow.parentRunId = '{study_id}'"
+            )
+        }
+
+        with pytest.raises(ValueError, match="already contains"):
+            train_regression.search(seed=7)
+
+        current = client.get_run(study_id)
+        assert current.data.tags == original.data.tags
+        assert current.data.metrics == original.data.metrics
+        assert current.data.params == original.data.params
+        assert current.info.status == "RUNNING"
+        assert mlflow.active_run().info.run_id == study_id
+        assert (
+            Path(client.download_artifacts(study_id, "search/search_results.csv")).read_bytes()
+            == original_csv
+        )
+        assert {
+            run.info.run_id
+            for run in client.search_runs(
+                [original.info.experiment_id], f"tags.mlflow.parentRunId = '{study_id}'"
+            )
+        } == original_trials
+
+
+@pytest.mark.parametrize("result_kind", ["tag", "metric", "artifact"])
+def test_search_rejects_existing_results_even_without_trials(training_store, result_kind):
+    _, client, _, _ = training_store
+    train_regression.setup_experiment()
+    identity = {"question": "p1", "model_family": "lightgbm", "stage_of_work": "search"}
+    with mlflow.start_run(tags=identity) as study:
+        if result_kind == "tag":
+            mlflow.set_tag("best_run_id", "previous-winner")
+        elif result_kind == "metric":
+            mlflow.log_metric("best_val_wape", 0.25)
+        else:
+            mlflow.log_text("previous search results\n", "search/search_results.csv")
+        before = client.get_run(study.info.run_id)
+
+        with pytest.raises(ValueError, match="already contains"):
+            train_regression.search()
+
+        after = client.get_run(study.info.run_id)
+        assert after.data.tags == before.data.tags
+        assert after.data.metrics == before.data.metrics
+        assert after.data.params == before.data.params
+        assert after.info.status == "RUNNING"
+        assert mlflow.active_run().info.run_id == study.info.run_id
+        assert len(client.search_runs([study.info.experiment_id])) == 1
+        if result_kind == "artifact":
+            assert (
+                Path(
+                    client.download_artifacts(study.info.run_id, "search/search_results.csv")
+                ).read_text()
+                == "previous search results\n"
+            )
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_search_rejects_project_study_with_prior_trial(training_store, monkeypatch, deleted):
+    _, client, _, _ = training_store
+    train_regression.setup_experiment()
+    experiment = client.get_experiment_by_name("mibici-equipo05")
+    study = client.create_run(
+        experiment.experiment_id,
+        tags={"question": "p1", "model_family": "lightgbm", "stage_of_work": "search"},
+    )
+    trial = client.create_run(
+        experiment.experiment_id, tags={"mlflow.parentRunId": study.info.run_id}
+    )
+    client.set_terminated(trial.info.run_id, status="FAILED")
+    if deleted:
+        client.delete_run(trial.info.run_id)
+    client.set_terminated(study.info.run_id, status="FINISHED")
+    before = client.get_run(study.info.run_id)
+    monkeypatch.setenv("MLFLOW_RUN_ID", study.info.run_id)
+
+    with pytest.raises(ValueError, match="already contains"):
+        train_regression.search()
+
+    after = client.get_run(study.info.run_id)
+    assert after.data.tags == before.data.tags
+    assert after.data.metrics == before.data.metrics
+    assert after.data.params == before.data.params
+    assert after.info.status == "FINISHED"
+    assert mlflow.active_run() is None
+    assert os.environ["MLFLOW_RUN_ID"] == study.info.run_id
+    assert len(client.search_runs([experiment.experiment_id], run_view_type=ViewType.ALL)) == 2
