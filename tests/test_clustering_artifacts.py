@@ -13,7 +13,10 @@ from sklearn.exceptions import NotFittedError
 from sklearn.metrics.pairwise import euclidean_distances
 
 from tc5061_proyecto_equipo5.modeling.train_clustering import (
+    ASSIGNMENTS,
+    MODELS,
     WardClusterer,
+    build_estimator,
     choose_k,
     cluster_metrics,
     column_names,
@@ -190,3 +193,14 @@ def test_ward_clusterer_predict_matches_the_nearest_mean_rule():
     ward_labels = AgglomerativeClustering(n_clusters=3, linkage="ward").fit_predict(X)
     means = np.vstack([X[ward_labels == group].mean(axis=0) for group in range(3)])
     np.testing.assert_array_equal(labels, euclidean_distances(new, means).argmin(axis=1))
+
+
+def test_every_model_has_an_assignment_rule():
+    assert set(ASSIGNMENTS) == set(MODELS)
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_build_estimator_logs_where_k_came_from(model):
+    _, params = build_estimator(model, k=3, seed=0, k_selection="given on CLI")
+
+    assert params["k_selection"] == "given on CLI"

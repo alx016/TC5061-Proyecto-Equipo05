@@ -30,9 +30,12 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClusterMixin
-from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.cluster import AgglomerativeClustering, KMeans, MiniBatchKMeans
 from sklearn.metrics import davies_bouldin_score, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.mixture import GaussianMixture
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
 import typer
 
@@ -54,7 +57,15 @@ from tc5061_proyecto_equipo5.modeling.common import (
 app = typer.Typer()
 
 SPLITS = ("train", "validation", "test")
-MODELS = ("kmeans", "ward")
+MODELS = ("gmm", "kmeans", "kmeans_scaled", "minibatch_kmeans", "ward")
+# How each model's predict labels the validation and December stations, logged with every run
+ASSIGNMENTS = {
+    "gmm": "highest posterior probability",
+    "kmeans": "nearest centroid",
+    "kmeans_scaled": "nearest centroid in standardized space",
+    "minibatch_kmeans": "nearest centroid",
+    "ward": "nearest train cluster mean",
+}
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
@@ -386,7 +397,7 @@ def train_and_log(
             "k_selection": "validation silhouette; December never used"
             if kind == "kmeans"
             else "inherited from the K-Means choice",
-            "assignment": "predict" if kind == "kmeans" else "nearest train cluster mean",
+            "assignment": ASSIGNMENTS[kind],
             **model_params,
         }
         mlflow.log_params(params)
@@ -448,14 +459,39 @@ def build_estimator(model: str, k: int, seed: int, k_selection: str) -> tuple[Cl
     shows K-Means settings) and carry ``k_selection``, so the run says whether K came from the
     validation silhouette or from the CLI.
     """
-    if model == "kmeans":
+    if model == "gmm":
+        estimator = GaussianMixture(
+            n_components=k, covariance_type="diag", n_init=10, random_state=seed
+        )
+        params = {
+            "n_components": k,
+            "covariance_type": "diag",
+            "n_init": 10,
+            "k_selection": k_selection,
+        }
+    elif model == "kmeans":
         estimator = KMeans(n_clusters=k, n_init=10, random_state=seed)
         params = {"n_init": 10, "init": "k-means++", "n_clusters": k, "k_selection": k_selection}
+    elif model == "kmeans_scaled":
+        estimator = make_pipeline(
+            StandardScaler(), KMeans(n_clusters=k, n_init=10, random_state=seed)
+        )
+        params = {
+            "n_init": 10,
+            "init": "k-means++",
+            "n_clusters": k,
+            "k_selection": k_selection,
+            "scaler": "standard",
+        }
+    elif model == "minibatch_kmeans":
+        estimator = MiniBatchKMeans(n_clusters=k, n_init=10, random_state=seed)
+        params = {"n_init": 10, "n_clusters": k, "batch_size": 1024, "k_selection": k_selection}
     elif model == "ward":
         estimator = WardClusterer(n_clusters=k)
         params = {"n_clusters": k, "linkage": "ward", "k_selection": k_selection}
     else:
         raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}.")
+
     return estimator, params
 
 
