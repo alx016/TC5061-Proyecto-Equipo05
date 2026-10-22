@@ -113,7 +113,17 @@ def test_metrics_use_the_class_order_of_the_estimator():
     )
 
 
-def _run(run_id, minority_ap, macro_f1, *, question="p2", stage="candidate", dirty="false"):
+def _run(
+    run_id,
+    minority_ap,
+    macro_f1,
+    *,
+    question="p2",
+    stage="candidate",
+    dirty="false",
+    recall=0.90,
+    fallback="false",
+):
     return {
         "run_id": run_id,
         "tags.question": question,
@@ -121,6 +131,8 @@ def _run(run_id, minority_ap, macro_f1, *, question="p2", stage="candidate", dir
         "tags.git_dirty": dirty,
         "metrics.val_pr_auc_minority_mean": minority_ap,
         "metrics.val_macro_f1": macro_f1,
+        "metrics.val_recall_shortage": recall,
+        "params.threshold_fallback": fallback,
     }
 
 
@@ -158,6 +170,45 @@ def test_choose_run_rejects_a_frame_without_clean_runs():
 
     with pytest.raises(ValueError, match="No clean P2"):
         train_classification.choose_run(runs)
+
+
+def test_choose_run_ignores_a_higher_ap_run_below_the_recall_guardrail():
+    runs = pd.DataFrame(
+        [
+            _run("higher-ap-low-recall", 0.50, 0.60, recall=0.60),
+            _run("guardrailed", 0.40, 0.45, recall=0.86),
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs)
+
+    assert chosen["run_id"] == "guardrailed"
+
+
+def test_choose_run_ignores_a_higher_ap_run_with_threshold_fallback():
+    runs = pd.DataFrame(
+        [
+            _run("higher-ap-fallback", 0.50, 0.60, recall=0.90, fallback="true"),
+            _run("guardrailed", 0.40, 0.45, recall=0.86),
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs)
+
+    assert chosen["run_id"] == "guardrailed"
+
+
+def test_choose_run_falls_back_to_best_ap_when_no_run_meets_the_guardrail():
+    runs = pd.DataFrame(
+        [
+            _run("higher-ap-low-recall", 0.50, 0.60, recall=0.60),
+            _run("lower-ap-low-recall", 0.40, 0.45, recall=0.70),
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs)
+
+    assert chosen["run_id"] == "higher-ap-low-recall"
 
 
 def test_selection_summary_counts_alerts_and_per_day_rate():
