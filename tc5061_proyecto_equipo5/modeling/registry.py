@@ -1,5 +1,6 @@
 """Register a trained run in the MLflow model Registry with tags, descriptions and an alias."""
 
+import os
 from typing import Annotated
 
 from loguru import logger
@@ -38,8 +39,11 @@ def main(
 
     # The run says which question it answers; the registered name follow from it
     question = run.data.tags.get("question")
+    if run.data.tags.get("git_dirty") == "true":
+        logger.warning(f"Run {run_id} was trained with uncommitted changes (git_dirty=true)")
+
     if question not in MODEL_NAMES:
-        raise typer.BadParameter(f"Run {run_id} has no valid question got {question!r}")
+        raise typer.BadParameter(f"Run {run_id} has no valid question tag got {question!r}")
     name = MODEL_NAMES[question]
     logger.info(f"Run {run_id} answers {question}: registering it as {name} with alias {alias}")
     version = mlflow.register_model(model_uri=f"runs:/{run_id}/model", name=name)
@@ -50,7 +54,7 @@ def main(
         "git_dirty": run.data.tags.get("git_dirty"),
         "data_version": run.data.params.get("data_version"),
         "features_data_version": run.data.params.get("features_data_version"),
-        "validation_status": "pending",
+        "validation_status": "approved" if alias == "champion" else "pending",
     }
     for key, value in tags.items():
         if value is not None:
@@ -65,9 +69,18 @@ def main(
         ),
     )
 
-    # The alias is the stable address that consumers load: models:/<name>/<alias>
+    # The alias is the stable address that consumers load: models:/<name>@<alias>
     client.set_registered_model_alias(name, alias, version.version)
-    logger.success(f"Registered run {run_id} as {name} version {version.version} as @{alias}")
+
+    #  inside `mlflow run -e register`, label the bookkeeping run so it can be found later
+    register_run_id = os.environ.get("MLFLOW_RUN_ID")
+    if register_run_id:
+        client.set_tag(register_run_id, "mlflow.runName", f"register-{name}-v{version.version}")
+        client.set_tag(register_run_id, "registered_model", name)
+        client.set_tag(register_run_id, "registered_version", version.version)
+        client.set_tag(register_run_id, "source_run_id", run_id)
+
+    logger.success(f"Registered run {run_id} as {name} version {version.version} (@{alias})")
 
 
 if __name__ == "__main__":
