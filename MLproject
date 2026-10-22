@@ -56,12 +56,12 @@ entry_points:
       run_id: {type: string, default: "none"}
     command: "python -m tc5061_proyecto_equipo5.modeling.train_classification select --question {question} --run-id {run_id}"
 
-#Rgister the model of one run in the Model Registry. A new version starts as challenger;
-# Promoting it to champion is an explicit decision (-P alias =champion)
+  # Register the model of one run in the Model Registry. A new version starts as challenger;
+  # promoting it to champion is an explicit decision (-P alias=champion)
   register:
-    parameters: 
+    parameters:
       run_id: {type: string}
-      alias: {type:string, default: challenger}
-    command: >- 
+      alias: {type: string, default: challenger}
+    command: >-
       python -m tc5061_proyecto_equipo5.modeling.registry
       --run-id {run_id} --alias {alias}
