@@ -29,14 +29,14 @@ clean:
 ## Lint using ruff (use `make format` to do formatting)
 .PHONY: lint
 lint:
-	ruff format --check
-	ruff check
+	uv run ruff format --check
+	uv run ruff check
 
 ## Format source code with ruff
 .PHONY: format
 format:
-	ruff check --fix
-	ruff format
+	uv run ruff check --fix
+	uv run ruff format
 
 
 
@@ -73,7 +73,7 @@ data: requirements
 ## Start the MLflow tracking server (metadata in mlflow.db, artifacts in mlartifacts/)
 .PHONY: mlflow-server
 mlflow-server:
-	mlflow server --backend-store-uri sqlite:///mlflow.db \
+	uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
 		--artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5001
 
 
