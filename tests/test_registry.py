@@ -121,6 +121,53 @@ def test_new_champion_moves_the_alias(tracking):
     assert version.tags["validation_status"] == "approved"
 
 
+def test_promoting_a_challenger_reuses_its_version(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false"})
+
+    assert register("--run-id", run_id).exit_code == 0
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+
+    client = MlflowClient()
+    versions = client.search_model_versions(f"name='{P1_NAME}'")
+    assert len(versions) == 1
+    # Stores differ on the version type (int in SQLite, str over REST), so compare as text
+    aliases = client.get_registered_model(P1_NAME).aliases
+    assert {alias: str(number) for alias, number in aliases.items()} == {
+        "champion": str(versions[0].version)
+    }
+    assert (
+        client.get_model_version_by_alias(P1_NAME, "champion").tags["validation_status"]
+        == "approved"
+    )
+
+
+def test_promoting_keeps_a_challenger_of_another_version(tracking):
+    promoted = logged_run({"question": "p1", "git_dirty": "false"})
+    newer = logged_run({"question": "p1", "git_dirty": "false"})
+
+    # Both start as challengers; the alias ends on the newer one, then the older is promoted
+    assert register("--run-id", promoted).exit_code == 0
+    assert register("--run-id", newer).exit_code == 0
+    assert register("--run-id", promoted, "--alias", "champion").exit_code == 0
+
+    client = MlflowClient()
+    assert len(client.search_model_versions(f"name='{P1_NAME}'")) == 2
+    assert client.get_model_version_by_alias(P1_NAME, "champion").run_id == promoted
+    assert client.get_model_version_by_alias(P1_NAME, "challenger").run_id == newer
+
+
+def test_rejects_demoting_the_champion_to_challenger(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false"})
+
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+    assert register("--run-id", run_id).exit_code == 2
+
+    client = MlflowClient()
+    assert "challenger" not in client.get_registered_model(P1_NAME).aliases
+    champion = client.get_model_version_by_alias(P1_NAME, "champion")
+    assert champion.tags["validation_status"] == "approved"
+
+
 def test_rejects_an_unknown_alias(tracking):
     run_id = logged_run({"question": "p1"})
 
@@ -135,3 +182,14 @@ def test_rejects_a_run_without_question(tracking):
 
 def test_rejects_a_missing_run(tracking):
     assert register("--run-id", "does-not-exist").exit_code == 2
+
+
+def test_rejects_a_run_without_model_and_registers_nothing(tracking):
+    # Same shape as a search Study: the question tag is there, the model lives in its Trials
+    with mlflow.start_run() as study:
+        mlflow.set_tags({"question": "p1", "git_dirty": "false"})
+
+    result = register("--run-id", study.info.run_id)
+
+    assert result.exit_code == 2
+    assert MlflowClient().search_registered_models() == []

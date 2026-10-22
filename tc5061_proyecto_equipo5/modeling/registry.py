@@ -35,6 +35,7 @@ def lineage_tags(question: str, run, alias: str) -> dict:
         "source_run_id": run.info.run_id,
         "experiment_id": run.info.experiment_id,
         "task": run.data.tags.get("task"),
+        "selected": run.data.tags.get("selected"),
     }
 
 
@@ -62,9 +63,35 @@ def main(
     if run.data.tags.get("git_dirty") == "true":
         logger.warning(f"Run {run_id} was trained with uncommitted changes (git_dirty=true)")
 
+    if alias == "champion" and run.data.tags.get("selected") != "true":
+        logger.warning(f"Run {run_id} was not marked by its select step (selected!=true)")
+
+    # Check before register_model, which creates the registered model before it looks for the
+    # artifact and would leave it empty. A search Study carries the question tag but no model
+    model_uri = f"runs:/{run_id}/model"
+    try:
+        mlflow.models.get_model_info(model_uri)
+    except MlflowException as error:
+        raise typer.BadParameter(
+            f"Run {run_id} has no logged model ({error}); "
+            "if it is a Study, use its best_run_id tag"
+        ) from error
+
     name = MODEL_NAMES[question]
     logger.info(f"Run {run_id} answers {question}: registering it as {name} with alias {alias}")
-    version = mlflow.register_model(model_uri=f"runs:/{run_id}/model", name=name)
+    # Promoting a challenger to champion moves the alias; registering again would duplicate it
+    existing = client.search_model_versions(f"name='{name}' and run_id='{run_id}'")
+    if existing:
+        version = max(existing, key=lambda found: int(found.version))
+        # The default alias must not demote the version in production
+        aliases = client.get_registered_model(name).aliases
+        if alias == "challenger" and int(aliases.get("champion", -1)) == int(version.version):
+            raise typer.BadParameter(
+                f"Run {run_id} is already {name} version {version.version} (@champion)"
+            )
+        logger.info(f"Run {run_id} is already {name} version {version.version}; reusing it")
+    else:
+        version = mlflow.register_model(model_uri=model_uri, name=name)
     tags = lineage_tags(question, run, alias)
 
     # Lineage tags copied from the run, so the version can be traced without opening it
@@ -88,8 +115,13 @@ def main(
 
     # The alias is the stable address that consumers load: models:/<name>@<alias>
     client.set_registered_model_alias(name, alias, version.version)
+    # A promoted challenger stops being one, so @challenger never points at the champion
+    if alias == "champion":
+        aliases = client.get_registered_model(name).aliases
+        if int(aliases.get("challenger", -1)) == int(version.version):
+            client.delete_registered_model_alias(name, "challenger")
 
-    #  inside `mlflow run -e register`, label the bookkeeping run so it can be found later
+    # Inside `mlflow run -e register`, label the bookkeeping run so it can be found later
     register_run_id = os.environ.get("MLFLOW_RUN_ID")
     if register_run_id:
         client.set_tag(register_run_id, "mlflow.runName", f"register-{name}-v{version.version}")
