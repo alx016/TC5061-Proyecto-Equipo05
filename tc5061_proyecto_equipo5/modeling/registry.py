@@ -22,6 +22,22 @@ MODEL_NAMES = {
 ALIASES = {"champion", "challenger"}
 
 
+def lineage_tags(question: str, run, alias: str) -> dict:
+    """Tags copied from the run so a version can be traced without opening it."""
+    return {
+        "question": question,
+        "model_family": run.data.tags.get("model_family"),
+        "git_commit": run.data.tags.get("git_commit"),
+        "git_dirty": run.data.tags.get("git_dirty"),
+        "data_version": run.data.params.get("data_version"),
+        "features_data_version": run.data.params.get("features_data_version"),
+        "validation_status": "approved" if alias == "champion" else "pending",
+        "source_run_id": run.info.run_id,
+        "experiment_id": run.info.experiment_id,
+        "task": run.data.tags.get("task"),
+    }
+
+
 @app.command()
 def main(
     run_id: Annotated[str, typer.Option(help="Run that logged the model")],
@@ -49,18 +65,8 @@ def main(
     name = MODEL_NAMES[question]
     logger.info(f"Run {run_id} answers {question}: registering it as {name} with alias {alias}")
     version = mlflow.register_model(model_uri=f"runs:/{run_id}/model", name=name)
-    tags = {
-        "question": question,
-        "model_family": run.data.tags.get("model_family"),
-        "git_commit": run.data.tags.get("git_commit"),
-        "git_dirty": run.data.tags.get("git_dirty"),
-        "data_version": run.data.params.get("data_version"),
-        "features_data_version": run.data.params.get("features_data_version"),
-        "validation_status": "approved" if alias == "champion" else "pending",
-        "source_run_id": run_id,
-        "experiment_id": run.info.experiment_id,
-        "task": run.data.tags.get("task"),
-    }
+    tags = lineage_tags(question, run, alias)
+
     # Lineage tags copied from the run, so the version can be traced without opening it
     for key, value in tags.items():
         if value is not None:
