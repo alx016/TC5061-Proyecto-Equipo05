@@ -1,4 +1,4 @@
-"""Register a trained run in the MLflow model Registry with tags, descriptions and an alias."""
+"""Register a trained run in the MLflow Model Registry with tags, descriptions and an alias."""
 
 import os
 from typing import Annotated
@@ -37,13 +37,15 @@ def main(
     except MlflowException as error:
         raise typer.BadParameter(f"Run {run_id} not found in tracking server") from error
 
-    # The run says which question it answers; the registered name follow from it
+    # The run says which question it answers; the registered name follows from it
     question = run.data.tags.get("question")
+
+    if question not in MODEL_NAMES:
+        raise typer.BadParameter(f"Run {run_id} has no valid question tag, got {question!r}")
+
     if run.data.tags.get("git_dirty") == "true":
         logger.warning(f"Run {run_id} was trained with uncommitted changes (git_dirty=true)")
 
-    if question not in MODEL_NAMES:
-        raise typer.BadParameter(f"Run {run_id} has no valid question tag got {question!r}")
     name = MODEL_NAMES[question]
     logger.info(f"Run {run_id} answers {question}: registering it as {name} with alias {alias}")
     version = mlflow.register_model(model_uri=f"runs:/{run_id}/model", name=name)
@@ -55,9 +57,18 @@ def main(
         "data_version": run.data.params.get("data_version"),
         "features_data_version": run.data.params.get("features_data_version"),
         "validation_status": "approved" if alias == "champion" else "pending",
+        "source_run_id": run_id,
+        "experiment_id": run.info.experiment_id,
+        "task": run.data.tags.get("task"),
     }
+    # Lineage tags copied from the run, so the version can be traced without opening it
     for key, value in tags.items():
         if value is not None:
+            client.set_model_version_tag(name, version.version, key, value)
+
+    # Selection decisions belong to each question's select step; the registry only carries them
+    for key, value in run.data.tags.items():
+        if key.startswith("selection_"):
             client.set_model_version_tag(name, version.version, key, value)
 
     client.update_model_version(
