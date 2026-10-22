@@ -41,6 +41,7 @@ UNSET = -1
 INTEGER_HYPERPARAMS = {
     "p1": train_regression.INTEGER_HYPERPARAMS,
     "p2": train_classification.INTEGER_HYPERPARAMS,
+    "p3": train_clustering.INTEGER_HYPERPARAMETERS,
 }
 
 

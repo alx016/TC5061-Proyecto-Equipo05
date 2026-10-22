@@ -71,6 +71,8 @@ K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
 REFERENCE_K = 4
 VALID_HYPERPARAMETERS = {"n_clusters"}
+# MLflow sends every numeric parameter as text; these must reach LightGBM as integers.
+INTEGER_HYPERPARAMETERS = {"n_clusters"}
 
 
 class WardClusterer(ClusterMixin, BaseEstimator):
