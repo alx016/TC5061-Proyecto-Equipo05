@@ -98,7 +98,7 @@ def test_labels_for_splits_assigns_every_split_with_kmeans():
     other = np.vstack([np.zeros((3, 2)), np.full((3, 2), 10.0)])
     matrices = {"train": train, "validation": other, "test": other}
 
-    labels = labels_for_splits(KMeans(n_clusters=2, n_init=10, random_state=0), matrices, "kmeans")
+    labels = labels_for_splits(KMeans(n_clusters=2, n_init=10, random_state=0), matrices)
 
     assert set(labels) == {"train", "validation", "test"}
     assert len(labels["validation"]) == 6
@@ -106,16 +106,12 @@ def test_labels_for_splits_assigns_every_split_with_kmeans():
     assert len(set(labels["validation"].tolist())) == 2
 
 
-def test_labels_for_splits_ward_falls_back_to_nearest_mean():
+def test_labels_for_splits_assigns_every_split_with_ward():
     train = np.vstack([np.zeros((10, 2)), np.full((10, 2), 10.0)])
     other = np.vstack([np.zeros((3, 2)), np.full((3, 2), 10.0)])
     matrices = {"train": train, "validation": other, "test": other}
 
-    from sklearn.cluster import AgglomerativeClustering
-
-    labels = labels_for_splits(
-        AgglomerativeClustering(n_clusters=2, linkage="ward"), matrices, "ward"
-    )
+    labels = labels_for_splits(WardClusterer(n_clusters=2), matrices)
 
     assert len(labels["test"]) == 6
     assert len(set(labels["test"].tolist())) == 2

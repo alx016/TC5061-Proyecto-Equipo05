@@ -54,7 +54,7 @@ from tc5061_proyecto_equipo5.modeling.common import (
 app = typer.Typer()
 
 SPLITS = ("train", "validation", "test")
-MODELS = ("kmeans",)
+MODELS = ("kmeans", "ward")
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
@@ -187,26 +187,18 @@ def choose_k(
     return best, table
 
 
-def labels_for_splits(model, matrices: dict[str, np.ndarray], kind: str) -> dict[str, np.ndarray]:
+def labels_for_splits(model, matrices: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     """Assign every split with the model fitted on train.
 
-    K-Means predicts directly.  Ward has no predict method, so the validation and December stations
-    are assigned to the nearest train cluster mean; that approximation is logged as a parameter and
-    it makes the comparison consistent, because K-Means uses exactly the same rule.
+    Models are assigned with a predict method, for Ward that is the nearest centroid,
+    so the validation and December stations are assigned to the nearest train cluster mean; that
+    approximation is logged as a parameter and it makes the comparison consistent, because K-Means
+    uses exactly the same rule.
     """
     labels = {"train": model.fit_predict(matrices["train"])}
-    if kind == "kmeans":
-        for split in ("validation", "test"):
-            labels[split] = model.predict(matrices[split])
-        return labels
-    means = np.vstack(
-        [
-            matrices["train"][labels["train"] == group].mean(axis=0).ravel()
-            for group in sorted(set(labels["train"].tolist()))
-        ]
-    )
+
     for split in ("validation", "test"):
-        labels[split] = euclidean_distances(matrices[split], means).argmin(axis=1)
+        labels[split] = model.predict(matrices[split])
     return labels
 
 
@@ -367,7 +359,7 @@ def train_and_log(
     """Fit one model on train, evaluate every split and log the run in MLflow."""
     with mlflow.start_run(run_name=name) as run:
         start = perf_counter()
-        labels = labels_for_splits(model, data["matrices"], kind)
+        labels = labels_for_splits(model, data["matrices"])
         # Includes the validation and test assignment; fit alone is not separable inside labels_for_splits
         fit_seconds = perf_counter() - start
         mlflow.log_metric("fit_seconds", fit_seconds)
@@ -449,6 +441,24 @@ def load_data(base_dir: Path) -> dict:
     return data
 
 
+def build_estimator(model: str, k: int, seed: int, k_selection: str) -> tuple[ClusterMixin, dict]:
+    """Return the unfitted estimator of one P3 model and the params to log with its run.
+
+    Only the requested model is built.  The params describe that model alone (a Ward run never
+    shows K-Means settings) and carry ``k_selection``, so the run says whether K came from the
+    validation silhouette or from the CLI.
+    """
+    if model == "kmeans":
+        estimator = KMeans(n_clusters=k, n_init=10, random_state=seed)
+        params = {"n_init": 10, "init": "k-means++", "n_clusters": k, "k_selection": k_selection}
+    elif model == "ward":
+        estimator = WardClusterer(n_clusters=k)
+        params = {"n_clusters": k, "linkage": "ward", "k_selection": k_selection}
+    else:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}.")
+    return estimator, params
+
+
 def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
     """Train and log one P3 model in one run: the unit of the MLflow ``train`` entry point."""
 
@@ -475,7 +485,7 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
         k_selection = "validation silhouette; December never used"
         k = best_k
 
-    estimator = KMeans(n_clusters=k, n_init=10, random_state=seed)
+    estimator, params = build_estimator(model, k, seed, k_selection)
 
     result = train_and_log(
         f"p3-{stage}-{model}-k{k}",
@@ -483,8 +493,8 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
         model,
         data,
         seed,
-        model_params={"n_init": 10, "init": "k-means++", "k_selection": k_selection},
-        figure_title=f"Perfiles horarios medios por clúster — K-Means, K={k} (ventana de ajuste)",
+        model_params=params,
+        figure_title=f"Perfiles horarios medios por clúster - {model}, K={k} (ventana de ajuste)",
         log_model=True,
         stage=stage,
     )
@@ -535,18 +545,17 @@ def clustering(
             stage="candidate",
         )
     )
-    # Same K as the candidate so the comparison is like for like; Ward has no predict method,
-    # which is why its model is not logged and its validation/December labels come from the means.
     records.append(
         train_and_log(
             f"clustering-candidate-ward-k{best_k}",
-            AgglomerativeClustering(n_clusters=best_k, linkage="ward"),
+            WardClusterer(n_clusters=best_k),
             "ward",
             data,
             seed,
             model_params={"linkage": "ward"},
             figure_title=f"Perfiles horarios medios por clúster — Ward, K={best_k} (ventana de ajuste)",
-            log_model=False,
+            log_model=True,
+            stage="candidate",
         )
     )
     table = pd.DataFrame(records).set_index("run_name")
