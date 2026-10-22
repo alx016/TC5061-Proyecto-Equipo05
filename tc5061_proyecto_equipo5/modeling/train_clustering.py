@@ -31,7 +31,12 @@ import pandas as pd
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClusterMixin
 from sklearn.cluster import AgglomerativeClustering, KMeans, MiniBatchKMeans
-from sklearn.metrics import davies_bouldin_score, silhouette_score
+from sklearn.metrics import (
+    adjusted_rand_score,
+    davies_bouldin_score,
+    silhouette_samples,
+    silhouette_score,
+)
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.mixture import GaussianMixture
 from sklearn.pipeline import make_pipeline
@@ -160,6 +165,28 @@ def cluster_metrics(matrix: np.ndarray, labels: np.ndarray, prefix: str) -> dict
     }
 
 
+def temporal_ari(
+    keys_a: pd.DataFrame, labels_a: np.ndarray, keys_b: pd.DataFrame, labels_b: np.ndarray
+) -> float:
+    """Return the adjusted Rand index between two windows' labels of the same stations.
+
+    Every train station also has a validation and a December profile, so this asks whether the
+    stations keep their group when the season changes.  Rows are matched by ``station_id`` (the
+    splits are not in the same order and later windows add new stations), and the index ignores
+    the label names: a whole group renamed from 0 to 2 still counts as stable.
+    """
+    merged = pd.DataFrame(
+        {"station_id": keys_a["station_id"].to_numpy(), "label_a": labels_a}
+    ).merge(
+        pd.DataFrame({"station_id": keys_b["station_id"].to_numpy(), "label_b": labels_b}),
+        on="station_id",
+        how="inner",
+    )
+    if len(merged) < 2:
+        return float("nan")
+    return float(adjusted_rand_score(merged["label_a"], merged["label_b"]))
+
+
 def choose_k(
     train_matrix: np.ndarray,
     validation_matrix: np.ndarray,
@@ -266,8 +293,42 @@ def profile_summary(
     return pd.DataFrame(rows).sort_values("cluster")
 
 
+def save_silhouette_plot(folder: Path, matrix: np.ndarray, labels: np.ndarray, title: str) -> None:
+    """Draw the silhouette of every station, grouped by cluster, with the mean as a dashed line.
+
+    Wide groups above zero are well separated; negative bars are stations closer to another group.
+    It is drawn on the raw profile matrix, the same space as the logged silhouette metrics, and
+    skipped when the split has a single group (the silhouette is undefined there).
+    """
+    groups = sorted(set(labels.tolist()))
+    if len(groups) < 2 or len(groups) >= matrix.shape[0]:
+        logger.warning(f"Silhouette plot skipped: {len(groups)} groups for {matrix.shape[0]} rows")
+        return
+    values = silhouette_samples(matrix, labels)
+    figure, axis = plt.subplots(figsize=(7, 6))
+    bottom, centers = 0, []
+    for cluster in groups:
+        cluster_values = np.sort(values[labels == cluster])
+        top = bottom + len(cluster_values)
+        axis.fill_betweenx(np.arange(bottom, top), 0, cluster_values, alpha=0.8)
+        centers.append((bottom + top) / 2)
+        # Leave a gap between groups so each one reads as its own block
+        bottom = top + 10
+    mean = float(values.mean())
+    axis.axvline(mean, color="black", linestyle="--", label=f"Media = {mean:.3f}")
+    axis.set_xlabel("Coeficiente de silhouette")
+    # Group names on the axis, not inside the plot, where negative bars would cover them
+    axis.set_yticks(centers, [f"Clúster {cluster}" for cluster in groups])
+    axis.set_title(title)
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(folder / "silhouette_validation.png", bbox_inches="tight")
+    plt.close(figure)
+
+
 def save_artifacts(
-    folder: Path,
+    plots: Path,
+    tables: Path,
     names: list[str],
     matrices: dict[str, np.ndarray],
     labels: dict[str, np.ndarray],
@@ -275,7 +336,11 @@ def save_artifacts(
     stations: pd.DataFrame,
     title: str,
 ) -> None:
-    """Write the cluster sizes, the hourly centroids, the profile summary and the station map."""
+    """Write the figures to ``plots`` and the CSV tables to ``tables``.
+
+    Figures: hourly centroids, station map and the validation silhouette per station.  Tables:
+    cluster sizes per split and the profile summary.
+    """
     sizes = (
         pd.DataFrame(
             {split: pd.Series(labels[split]).value_counts().sort_index() for split in SPLITS}
@@ -284,7 +349,7 @@ def save_artifacts(
         .astype(int)
     )
     sizes.index.name = "cluster"
-    sizes.to_csv(folder / "cluster_sizes.csv")
+    sizes.to_csv(tables / "cluster_sizes.csv")
 
     centroids = centroid_frame(matrices["train"], labels["train"], names)
     figure, axes = plt.subplots(1, 2, figsize=(13, 5))
@@ -301,7 +366,7 @@ def save_artifacts(
         axis.legend(fontsize=8)
     figure.suptitle(title)
     figure.tight_layout()
-    figure.savefig(folder / "cluster_centroids.png", bbox_inches="tight")
+    figure.savefig(plots / "cluster_centroids.png", bbox_inches="tight")
     plt.close(figure)
 
     train_keys = pd.DataFrame({"station_id": keys_train["station_id"], "cluster": labels["train"]})
@@ -313,7 +378,7 @@ def save_artifacts(
             f"{missing} train stations have no coordinates in the catalog and are skipped"
         )
     profile_summary(centroids, labels["train"], located).to_csv(
-        folder / "cluster_profile_summary.csv", index=False
+        tables / "cluster_profile_summary.csv", index=False
     )
 
     figure, axis = plt.subplots(figsize=(7, 7))
@@ -341,8 +406,15 @@ def save_artifacts(
     axis.set_title(f"Estaciones de la ventana de ajuste por clúster (n={len(located)})")
     axis.legend(fontsize=8)
     figure.tight_layout()
-    figure.savefig(folder / "cluster_map.png", bbox_inches="tight")
+    figure.savefig(plots / "cluster_map.png", bbox_inches="tight")
     plt.close(figure)
+
+    save_silhouette_plot(
+        plots,
+        matrices["validation"],
+        labels["validation"],
+        f"Silhouette por estación, validación (K={len(set(labels['train'].tolist()))})",
+    )
 
 
 def load_stations() -> pd.DataFrame:
@@ -380,6 +452,11 @@ def train_and_log(
         for split in SPLITS:
             prefix = "val_" if split == "validation" else f"{split}_"
             metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
+        # Stability: do the train stations keep their group in the later windows?
+        for split, prefix in (("validation", "val_"), ("test", "test_")):
+            metrics[f"{prefix}temporal_ari"] = temporal_ari(
+                data["keys"]["train"], labels["train"], data["keys"][split], labels[split]
+            )
         params = {
             "study_year": STUDY_YEAR,
             "seed": seed,
@@ -409,8 +486,12 @@ def train_and_log(
         log_training_input(train, data["source"], "p3-train")
         mlflow.log_metrics(metrics)
         with tempfile.TemporaryDirectory() as folder:
+            plots, tables = Path(folder) / "plots", Path(folder) / "tables"
+            plots.mkdir()
+            tables.mkdir()
             save_artifacts(
-                Path(folder),
+                plots,
+                tables,
                 data["names"],
                 data["matrices"],
                 labels,
@@ -418,8 +499,9 @@ def train_and_log(
                 data["stations"],
                 figure_title,
             )
-            data["k_table"].to_csv(Path(folder) / "k_selection.csv", index=False)
-            mlflow.log_artifacts(folder)
+            data["k_table"].to_csv(tables / "k_selection.csv", index=False)
+            mlflow.log_artifacts(str(plots), artifact_path="plots")
+            mlflow.log_artifacts(str(tables), artifact_path="tables")
         if log_model:
             log_model_with_signature(
                 model,

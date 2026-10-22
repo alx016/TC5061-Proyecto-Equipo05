@@ -23,6 +23,8 @@ from tc5061_proyecto_equipo5.modeling.train_clustering import (
     labels_for_splits,
     load_split,
     profile_summary,
+    save_silhouette_plot,
+    temporal_ari,
     zone_from_name,
 )
 
@@ -204,3 +206,56 @@ def test_build_estimator_logs_where_k_came_from(model):
     _, params = build_estimator(model, k=3, seed=0, k_selection="given on CLI")
 
     assert params["k_selection"] == "given on CLI"
+
+
+def stations(ids) -> pd.DataFrame:
+    return pd.DataFrame({"station_id": ids})
+
+
+def test_save_silhouette_plot_writes_the_figure(tmp_path):
+    X = three_blobs()
+    labels = np.repeat([0, 1, 2], 30)
+
+    save_silhouette_plot(tmp_path, X, labels, "test")
+
+    assert (tmp_path / "silhouette_validation.png").is_file()
+
+
+def test_save_silhouette_plot_skips_a_single_group(tmp_path):
+    save_silhouette_plot(tmp_path, three_blobs(), np.zeros(90, dtype=int), "test")
+
+    assert not (tmp_path / "silhouette_validation.png").exists()
+
+
+def test_temporal_ari_ignores_renamed_labels():
+    keys = stations([1, 2, 3, 4])
+
+    ari = temporal_ari(keys, np.array([0, 0, 1, 1]), keys, np.array([1, 1, 0, 0]))
+
+    assert ari == pytest.approx(1.0)
+
+
+def test_temporal_ari_matches_rows_by_station_not_by_position():
+    labels_a = np.array([0, 0, 1, 1])
+    # Same assignment as labels_a, with the rows in another order
+    keys_b, labels_b = stations([4, 1, 3, 2]), np.array([1, 0, 1, 0])
+
+    ari = temporal_ari(stations([1, 2, 3, 4]), labels_a, keys_b, labels_b)
+
+    assert ari == pytest.approx(1.0)
+
+
+def test_temporal_ari_ignores_stations_missing_from_one_window():
+    keys_a, labels_a = stations([1, 2, 3, 4]), np.array([0, 0, 1, 1])
+    # Stations 5 and 6 only exist in the later window
+    keys_b, labels_b = stations([1, 2, 3, 4, 5, 6]), np.array([0, 0, 1, 1, 0, 1])
+
+    ari = temporal_ari(keys_a, labels_a, keys_b, labels_b)
+
+    assert ari == pytest.approx(1.0)
+
+
+def test_temporal_ari_is_nan_with_fewer_than_two_shared_stations():
+    ari = temporal_ari(stations([1, 2]), np.array([0, 1]), stations([2, 3]), np.array([0, 1]))
+
+    assert np.isnan(ari)
