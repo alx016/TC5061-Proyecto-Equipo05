@@ -430,6 +430,20 @@ def load_stations() -> pd.DataFrame:
     return stations[["station_id", "name", "latitude", "longitude"]]
 
 
+def select_winner(rows: list[dict]) -> dict:
+    """Pick the Trial with the best validation silhouette; ties go to the smaller K.
+
+    Trials whose silhouette is NaN (a K that leaves one group in validation) are ignored.
+    """
+
+    finite = [row for row in rows if np.isfinite(row["val_silhouette"])]
+    if not finite:
+        raise ValueError("P3 search has no Trial with a finite validation silhouette")
+    best = max(finite, key=lambda row: (row["val_silhouette"], -row["k"]))
+
+    return best
+
+
 def train_and_log(
     name: str,
     model,
@@ -440,9 +454,13 @@ def train_and_log(
     figure_title: str,
     log_model: bool,
     stage: str = "baseline",
+    nested: bool = False,
 ) -> dict:
-    """Fit one model on train, evaluate every split and log the run in MLflow."""
-    with mlflow.start_run(run_name=name) as run:
+    """Fit one model on train, evaluate every split and log the run in MLflow.
+
+    ``nested=True`` opens the run as a child of the active one (a search Trial).
+    """
+    with mlflow.start_run(run_name=name, nested=nested) as run:
         start = perf_counter()
         labels = labels_for_splits(model, data["matrices"])
         # Includes the validation and test assignment; fit alone is not separable inside labels_for_splits
@@ -499,7 +517,9 @@ def train_and_log(
                 data["stations"],
                 figure_title,
             )
-            data["k_table"].to_csv(tables / "k_selection.csv", index=False)
+            # A search Trial has no choose_k table: the search itself is the K comparison
+            if "k_table" in data:
+                data["k_table"].to_csv(tables / "k_selection.csv", index=False)
             mlflow.log_artifacts(str(plots), artifact_path="plots")
             mlflow.log_artifacts(str(tables), artifact_path="tables")
         if log_model:
@@ -620,6 +640,64 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
     )
 
     return result["run_id"]
+
+
+def search(model: str = "kmeans", seed: int = SEED) -> str:
+    """Train one nested Trial per K in ``K_VALUES`` and return the Study (parent) run id.
+
+    The winner is the Trial with the best validation silhouette (ties go to the smaller K, see
+    ``select_winner``); December is logged by every Trial but never used to choose.  The Study
+    keeps the search space, the winner and the comparison table in ``search/``.
+    """
+    if model not in MODELS:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}")
+    setup_experiment()
+    data = load_data(CLUSTERING_FEATURES_DIR)
+    space = {"n_clusters": list(K_VALUES)}
+    rows = []
+    # Inside `mlflow run` this resumes the entry point's run, which ignores run_name: name it by tag
+    with mlflow.start_run() as study:
+        mlflow.set_tags(
+            {
+                **base_tags("p3", model, "search"),
+                "mlflow.runName": f"p3-search-{model}",
+                "hypothesis": "The K that best separates the hourly profiles lies between 3 and 6",
+                "objective": "maximize val_silhouette",
+            }
+        )
+        mlflow.log_params({"seed": seed, "search_space": json.dumps(space)})
+        for k in K_VALUES:
+            estimator, params = build_estimator(model, k, seed, k_selection="search trial")
+            record = train_and_log(
+                f"p3-search-{model}-k{k:02d}",
+                estimator,
+                model,
+                data,
+                seed,
+                model_params=params,
+                figure_title=f"Perfiles horarios medios por clúster — {model}, K={k} (ventana de ajuste)",
+                log_model=True,
+                stage="search",
+                nested=True,
+            )
+            rows.append({"k": k, **record})
+        winner = select_winner(rows)
+        mlflow.log_metrics(
+            {"best_val_silhouette": winner["val_silhouette"], "best_k": winner["k"]}
+        )
+        mlflow.set_tag("best_run_id", winner["run_id"])
+        columns = ["run_id", "k", "val_silhouette", "val_davies_bouldin", "val_temporal_ari"]
+        table = pd.DataFrame(rows)[columns]
+        table["selected"] = table["run_id"] == winner["run_id"]
+        with tempfile.TemporaryDirectory() as folder:
+            table.to_csv(Path(folder) / "search_results.csv", index=False)
+            mlflow.log_artifacts(folder, artifact_path="search")
+    # The winning Trial is already closed; the client tags it without reopening it
+    mlflow.MlflowClient().set_tag(winner["run_id"], "selected", "true")
+    logger.success(
+        f"p3-search-{model}: K={winner['k']} wins (val_silhouette {winner['val_silhouette']:.4f})"
+    )
+    return study.info.run_id
 
 
 @app.command()
