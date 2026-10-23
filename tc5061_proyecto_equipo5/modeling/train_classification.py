@@ -500,7 +500,11 @@ def selection_summary(
     n_alerts = int(np.count_nonzero(np.asarray(prediction) != 0))
     return {
         "run_id": run_id,
-        "rule": "max val_pr_auc_minority_mean, tie-break val_macro_f1; clean runs only",
+        "rule": (
+            f"prefer val_recall_shortage >= {P2_MIN_RECALL_SHORTAGE:.2f} and "
+            "threshold_fallback=false; max val_pr_auc_minority_mean, tie-break val_macro_f1; "
+            "clean runs only, same commit for automatic selection"
+        ),
         "thresholds": {
             "shortage": float(thresholds[1]),
             "saturation": float(thresholds[2]),

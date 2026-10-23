@@ -232,6 +232,8 @@ def test_selection_summary_counts_alerts_and_per_day_rate():
     )
 
     assert summary["run_id"] == "run-1"
+    assert "val_recall_shortage" in summary["rule"]
+    assert "threshold_fallback=false" in summary["rule"]
     assert summary["n_alerts"] == 3
     assert summary["alerts_per_day"] == pytest.approx(1.5)
     assert summary["thresholds"] == {"shortage": 0.2, "saturation": 0.3}
@@ -471,16 +473,24 @@ def _install_fake_tracking(monkeypatch):
             tracking.log_params(
                 {"data_version": train_classification.data_version(), **model_params}
             )
-            val_macro_f1 = (
-                0.40
-                + float(model_params["learning_rate"])
-                + (float(model_params["num_leaves"]) / 1000)
-            )
+            learning_rate = float(model_params["learning_rate"])
+            num_leaves = float(model_params["num_leaves"])
+            val_macro_f1 = 0.40 + learning_rate + (num_leaves / 1000)
+            # One high-AP trial violates the recall guardrail and must not be promoted; the
+            # remaining AP order deliberately differs from the macro-F1 order.
+            if learning_rate == 0.1 and num_leaves == 127:
+                val_pr_auc_minority_mean = 0.99
+                val_recall_shortage = 0.50
+                threshold_fallback = True
+            else:
+                val_pr_auc_minority_mean = 0.60 - learning_rate - (num_leaves / 1000)
+                val_recall_shortage = 0.90
+                threshold_fallback = False
             tracking.log_metrics(
                 {
                     "val_macro_f1": val_macro_f1,
-                    "val_pr_auc_minority_mean": val_macro_f1,
-                    "val_recall_shortage": 0.90,
+                    "val_pr_auc_minority_mean": val_pr_auc_minority_mean,
+                    "val_recall_shortage": val_recall_shortage,
                     "val_precision_shortage": 0.60,
                     "val_precision_saturation": 0.60,
                 }
@@ -490,10 +500,10 @@ def _install_fake_tracking(monkeypatch):
             "run_name": name,
             "model": model,
             "thresholds": {1: 0.5, 2: 0.5},
-            "threshold_fallback": False,
+            "threshold_fallback": threshold_fallback,
             "val_macro_f1": val_macro_f1,
-            "val_pr_auc_minority_mean": val_macro_f1,
-            "val_recall_shortage": 0.90,
+            "val_pr_auc_minority_mean": val_pr_auc_minority_mean,
+            "val_recall_shortage": val_recall_shortage,
             "val_precision_shortage": 0.60,
             "val_precision_saturation": 0.60,
             "fit_seconds": 0.0,
@@ -573,9 +583,11 @@ def test_search_promotes_the_winning_grid_config_as_a_selectable_candidate(monke
     assert set(table["run_id"]) == trial_ids
     assert table["hyperparams"].nunique() == 9
 
+    # The highest-AP trial violates the recall guardrail, so the promoted winner is the best
+    # eligible AP trial even though another eligible trial has a higher macro-F1.
     winner = {
-        "learning_rate": 0.1,
-        "num_leaves": 127,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
         "min_child_samples": 100,
     }
     winning_call = next(
@@ -605,6 +617,49 @@ def test_search_promotes_the_winning_grid_config_as_a_selectable_candidate(monke
     assert tracking.runs[candidate_id]["tags"]["stage_of_work"] == "candidate"
     assert tracking.runs[parent_id]["params"]["best_candidate_run_id"] == candidate_id
     assert tracking.runs[parent_id]["params"]["best_run_id"] == winning_id
+
+    # The guardrail rejects the 0.99-AP trial, and AP (not macro-F1) chooses the winner.
+    rejected_call = next(
+        call
+        for call in searches
+        if call["model_params"]
+        == {
+            "model": "lightgbm",
+            "seed": seed,
+            "learning_rate": 0.1,
+            "num_leaves": 127,
+            "min_child_samples": 100,
+        }
+    )
+    rejected_id = next(
+        run_id for run_id, run in tracking.runs.items() if run["name"] == rejected_call["name"]
+    )
+    macro_better_call = next(
+        call
+        for call in searches
+        if call["model_params"]
+        == {
+            "model": "lightgbm",
+            "seed": seed,
+            "learning_rate": 0.05,
+            "num_leaves": 63,
+            "min_child_samples": 100,
+        }
+    )
+    macro_better_id = next(
+        run_id for run_id, run in tracking.runs.items() if run["name"] == macro_better_call["name"]
+    )
+    winning_metrics = tracking.runs[winning_id]["metrics"]
+    rejected_metrics = tracking.runs[rejected_id]["metrics"]
+    macro_better_metrics = tracking.runs[macro_better_id]["metrics"]
+    assert rejected_metrics["val_pr_auc_minority_mean"] > winning_metrics["val_pr_auc_minority_mean"]
+    assert rejected_metrics["val_recall_shortage"] < train_classification.P2_MIN_RECALL_SHORTAGE
+    assert winning_metrics["val_recall_shortage"] >= train_classification.P2_MIN_RECALL_SHORTAGE
+    assert macro_better_metrics["val_macro_f1"] > winning_metrics["val_macro_f1"]
+    assert (
+        macro_better_metrics["val_pr_auc_minority_mean"]
+        < winning_metrics["val_pr_auc_minority_mean"]
+    )
 
     # The parent records the data version that the trials and the candidate log.
     assert tracking.runs[parent_id]["params"]["data_version"] == "synthetic-v1"
