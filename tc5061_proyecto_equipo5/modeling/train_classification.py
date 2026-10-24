@@ -511,7 +511,7 @@ def selection_summary(
         },
         "threshold_fallback": bool(fallback),
         "n_alerts": n_alerts,
-        "alerts_per_day": n_alerts / n_test_dates if n_test_dates else 0.0,
+        "alerts_per_day": alerts_per_day(n_alerts, n_test_dates),
         "recall_shortage": float(test_metrics["test_recall_shortage"]),
         "precision_shortage": float(test_metrics["test_precision_shortage"]),
         "recall_saturation": float(test_metrics["test_recall_saturation"]),
@@ -582,6 +582,11 @@ def predict_ms_per_1k(model, X) -> float:
     return elapsed * 1000.0 * 1000.0 / rows
 
 
+def alerts_per_day(n_alerts: int, n_dates: int) -> float:
+    """Return the alert rate per day, or ``0.0`` when no day is available."""
+    return n_alerts / n_dates if n_dates else 0.0
+
+
 def train_and_log(
     name: str,
     model,
@@ -612,8 +617,8 @@ def train_and_log(
         val_metrics["fit_seconds"] = fit_seconds
         val_metrics["predict_ms_per_1k"] = predict_ms_per_1k(model, X_val)
         val_metrics["val_alerts"] = int(np.count_nonzero(prediction_val != 0))
-        val_metrics["val_alerts_per_day"] = (
-            val_metrics["val_alerts"] / data["n_dates"]["validation"]
+        val_metrics["val_alerts_per_day"] = alerts_per_day(
+            val_metrics["val_alerts"], data.get("n_dates", {}).get("validation", 0)
         )
 
         params = {
@@ -731,8 +736,8 @@ def choose_run(
     (``val_recall_shortage >= P2_MIN_RECALL_SHORTAGE`` and ``threshold_fallback=false``) are
     preferred; when none does, the best AP run is returned so ``select`` can surface the fallback.
     Unless ``allow_dirty`` is set, only runs trained from a clean tree are eligible.  When
-    ``git_commit`` is given, runs from other commits are excluded, so a clean run from another
-    branch cannot become the selected evidence by accident.
+    ``git_commit`` is given, runs from other commits are excluded even if ``allow_dirty`` is set,
+    so a local run from another branch cannot become the selected evidence by accident.
     """
     if "tags.question" not in runs.columns or "tags.stage_of_work" not in runs.columns:
         raise ValueError("No P2 baseline or candidate runs found")
@@ -740,29 +745,24 @@ def choose_run(
         raise ValueError("Runs are missing the git_dirty tag")
     if git_commit is not None and "tags.git_commit" not in runs.columns:
         raise ValueError("Runs are missing the git_commit tag")
-    candidates_frame = runs[
+    candidates = runs[
         (runs["tags.question"] == "p2")
         & (runs["tags.stage_of_work"].isin(["baseline", "candidate"]))
-    ].copy()
+    ]
     if not allow_dirty:
-        candidates_frame = candidates_frame[candidates_frame["tags.git_dirty"] == "false"]
-        if git_commit is not None:
-            candidates_frame = candidates_frame[candidates_frame["tags.git_commit"] == git_commit]
-    if candidates_frame.empty:
+        candidates = candidates[candidates["tags.git_dirty"].astype(str).str.lower().eq("false")]
+    if git_commit is not None:
+        candidates = candidates[candidates["tags.git_commit"] == git_commit]
+    if candidates.empty:
         clean = "clean " if not allow_dirty else ""
         commit_note = f" from {git_commit[:7]}" if git_commit else ""
         raise ValueError(f"No {clean}P2 baseline or candidate runs found{commit_note}")
-    clean = candidates_frame
-    if not allow_dirty:
-        clean = clean[clean["tags.git_dirty"].astype(str).str.lower().eq("false")]
-    if clean.empty:
-        raise ValueError("No clean P2 baseline or candidate run; commit or stash the tree first")
 
-    clean = _prefer_guardrailed(clean)
+    selected = _prefer_guardrailed(candidates).copy()
     for column in ("metrics.val_pr_auc_minority_mean", "metrics.val_macro_f1"):
-        if column not in clean.columns:
-            clean[column] = 0.0
-    return clean.sort_values(
+        if column not in selected.columns:
+            selected[column] = 0.0
+    return selected.sort_values(
         ["metrics.val_pr_auc_minority_mean", "metrics.val_macro_f1"],
         ascending=False,
         na_position="last",

@@ -291,6 +291,27 @@ def test_choose_run_allows_dirty_runs_for_local_work():
     assert chosen["run_id"] == "dirty-best"
 
 
+def test_choose_run_filters_by_commit_when_dirty_runs_are_allowed():
+    # With allow_dirty=True the commit filter must still apply: the higher-AP run comes from
+    # another commit and must not become the selected local evidence.
+    runs = pd.DataFrame(
+        [
+            {**_run("dirty-other-commit", 0.70, 0.95, dirty="true"), "tags.git_commit": "def456"},
+            {**_run("dirty-head", 0.40, 0.45, dirty="true"), "tags.git_commit": "abc123"},
+        ]
+    )
+
+    chosen = train_classification.choose_run(runs, allow_dirty=True, git_commit="abc123")
+
+    assert chosen["run_id"] == "dirty-head"
+
+
+def test_alerts_per_day_guards_zero_dates():
+    assert train_classification.alerts_per_day(0, 0) == 0.0
+    assert train_classification.alerts_per_day(6, 0) == 0.0
+    assert train_classification.alerts_per_day(3, 2) == pytest.approx(1.5)
+
+
 def test_persistence_baseline_uses_the_normalized_lag_two_flow():
     # net_flow_lag2 is already divided by capacity in features.py; capacity must not be used again.
     X = pd.DataFrame(
