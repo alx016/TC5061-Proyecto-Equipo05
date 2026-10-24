@@ -770,7 +770,7 @@ def clustering(
             model_params={"n_init": 10, "init": "k-means++"},
             figure_title=f"Perfiles horarios medios por clúster — K-Means, K={REFERENCE_K} (ventana de ajuste)",
             log_model=True,
-            stage="candidate",
+            stage="baseline",
         )
     ]
     records.append(
