@@ -732,12 +732,12 @@ def search(model: str = "kmeans", seed: int = SEED) -> str:
         mlflow.set_tag("best_run_id", winner["run_id"])
         columns = ["run_id", "k", "val_silhouette", "val_davies_bouldin", "val_temporal_ari"]
         table = pd.DataFrame(rows)[columns]
-        table["selected"] = table["run_id"] == winner["run_id"]
+        table["search_winner"] = table["run_id"] == winner["run_id"]
         with tempfile.TemporaryDirectory() as folder:
             table.to_csv(Path(folder) / "search_results.csv", index=False)
             mlflow.log_artifacts(folder, artifact_path="search")
     # The winning Trial is already closed; the client tags it without reopening it
-    mlflow.MlflowClient().set_tag(winner["run_id"], "selected", "true")
+    mlflow.MlflowClient().set_tag(winner["run_id"], "search_winner", "true")
     logger.success(
         f"p3-search-{model}: K={winner['k']} wins (val_silhouette {winner['val_silhouette']:.4f})"
     )

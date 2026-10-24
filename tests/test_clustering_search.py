@@ -93,8 +93,10 @@ def test_search_logs_one_nested_trial_per_k_and_tags_the_winner(tracking_store, 
     assert study.data.tags["mlflow.runName"] == "p3-search-kmeans"
     assert study.data.tags["stage_of_work"] == "search"
     assert study.data.metrics["best_k"] == 4
-    winner = {run.info.run_id for run in trials if run.data.tags.get("selected") == "true"}
+    winner = {run.info.run_id for run in trials if run.data.tags.get("search_winner") == "true"}
     assert winner == {study.data.tags["best_run_id"]}
+    # selected is reserved for the single run chosen by select
+    assert not any("selected" in run.data.tags for run in trials)
     assert [artifact.path for artifact in client.list_artifacts(study_id, "search")] == [
         "search/search_results.csv"
     ]
