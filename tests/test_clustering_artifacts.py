@@ -3,6 +3,8 @@
 All tests use small synthetic matrices, so they do not need the real profile artifacts.
 """
 
+import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,6 +14,7 @@ from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.exceptions import NotFittedError
 from sklearn.metrics.pairwise import euclidean_distances
 
+from tc5061_proyecto_equipo5.modeling.common import log_model_with_signature
 from tc5061_proyecto_equipo5.modeling.train_clustering import (
     ASSIGNMENTS,
     MODELS,
@@ -298,3 +301,34 @@ def test_temporal_ari_is_nan_with_fewer_than_two_shared_stations():
     ari = temporal_ari(stations([1, 2]), np.array([0, 1]), stations([2, 3]), np.array([0, 1]))
 
     assert np.isnan(ari)
+
+
+def test_logged_p3_model_signature_names_the_columns(tmp_path, monkeypatch):
+    # Throwaway store and artifact folder, so the test leaves nothing in the repo's mlruns/
+    monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
+    previous = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+    mlflow.set_experiment(
+        experiment_id=mlflow.create_experiment(
+            "p3-signature-test", artifact_location=(tmp_path / "artifacts").as_uri()
+        )
+    )
+    names = ["departures_hour_08", "arrivals_hour_18", "asymmetry"]
+    train = pd.DataFrame(np.random.default_rng(0).normal(size=(20, 3)), columns=names)
+    model = WardClusterer(n_clusters=2).fit(train)
+    try:
+        with mlflow.start_run() as run:
+            # Same format as train_and_log: skops would reject the WardClusterer class
+            log_model_with_signature(
+                model,
+                train,
+                serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+            )
+        loaded = mlflow.pyfunc.load_model(f"runs:/{run.info.run_id}/model")
+    finally:
+        mlflow.set_tracking_uri(previous)
+
+    assert loaded.metadata.get_input_schema().input_names() == names
+    # The signature matches columns by name, so a reordered frame gets the same labels
+    reordered = train[names[::-1]]
+    np.testing.assert_array_equal(loaded.predict(reordered), model.predict(train))

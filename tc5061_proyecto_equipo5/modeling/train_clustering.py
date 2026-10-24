@@ -593,7 +593,8 @@ def load_data(base_dir: Path) -> dict:
         "source": base_dir / "ready" / "train",
     }
     for split in SPLITS:
-        data["keys"][split], data["matrices"][split] = load_split(base_dir, split)
+        data["keys"][split], matrix = load_split(base_dir, split)
+        data["matrices"][split] = pd.DataFrame(matrix, columns=data["names"])
     data["windows"] = {split: window_labels(keys) for split, keys in data["keys"].items()}
 
     return data
