@@ -351,11 +351,14 @@ def save_artifacts(
     """Write the figures to ``plots`` and the CSV tables to ``tables``.
 
     Figures: hourly centroids, station map and the validation silhouette per station.  Tables:
-    cluster sizes per split and the profile summary.
+    cluster sizes in train and validation and the profile summary.
     """
     sizes = (
         pd.DataFrame(
-            {split: pd.Series(labels[split]).value_counts().sort_index() for split in SPLITS}
+            {
+                split: pd.Series(labels[split]).value_counts().sort_index()
+                for split in ("train", "validation")
+            }
         )
         .fillna(0)
         .astype(int)
@@ -481,14 +484,16 @@ def train_and_log(
             }
         )
         metrics = {}
-        for split in SPLITS:
-            prefix = "val_" if split == "validation" else f"{split}_"
+        # December is scored once, by select, for the chosen run only
+        for split, prefix in (("train", "train_"), ("validation", "val_")):
             metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
-        # Stability: do the train stations keep their group in the later windows?
-        for split, prefix in (("validation", "val_"), ("test", "test_")):
-            metrics[f"{prefix}temporal_ari"] = temporal_ari(
-                data["keys"]["train"], labels["train"], data["keys"][split], labels[split]
-            )
+        # Stability: do the train stations keep their group in the validation window?
+        metrics["val_temporal_ari"] = temporal_ari(
+            data["keys"]["train"],
+            labels["train"],
+            data["keys"]["validation"],
+            labels["validation"],
+        )
         params = {
             "study_year": STUDY_YEAR,
             "seed": seed,
@@ -660,7 +665,7 @@ def search(model: str = "kmeans", seed: int = SEED) -> str:
     """Train one nested Trial per K in ``K_VALUES`` and return the Study (parent) run id.
 
     The winner is the Trial with the best validation silhouette (ties go to the smaller K, see
-    ``select_winner``); December is logged by every Trial but never used to choose.  The Study
+    ``select_winner``); no Trial scores December, that is left to ``select``.  The Study
     keeps the search space, the winner and the comparison table in ``search/``.
     """
     if model not in MODELS:
