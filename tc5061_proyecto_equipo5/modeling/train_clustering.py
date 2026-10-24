@@ -87,7 +87,9 @@ class WardClusterer(ClusterMixin, BaseEstimator):
     train labels and assigns new stations (validation, December, production) to the nearest train
     cluster mean, the same rule K-Means uses, so both models are compared like for like.  Because
     Ward groups by hierarchy, ``predict`` on the train rows can disagree with ``labels_`` for a few
-    border stations.  Ward needs O(n^2) memory: fine for a few hundred stations, not for P1 rows.
+    border stations; the evaluation never uses ``labels_``, every split (train included) is
+    labeled with ``predict``.  Ward needs O(n^2) memory: fine for a few hundred stations, not for
+    P1 rows.
     """
 
     def __init__(self, n_clusters=REFERENCE_K):
@@ -227,19 +229,29 @@ def choose_k(
     return best, table
 
 
-def labels_for_splits(model, matrices: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """Assign every split with the model fitted on train.
+def predict_ms_per_1k(model, X: np.ndarray) -> float:
+    """Measure prediction time for 1,000 rows (or fewer) in milliseconds."""
+    rows = min(1000, len(X))
+    start = perf_counter()
+    model.predict(X[:rows])
+    return (perf_counter() - start) * 1000.0 * 1000.0 / rows
 
-    Models are assigned with a predict method, for Ward that is the nearest centroid,
-    so the validation and December stations are assigned to the nearest train cluster mean; that
-    approximation is logged as a parameter and it makes the comparison consistent, because K-Means
-    uses exactly the same rule.
+
+def labels_for_splits(
+    model, matrices: dict[str, np.ndarray]
+) -> tuple[dict[str, np.ndarray], float]:
+    """Fit the model on train and assign every split with its predict method.
+
+    Train, validation and December all use the same rule (for Ward, the nearest train cluster
+    mean), the rule the logged model applies in production, so the temporal ARI compares like
+    with like.  Returns the labels per split and the seconds spent in ``fit`` alone.
     """
-    labels = {"train": model.fit_predict(matrices["train"])}
+    start = perf_counter()
+    model.fit(matrices["train"])
+    fit_seconds = perf_counter() - start
 
-    for split in ("validation", "test"):
-        labels[split] = model.predict(matrices[split])
-    return labels
+    labels = {split: model.predict(matrices[split]) for split in SPLITS}
+    return labels, fit_seconds
 
 
 def centroid_frame(matrix: np.ndarray, labels: np.ndarray, names: list[str]) -> pd.DataFrame:
@@ -461,11 +473,13 @@ def train_and_log(
     ``nested=True`` opens the run as a child of the active one (a search Trial).
     """
     with mlflow.start_run(run_name=name, nested=nested) as run:
-        start = perf_counter()
-        labels = labels_for_splits(model, data["matrices"])
-        # Includes the validation and test assignment; fit alone is not separable inside labels_for_splits
-        fit_seconds = perf_counter() - start
-        mlflow.log_metric("fit_seconds", fit_seconds)
+        labels, fit_seconds = labels_for_splits(model, data["matrices"])
+        mlflow.log_metrics(
+            {
+                "fit_seconds": fit_seconds,
+                "predict_ms_per_1k": predict_ms_per_1k(model, data["matrices"]["validation"]),
+            }
+        )
         metrics = {}
         for split in SPLITS:
             prefix = "val_" if split == "validation" else f"{split}_"

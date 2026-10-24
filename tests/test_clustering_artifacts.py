@@ -103,7 +103,7 @@ def test_labels_for_splits_assigns_every_split_with_kmeans():
     other = np.vstack([np.zeros((3, 2)), np.full((3, 2), 10.0)])
     matrices = {"train": train, "validation": other, "test": other}
 
-    labels = labels_for_splits(KMeans(n_clusters=2, n_init=10, random_state=0), matrices)
+    labels, _ = labels_for_splits(KMeans(n_clusters=2, n_init=10, random_state=0), matrices)
 
     assert set(labels) == {"train", "validation", "test"}
     assert len(labels["validation"]) == 6
@@ -116,10 +116,22 @@ def test_labels_for_splits_assigns_every_split_with_ward():
     other = np.vstack([np.zeros((3, 2)), np.full((3, 2), 10.0)])
     matrices = {"train": train, "validation": other, "test": other}
 
-    labels = labels_for_splits(WardClusterer(n_clusters=2), matrices)
+    labels, _ = labels_for_splits(WardClusterer(n_clusters=2), matrices)
 
     assert len(labels["test"]) == 6
     assert len(set(labels["test"].tolist())) == 2
+
+
+def test_labels_for_splits_labels_ward_train_with_predict():
+    rng = np.random.default_rng(0)
+    train = rng.normal(size=(40, 3))
+    matrices = {"train": train, "validation": train, "test": train}
+    model = WardClusterer(n_clusters=3)
+
+    labels, fit_seconds = labels_for_splits(model, matrices)
+
+    np.testing.assert_array_equal(labels["train"], model.predict(train))
+    assert fit_seconds >= 0
 
 
 def test_load_split_rejects_a_matrix_with_the_wrong_row_count(tmp_path):
