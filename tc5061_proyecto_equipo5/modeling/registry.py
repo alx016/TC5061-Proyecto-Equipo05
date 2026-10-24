@@ -18,6 +18,18 @@ MODEL_NAMES = {
     "p2": f"{EXPERIMENT_NAME}-p2-riesgo",
     "p3": f"{EXPERIMENT_NAME}-p3-grupos",
 }
+# What each registered model answers, shown first in the Model Registry UI
+MODEL_DESCRIPTIONS = {
+    "p1": "P1 demanda: viajes que iniciaran en cada estacion la siguiente hora. Metrica: WAPE.",
+    "p2": (
+        "P2 riesgo: desabasto, balanceada o saturacion de cada estacion la siguiente hora. "
+        "Metricas: macro-F1 y PR-AUC."
+    ),
+    "p3": (
+        "P3 grupos: estaciones agrupadas por su perfil horario de uso. "
+        "Metricas: silhouette y Davies-Bouldin."
+    ),
+}
 # champion serves; challenger waits for comparison. A new version starts as challenger.
 ALIASES = {"champion", "challenger"}
 
@@ -44,7 +56,7 @@ def main(
     run_id: Annotated[str, typer.Option(help="Run that logged the model")],
     alias: Annotated[str, typer.Option(help="champion or challenger")] = "challenger",
 ):
-    """Register the model of one run and point an alias to the new version."""
+    """Register the model of one run and point an alias to its new version."""
     if alias not in ALIASES:
         raise typer.BadParameter(f"Alias must be one of {sorted(ALIASES)}, got {alias!r}")
 
@@ -92,6 +104,11 @@ def main(
         logger.info(f"Run {run_id} is already {name} version {version.version}; reusing it")
     else:
         version = mlflow.register_model(model_uri=model_uri, name=name)
+
+    # The registered model says what it answers; each version says where it came from
+    client.update_registered_model(name, description=MODEL_DESCRIPTIONS[question])
+    client.set_registered_model_tag(name, "question", question)
+    client.set_registered_model_tag(name, "team", "equipo05")
     tags = lineage_tags(question, run, alias)
 
     # Lineage tags copied from the run, so the version can be traced without opening it
@@ -108,7 +125,7 @@ def main(
         name,
         version.version,
         description=(
-            f"{tags['model_family']} trained in run {run_id} "
+            f"{tags['model_family']} entrenado en el run {run_id} "
             f"(commit {tags['git_commit']}, data_version {tags['data_version']})."
         ),
     )

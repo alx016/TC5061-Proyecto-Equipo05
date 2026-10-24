@@ -107,6 +107,9 @@ def test_register_adds_tags_and_challenger_alias(tracking):
     assert version.tags["data_version"] == "abc123"
     assert version.tags["selection_rule"] == "min val_wape"
     assert run_id in version.description
+    model = MlflowClient().get_registered_model(P1_NAME)
+    assert "WAPE" in model.description
+    assert model.tags["question"] == "p1"
 
 
 def test_new_champion_moves_the_alias(tracking):
