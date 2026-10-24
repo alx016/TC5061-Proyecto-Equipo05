@@ -22,6 +22,7 @@ from tc5061_proyecto_equipo5.modeling.train_clustering import (
     column_names,
     labels_for_splits,
     load_split,
+    model_space_metrics,
     profile_summary,
     save_silhouette_plot,
     temporal_ari,
@@ -132,6 +133,32 @@ def test_labels_for_splits_labels_ward_train_with_predict():
 
     np.testing.assert_array_equal(labels["train"], model.predict(train))
     assert fit_seconds >= 0
+
+
+def test_model_space_metrics_scores_kmeans_scaled_in_its_standardized_space():
+    rng = np.random.default_rng(0)
+    # The second column is 100 times wider, so standardizing changes the distances
+    train = rng.normal(size=(40, 2)) * np.array([1.0, 100.0])
+    model, _ = build_estimator("kmeans_scaled", 3, seed=0, k_selection="test")
+    labels = model.fit(train).predict(train)
+
+    metrics = model_space_metrics(model, train, labels)
+
+    standardized = model[:-1].transform(train)
+    expected = cluster_metrics(standardized, labels, "val_")["val_silhouette"]
+    assert metrics == {"val_silhouette_model_space": pytest.approx(expected)}
+    assert metrics["val_silhouette_model_space"] != pytest.approx(
+        cluster_metrics(train, labels, "val_")["val_silhouette"]
+    )
+
+
+@pytest.mark.parametrize("model", ["gmm", "kmeans", "minibatch_kmeans", "ward"])
+def test_model_space_metrics_is_empty_for_models_without_a_transform(model):
+    train = np.vstack([np.zeros((10, 2)), np.full((10, 2), 10.0)])
+    estimator, _ = build_estimator(model, 2, seed=0, k_selection="test")
+    labels = estimator.fit(train).predict(train)
+
+    assert model_space_metrics(estimator, train, labels) == {}
 
 
 def test_load_split_rejects_a_matrix_with_the_wrong_row_count(tmp_path):

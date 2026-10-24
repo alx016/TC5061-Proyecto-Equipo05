@@ -39,7 +39,7 @@ from sklearn.metrics import (
 )
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.mixture import GaussianMixture
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
 import typer
@@ -157,7 +157,12 @@ def window_labels(keys: pd.DataFrame) -> str:
 
 
 def cluster_metrics(matrix: np.ndarray, labels: np.ndarray, prefix: str) -> dict[str, float]:
-    """Return the silhouette and Davies-Bouldin scores of one split."""
+    """Return the silhouette and Davies-Bouldin scores of one split.
+
+    Every P3 model is scored on the frozen profile matrix, the common space where the columns
+    keep their business meaning (share of trips per hour), so the scores compare across models
+    even when a model clusters in another space, like the standardized ``kmeans_scaled``.
+    """
     groups = len(set(labels.tolist()))
     if groups < 2 or groups >= matrix.shape[0]:
         return {f"{prefix}silhouette": float("nan"), f"{prefix}davies_bouldin": float("nan")}
@@ -165,6 +170,22 @@ def cluster_metrics(matrix: np.ndarray, labels: np.ndarray, prefix: str) -> dict
         f"{prefix}silhouette": float(silhouette_score(matrix, labels)),
         f"{prefix}davies_bouldin": float(davies_bouldin_score(matrix, labels)),
     }
+
+
+def model_space_metrics(model, matrix: np.ndarray, labels: np.ndarray) -> dict[str, float]:
+    """Return the validation silhouette in the space the model clustered, for pipelines only.
+
+    A pipeline transforms the profiles before clustering (``kmeans_scaled`` standardizes them),
+    so this describes how well it separates the groups by its own rule.  It is descriptive: it
+    does not compare across models and selection never uses it.
+    """
+    if not isinstance(model, Pipeline):
+        return {}
+    transformed = model[:-1].transform(matrix)
+    groups = len(set(labels.tolist()))
+    if groups < 2 or groups >= transformed.shape[0]:
+        return {"val_silhouette_model_space": float("nan")}
+    return {"val_silhouette_model_space": float(silhouette_score(transformed, labels))}
 
 
 def temporal_ari(
@@ -487,6 +508,9 @@ def train_and_log(
         # December is scored once, by select, for the chosen run only
         for split, prefix in (("train", "train_"), ("validation", "val_")):
             metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
+        metrics.update(
+            model_space_metrics(model, data["matrices"]["validation"], labels["validation"])
+        )
         # Stability: do the train stations keep their group in the validation window?
         metrics["val_temporal_ari"] = temporal_ari(
             data["keys"]["train"],
