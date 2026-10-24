@@ -26,10 +26,10 @@ entry_points:
       hp_n_estimators: {type: int, default: -1}
       hp_learning_rate: {type: float, default: -1}
       hp_num_leaves: {type: int, default: -1}
-      hp_min_child_samples: {type: float, default: -1}
-      hp_max_depth: {type: float, default: -1}
-      hp_min_samples_leaf: {type: float, default: -1}
-      hp_max_leaf_nodes: {type: float, default: -1}
+      hp_min_child_samples: {type: int, default: -1}
+      hp_max_depth: {type: int, default: -1}
+      hp_min_samples_leaf: {type: int, default: -1}
+      hp_max_leaf_nodes: {type: int, default: -1}
       hp_alpha: {type: float, default: -1}
       hp_C: {type: float, default: -1}
       hp_n_clusters: {type: int, default: -1}
