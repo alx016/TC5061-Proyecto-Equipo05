@@ -480,6 +480,37 @@ def select_winner(rows: list[dict]) -> dict:
     return best
 
 
+def choose_run(
+    runs: pd.DataFrame, allow_dirty: bool = False, git_commit: str | None = None
+) -> pd.Series:
+    """Pick the P3 baseline or candidate run with the best validation silhouette.
+
+    Ties go to the lower validation Davies-Bouldin, then to the smaller K.  Runs with a NaN
+    silhouette are ignored.  Unless ``allow_dirty`` is set, only runs trained from a clean tree
+    are eligible; when ``git_commit`` is given, runs from other commits are excluded, so a run
+    from another branch cannot become the selected model by accident.
+    """
+    needed = {"tags.question", "tags.stage_of_work", "metrics.val_silhouette"}
+    if not needed <= set(runs.columns):
+        raise ValueError("No P3 baseline or candidate runs found")
+    candidates = runs[
+        (runs["tags.question"] == "p3")
+        & runs["tags.stage_of_work"].isin(["baseline", "candidate"])
+        & np.isfinite(runs["metrics.val_silhouette"])
+    ]
+    if not allow_dirty:
+        candidates = candidates[candidates["tags.git_dirty"].astype(str).str.lower().eq("false")]
+    if git_commit is not None:
+        candidates = candidates[candidates["tags.git_commit"] == git_commit]
+    if candidates.empty:
+        raise ValueError("No eligible P3 baseline or candidate run found")
+    ranked = candidates.assign(k=pd.to_numeric(candidates["params.n_clusters"])).sort_values(
+        ["metrics.val_silhouette", "metrics.val_davies_bouldin", "k"],
+        ascending=[False, True, True],
+    )
+    return ranked.iloc[0]
+
+
 def train_and_log(
     name: str,
     model,
