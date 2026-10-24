@@ -77,8 +77,37 @@ def test_fractional_integer_option_is_rejected(monkeypatch):
     assert calls == []
 
 
+def test_p3_casts_n_clusters_from_the_mlflow_float(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p3", fake_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p3", "--model", "kmeans", "--n-clusters=5.0"]
+    )
+
+    assert result.exit_code == 0, result.output
+    # KMeans rejects n_clusters=5.0, so the dispatcher must hand over the integer 5
+    assert calls == [("kmeans", "candidate", SEED, {"n_clusters": 5})]
+    assert isinstance(calls[0][3]["n_clusters"], int)
+
+
+def test_p3_rejects_a_fractional_number_of_clusters(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p3", fake_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p3", "--model", "kmeans", "--n-clusters=4.5"]
+    )
+
+    assert result.exit_code != 0
+    assert "n_clusters must be an integer" in result.output
+    assert calls == []
+
+
 def test_unknown_question_stage_or_missing_trainer_is_rejected(monkeypatch):
     monkeypatch.setitem(train.TRAINERS, "p1", fake_trainer([]))
+    # Every question has a trainer now, so remove one to check the "no train_one yet" guard
+    monkeypatch.delitem(train.TRAINERS, "p3")
 
     for args in (
         ["--question", "p9", "--model", "x"],

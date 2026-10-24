@@ -16,20 +16,32 @@ to the shared MLflow experiment with the helpers in modeling/common.py.
 import json
 from pathlib import Path
 import tempfile
+from time import perf_counter
 
 from loguru import logger
 import matplotlib
 
 matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from sklearn.cluster import AgglomerativeClustering, KMeans
-from sklearn.metrics import davies_bouldin_score, silhouette_score
+from sklearn.base import BaseEstimator, ClusterMixin
+from sklearn.cluster import AgglomerativeClustering, KMeans, MiniBatchKMeans
+from sklearn.metrics import (
+    adjusted_rand_score,
+    davies_bouldin_score,
+    silhouette_samples,
+    silhouette_score,
+)
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.mixture import GaussianMixture
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils.validation import check_is_fitted
 import typer
 
 from tc5061_proyecto_equipo5.config import (
@@ -38,17 +50,67 @@ from tc5061_proyecto_equipo5.config import (
     SEED,
     STUDY_YEAR,
 )
-from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
+from tc5061_proyecto_equipo5.modeling.common import (
+    base_tags,
+    data_version,
+    log_model_with_signature,
+    log_run_context,
+    log_training_input,
+    setup_experiment,
+)
 
 app = typer.Typer()
 
-# P3 artifacts, written by `features build --question p3`
-DEFAULT_BASE_DIR = CLUSTERING_FEATURES_DIR
 SPLITS = ("train", "validation", "test")
+MODELS = ("gmm", "kmeans", "kmeans_scaled", "minibatch_kmeans", "ward")
+# How each model's predict labels the validation and December stations, logged with every run
+ASSIGNMENTS = {
+    "gmm": "highest posterior probability",
+    "kmeans": "nearest centroid",
+    "kmeans_scaled": "nearest centroid in standardized space",
+    "minibatch_kmeans": "nearest centroid",
+    "ward": "nearest train cluster mean",
+}
 # The ML Canvas expects between 3 and 6 functional groups
 K_VALUES = (3, 4, 5, 6)
 # Fixed K of the ablation already published in features_manifest.json, kept for comparability
 REFERENCE_K = 4
+VALID_HYPERPARAMETERS = {"n_clusters"}
+# MLflow sends every numeric parameter as text; these must reach LightGBM as integers.
+INTEGER_HYPERPARAMETERS = {"n_clusters"}
+
+
+class WardClusterer(ClusterMixin, BaseEstimator):
+    """Agglomerative Ward clustering with a ``predict`` method, so it can be logged and registered.
+
+    ``AgglomerativeClustering`` only labels the rows it was fitted on.  This wrapper keeps Ward's
+    train labels and assigns new stations (validation, December, production) to the nearest train
+    cluster mean, the same rule K-Means uses, so both models are compared like for like.  Because
+    Ward groups by hierarchy, ``predict`` on the train rows can disagree with ``labels_`` for a few
+    border stations.  Ward needs O(n^2) memory: fine for a few hundred stations, not for P1 rows.
+    """
+
+    def __init__(self, n_clusters=REFERENCE_K):
+        self.n_clusters = n_clusters
+
+    def fit(self, X: np.ndarray, y=None):
+        """Cluster the train rows with Ward and keep the mean of each cluster as its centroid.
+
+        ``y`` is ignored; it is accepted only to follow the scikit-learn API.
+        """
+        self.model_ = AgglomerativeClustering(n_clusters=self.n_clusters, linkage="ward")
+        self.labels_ = self.model_.fit_predict(X, y)
+        self.n_features_in_ = X.shape[1]
+
+        self.cluster_centers_ = np.vstack(
+            [X[self.labels_ == group].mean(axis=0) for group in sorted(set(self.labels_.tolist()))]
+        )
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Return the label of the nearest train centroid (Euclidean distance) for every row."""
+        check_is_fitted(self)
+        return euclidean_distances(X, self.cluster_centers_).argmin(axis=1)
 
 
 def load_manifest(base_dir: Path) -> dict:
@@ -103,6 +165,28 @@ def cluster_metrics(matrix: np.ndarray, labels: np.ndarray, prefix: str) -> dict
     }
 
 
+def temporal_ari(
+    keys_a: pd.DataFrame, labels_a: np.ndarray, keys_b: pd.DataFrame, labels_b: np.ndarray
+) -> float:
+    """Return the adjusted Rand index between two windows' labels of the same stations.
+
+    Every train station also has a validation and a December profile, so this asks whether the
+    stations keep their group when the season changes.  Rows are matched by ``station_id`` (the
+    splits are not in the same order and later windows add new stations), and the index ignores
+    the label names: a whole group renamed from 0 to 2 still counts as stable.
+    """
+    merged = pd.DataFrame(
+        {"station_id": keys_a["station_id"].to_numpy(), "label_a": labels_a}
+    ).merge(
+        pd.DataFrame({"station_id": keys_b["station_id"].to_numpy(), "label_b": labels_b}),
+        on="station_id",
+        how="inner",
+    )
+    if len(merged) < 2:
+        return float("nan")
+    return float(adjusted_rand_score(merged["label_a"], merged["label_b"]))
+
+
 def choose_k(
     train_matrix: np.ndarray,
     validation_matrix: np.ndarray,
@@ -143,26 +227,18 @@ def choose_k(
     return best, table
 
 
-def labels_for_splits(model, matrices: dict[str, np.ndarray], kind: str) -> dict[str, np.ndarray]:
+def labels_for_splits(model, matrices: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     """Assign every split with the model fitted on train.
 
-    K-Means predicts directly.  Ward has no predict method, so the validation and December stations
-    are assigned to the nearest train cluster mean; that approximation is logged as a parameter and
-    it makes the comparison consistent, because K-Means uses exactly the same rule.
+    Models are assigned with a predict method, for Ward that is the nearest centroid,
+    so the validation and December stations are assigned to the nearest train cluster mean; that
+    approximation is logged as a parameter and it makes the comparison consistent, because K-Means
+    uses exactly the same rule.
     """
     labels = {"train": model.fit_predict(matrices["train"])}
-    if kind == "kmeans":
-        for split in ("validation", "test"):
-            labels[split] = model.predict(matrices[split])
-        return labels
-    means = np.vstack(
-        [
-            matrices["train"][labels["train"] == group].mean(axis=0).ravel()
-            for group in sorted(set(labels["train"].tolist()))
-        ]
-    )
+
     for split in ("validation", "test"):
-        labels[split] = euclidean_distances(matrices[split], means).argmin(axis=1)
+        labels[split] = model.predict(matrices[split])
     return labels
 
 
@@ -217,8 +293,42 @@ def profile_summary(
     return pd.DataFrame(rows).sort_values("cluster")
 
 
+def save_silhouette_plot(folder: Path, matrix: np.ndarray, labels: np.ndarray, title: str) -> None:
+    """Draw the silhouette of every station, grouped by cluster, with the mean as a dashed line.
+
+    Wide groups above zero are well separated; negative bars are stations closer to another group.
+    It is drawn on the raw profile matrix, the same space as the logged silhouette metrics, and
+    skipped when the split has a single group (the silhouette is undefined there).
+    """
+    groups = sorted(set(labels.tolist()))
+    if len(groups) < 2 or len(groups) >= matrix.shape[0]:
+        logger.warning(f"Silhouette plot skipped: {len(groups)} groups for {matrix.shape[0]} rows")
+        return
+    values = silhouette_samples(matrix, labels)
+    figure, axis = plt.subplots(figsize=(7, 6))
+    bottom, centers = 0, []
+    for cluster in groups:
+        cluster_values = np.sort(values[labels == cluster])
+        top = bottom + len(cluster_values)
+        axis.fill_betweenx(np.arange(bottom, top), 0, cluster_values, alpha=0.8)
+        centers.append((bottom + top) / 2)
+        # Leave a gap between groups so each one reads as its own block
+        bottom = top + 10
+    mean = float(values.mean())
+    axis.axvline(mean, color="black", linestyle="--", label=f"Media = {mean:.3f}")
+    axis.set_xlabel("Coeficiente de silhouette")
+    # Group names on the axis, not inside the plot, where negative bars would cover them
+    axis.set_yticks(centers, [f"Clúster {cluster}" for cluster in groups])
+    axis.set_title(title)
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(folder / "silhouette_validation.png", bbox_inches="tight")
+    plt.close(figure)
+
+
 def save_artifacts(
-    folder: Path,
+    plots: Path,
+    tables: Path,
     names: list[str],
     matrices: dict[str, np.ndarray],
     labels: dict[str, np.ndarray],
@@ -226,7 +336,11 @@ def save_artifacts(
     stations: pd.DataFrame,
     title: str,
 ) -> None:
-    """Write the cluster sizes, the hourly centroids, the profile summary and the station map."""
+    """Write the figures to ``plots`` and the CSV tables to ``tables``.
+
+    Figures: hourly centroids, station map and the validation silhouette per station.  Tables:
+    cluster sizes per split and the profile summary.
+    """
     sizes = (
         pd.DataFrame(
             {split: pd.Series(labels[split]).value_counts().sort_index() for split in SPLITS}
@@ -235,7 +349,7 @@ def save_artifacts(
         .astype(int)
     )
     sizes.index.name = "cluster"
-    sizes.to_csv(folder / "cluster_sizes.csv")
+    sizes.to_csv(tables / "cluster_sizes.csv")
 
     centroids = centroid_frame(matrices["train"], labels["train"], names)
     figure, axes = plt.subplots(1, 2, figsize=(13, 5))
@@ -252,7 +366,7 @@ def save_artifacts(
         axis.legend(fontsize=8)
     figure.suptitle(title)
     figure.tight_layout()
-    figure.savefig(folder / "cluster_centroids.png", bbox_inches="tight")
+    figure.savefig(plots / "cluster_centroids.png", bbox_inches="tight")
     plt.close(figure)
 
     train_keys = pd.DataFrame({"station_id": keys_train["station_id"], "cluster": labels["train"]})
@@ -264,7 +378,7 @@ def save_artifacts(
             f"{missing} train stations have no coordinates in the catalog and are skipped"
         )
     profile_summary(centroids, labels["train"], located).to_csv(
-        folder / "cluster_profile_summary.csv", index=False
+        tables / "cluster_profile_summary.csv", index=False
     )
 
     figure, axis = plt.subplots(figsize=(7, 7))
@@ -292,8 +406,15 @@ def save_artifacts(
     axis.set_title(f"Estaciones de la ventana de ajuste por clúster (n={len(located)})")
     axis.legend(fontsize=8)
     figure.tight_layout()
-    figure.savefig(folder / "cluster_map.png", bbox_inches="tight")
+    figure.savefig(plots / "cluster_map.png", bbox_inches="tight")
     plt.close(figure)
+
+    save_silhouette_plot(
+        plots,
+        matrices["validation"],
+        labels["validation"],
+        f"Silhouette por estación, validación (K={len(set(labels['train'].tolist()))})",
+    )
 
 
 def load_stations() -> pd.DataFrame:
@@ -309,6 +430,20 @@ def load_stations() -> pd.DataFrame:
     return stations[["station_id", "name", "latitude", "longitude"]]
 
 
+def select_winner(rows: list[dict]) -> dict:
+    """Pick the Trial with the best validation silhouette; ties go to the smaller K.
+
+    Trials whose silhouette is NaN (a K that leaves one group in validation) are ignored.
+    """
+
+    finite = [row for row in rows if np.isfinite(row["val_silhouette"])]
+    if not finite:
+        raise ValueError("P3 search has no Trial with a finite validation silhouette")
+    best = max(finite, key=lambda row: (row["val_silhouette"], -row["k"]))
+
+    return best
+
+
 def train_and_log(
     name: str,
     model,
@@ -318,42 +453,63 @@ def train_and_log(
     model_params: dict,
     figure_title: str,
     log_model: bool,
+    stage: str = "baseline",
+    nested: bool = False,
 ) -> dict:
-    """Fit one model on train, evaluate every split and log the run in MLflow."""
-    labels = labels_for_splits(model, data["matrices"], kind)
-    metrics = {}
-    for split in SPLITS:
-        prefix = "val_" if split == "validation" else f"{split}_"
-        metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
-    params = {
-        "study_year": STUDY_YEAR,
-        "seed": seed,
-        "model": kind,
-        "n_clusters": len(set(labels["train"].tolist())),
-        "n_train": data["matrices"]["train"].shape[0],
-        "n_val": data["matrices"]["validation"].shape[0],
-        "n_test": data["matrices"]["test"].shape[0],
-        "n_features": data["matrices"]["train"].shape[1],
-        "train_window": data["windows"]["train"],
-        "val_window": data["windows"]["validation"],
-        "test_window": data["windows"]["test"],
-        "feature_set": "station_profiles",
-        "feature_version": data["manifest"]["feature_version"],
-        "feature_data_version": data["manifest"]["data_version"],
-        "data_version": data_version(),
-        "k_selection": "validation silhouette; December never used"
-        if kind == "kmeans"
-        else "inherited from the K-Means choice",
-        "assignment": "predict" if kind == "kmeans" else "nearest train cluster mean",
-        **model_params,
-    }
-    with mlflow.start_run(run_name=name) as run:
+    """Fit one model on train, evaluate every split and log the run in MLflow.
+
+    ``nested=True`` opens the run as a child of the active one (a search Trial).
+    """
+    with mlflow.start_run(run_name=name, nested=nested) as run:
+        start = perf_counter()
+        labels = labels_for_splits(model, data["matrices"])
+        # Includes the validation and test assignment; fit alone is not separable inside labels_for_splits
+        fit_seconds = perf_counter() - start
+        mlflow.log_metric("fit_seconds", fit_seconds)
+        metrics = {}
+        for split in SPLITS:
+            prefix = "val_" if split == "validation" else f"{split}_"
+            metrics.update(cluster_metrics(data["matrices"][split], labels[split], prefix))
+        # Stability: do the train stations keep their group in the later windows?
+        for split, prefix in (("validation", "val_"), ("test", "test_")):
+            metrics[f"{prefix}temporal_ari"] = temporal_ari(
+                data["keys"]["train"], labels["train"], data["keys"][split], labels[split]
+            )
+        params = {
+            "study_year": STUDY_YEAR,
+            "seed": seed,
+            "model": kind,
+            "n_clusters": len(set(labels["train"].tolist())),
+            "n_train": data["matrices"]["train"].shape[0],
+            "n_val": data["matrices"]["validation"].shape[0],
+            "n_test": data["matrices"]["test"].shape[0],
+            "n_features": data["matrices"]["train"].shape[1],
+            "train_window": data["windows"]["train"],
+            "val_window": data["windows"]["validation"],
+            "test_window": data["windows"]["test"],
+            "feature_set": "station_profiles",
+            "feature_version": data["manifest"]["feature_version"],
+            "feature_data_version": data["manifest"]["data_version"],
+            "data_version": data_version(),
+            "k_selection": "validation silhouette; December never used"
+            if kind == "kmeans"
+            else "inherited from the K-Means choice",
+            "assignment": ASSIGNMENTS[kind],
+            **model_params,
+        }
         mlflow.log_params(params)
-        mlflow.set_tags(base_tags("p3", name, "baseline"))
+        mlflow.set_tags(base_tags("p3", kind, stage))
+        log_run_context(params)
+        train = pd.DataFrame(data["matrices"]["train"], columns=data["names"])
+        log_training_input(train, data["source"], "p3-train")
         mlflow.log_metrics(metrics)
         with tempfile.TemporaryDirectory() as folder:
+            plots, tables = Path(folder) / "plots", Path(folder) / "tables"
+            plots.mkdir()
+            tables.mkdir()
             save_artifacts(
-                Path(folder),
+                plots,
+                tables,
                 data["names"],
                 data["matrices"],
                 labels,
@@ -361,10 +517,17 @@ def train_and_log(
                 data["stations"],
                 figure_title,
             )
-            data["k_table"].to_csv(Path(folder) / "k_selection.csv", index=False)
-            mlflow.log_artifacts(folder)
+            # A search Trial has no choose_k table: the search itself is the K comparison
+            if "k_table" in data:
+                data["k_table"].to_csv(tables / "k_selection.csv", index=False)
+            mlflow.log_artifacts(str(plots), artifact_path="plots")
+            mlflow.log_artifacts(str(tables), artifact_path="tables")
         if log_model:
-            mlflow.sklearn.log_model(model, name="model")
+            log_model_with_signature(
+                model,
+                data["matrices"]["train"],
+                serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+            )
         run_id = run.info.run_id
     logger.success(f"{name}: run {run_id} logged")
     return {"run_id": run_id, "run_name": name, **metrics}
@@ -375,14 +538,8 @@ def main() -> None:
     """Train the MiBici clustering models (keeps ``clustering`` a subcommand)."""
 
 
-@app.command()
-def clustering(
-    base_dir: Path = DEFAULT_BASE_DIR,
-    seed: int = SEED,
-):
-    """Train the fixed-K reference, the best-K candidate and the Ward comparison."""
-    # One shared experiment for the team, from modeling/common.py
-    setup_experiment()
+def load_data(base_dir: Path) -> dict:
+    """Load the manifest, the three splits, their windows and the station catalog."""
     manifest = load_manifest(base_dir)
     data = {
         "manifest": manifest,
@@ -390,10 +547,169 @@ def clustering(
         "matrices": {},
         "keys": {},
         "stations": load_stations(),
+        "source": base_dir / "ready" / "train",
     }
     for split in SPLITS:
         data["keys"][split], data["matrices"][split] = load_split(base_dir, split)
     data["windows"] = {split: window_labels(keys) for split, keys in data["keys"].items()}
+
+    return data
+
+
+def build_estimator(model: str, k: int, seed: int, k_selection: str) -> tuple[ClusterMixin, dict]:
+    """Return the unfitted estimator of one P3 model and the params to log with its run.
+
+    Only the requested model is built.  The params describe that model alone (a Ward run never
+    shows K-Means settings) and carry ``k_selection``, so the run says whether K came from the
+    validation silhouette or from the CLI.
+    """
+    if model == "gmm":
+        estimator = GaussianMixture(
+            n_components=k, covariance_type="diag", n_init=10, random_state=seed
+        )
+        params = {
+            "n_components": k,
+            "covariance_type": "diag",
+            "n_init": 10,
+            "k_selection": k_selection,
+        }
+    elif model == "kmeans":
+        estimator = KMeans(n_clusters=k, n_init=10, random_state=seed)
+        params = {"n_init": 10, "init": "k-means++", "n_clusters": k, "k_selection": k_selection}
+    elif model == "kmeans_scaled":
+        estimator = make_pipeline(
+            StandardScaler(), KMeans(n_clusters=k, n_init=10, random_state=seed)
+        )
+        params = {
+            "n_init": 10,
+            "init": "k-means++",
+            "n_clusters": k,
+            "k_selection": k_selection,
+            "scaler": "standard",
+        }
+    elif model == "minibatch_kmeans":
+        estimator = MiniBatchKMeans(n_clusters=k, n_init=10, random_state=seed)
+        params = {"n_init": 10, "n_clusters": k, "batch_size": 1024, "k_selection": k_selection}
+    elif model == "ward":
+        estimator = WardClusterer(n_clusters=k)
+        params = {"n_clusters": k, "linkage": "ward", "k_selection": k_selection}
+    else:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}.")
+
+    return estimator, params
+
+
+def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
+    """Train and log one P3 model in one run: the unit of the MLflow ``train`` entry point."""
+
+    if model not in MODELS:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}")
+
+    diff_hip = set(hyperparams) - set(VALID_HYPERPARAMETERS)
+    if diff_hip:
+        raise ValueError(
+            f"P3 models only accept {sorted(VALID_HYPERPARAMETERS)}, got {sorted(diff_hip)}"
+        )
+
+    setup_experiment()
+    data = load_data(CLUSTERING_FEATURES_DIR)
+    best_k, k_table = choose_k(
+        data["matrices"]["train"], data["matrices"]["validation"], K_VALUES, seed
+    )
+    data["k_table"] = k_table
+
+    if "n_clusters" in hyperparams:
+        k_selection = "given on CLI"
+        k = hyperparams["n_clusters"]
+    else:
+        k_selection = "validation silhouette; December never used"
+        k = best_k
+
+    estimator, params = build_estimator(model, k, seed, k_selection)
+
+    result = train_and_log(
+        f"p3-{stage}-{model}-k{k}",
+        estimator,
+        model,
+        data,
+        seed,
+        model_params=params,
+        figure_title=f"Perfiles horarios medios por clúster - {model}, K={k} (ventana de ajuste)",
+        log_model=True,
+        stage=stage,
+    )
+
+    return result["run_id"]
+
+
+def search(model: str = "kmeans", seed: int = SEED) -> str:
+    """Train one nested Trial per K in ``K_VALUES`` and return the Study (parent) run id.
+
+    The winner is the Trial with the best validation silhouette (ties go to the smaller K, see
+    ``select_winner``); December is logged by every Trial but never used to choose.  The Study
+    keeps the search space, the winner and the comparison table in ``search/``.
+    """
+    if model not in MODELS:
+        raise ValueError(f"model must be one of {sorted(MODELS)}, got {model!r}")
+    setup_experiment()
+    data = load_data(CLUSTERING_FEATURES_DIR)
+    space = {"n_clusters": list(K_VALUES)}
+    rows = []
+    # Inside `mlflow run` this resumes the entry point's run, which ignores run_name: name it by tag
+    with mlflow.start_run() as study:
+        mlflow.set_tags(
+            {
+                **base_tags("p3", model, "search"),
+                "mlflow.runName": f"p3-search-{model}",
+                "hypothesis": "The K that best separates the hourly profiles lies between 3 and 6",
+                "objective": "maximize val_silhouette",
+            }
+        )
+        mlflow.log_params({"seed": seed, "search_space": json.dumps(space)})
+        for k in K_VALUES:
+            estimator, params = build_estimator(model, k, seed, k_selection="search trial")
+            record = train_and_log(
+                f"p3-search-{model}-k{k:02d}",
+                estimator,
+                model,
+                data,
+                seed,
+                model_params=params,
+                figure_title=f"Perfiles horarios medios por clúster — {model}, K={k} (ventana de ajuste)",
+                log_model=True,
+                stage="search",
+                nested=True,
+            )
+            rows.append({"k": k, **record})
+        winner = select_winner(rows)
+        mlflow.log_metrics(
+            {"best_val_silhouette": winner["val_silhouette"], "best_k": winner["k"]}
+        )
+        mlflow.set_tag("best_run_id", winner["run_id"])
+        columns = ["run_id", "k", "val_silhouette", "val_davies_bouldin", "val_temporal_ari"]
+        table = pd.DataFrame(rows)[columns]
+        table["selected"] = table["run_id"] == winner["run_id"]
+        with tempfile.TemporaryDirectory() as folder:
+            table.to_csv(Path(folder) / "search_results.csv", index=False)
+            mlflow.log_artifacts(folder, artifact_path="search")
+    # The winning Trial is already closed; the client tags it without reopening it
+    mlflow.MlflowClient().set_tag(winner["run_id"], "selected", "true")
+    logger.success(
+        f"p3-search-{model}: K={winner['k']} wins (val_silhouette {winner['val_silhouette']:.4f})"
+    )
+    return study.info.run_id
+
+
+@app.command()
+def clustering(
+    base_dir: Path = CLUSTERING_FEATURES_DIR,
+    seed: int = SEED,
+):
+    """Train the fixed-K reference, the best-K candidate and the Ward comparison."""
+    # One shared experiment for the team, from modeling/common.py
+    setup_experiment()
+
+    data = load_data(base_dir)
 
     best_k, k_table = choose_k(
         data["matrices"]["train"], data["matrices"]["validation"], K_VALUES, seed
@@ -411,6 +727,7 @@ def clustering(
             model_params={"n_init": 10, "init": "k-means++"},
             figure_title=f"Perfiles horarios medios por clúster — K-Means, K={REFERENCE_K} (ventana de ajuste)",
             log_model=True,
+            stage="candidate",
         )
     ]
     records.append(
@@ -423,20 +740,20 @@ def clustering(
             model_params={"n_init": 10, "init": "k-means++"},
             figure_title=f"Perfiles horarios medios por clúster — K-Means, K={best_k} (ventana de ajuste)",
             log_model=True,
+            stage="candidate",
         )
     )
-    # Same K as the candidate so the comparison is like for like; Ward has no predict method,
-    # which is why its model is not logged and its validation/December labels come from the means.
     records.append(
         train_and_log(
             f"clustering-candidate-ward-k{best_k}",
-            AgglomerativeClustering(n_clusters=best_k, linkage="ward"),
+            WardClusterer(n_clusters=best_k),
             "ward",
             data,
             seed,
             model_params={"linkage": "ward"},
             figure_title=f"Perfiles horarios medios por clúster — Ward, K={best_k} (ventana de ajuste)",
-            log_model=False,
+            log_model=True,
+            stage="candidate",
         )
     )
     table = pd.DataFrame(records).set_index("run_name")
