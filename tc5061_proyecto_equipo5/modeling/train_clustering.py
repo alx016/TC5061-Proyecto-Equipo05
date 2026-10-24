@@ -51,8 +51,10 @@ from tc5061_proyecto_equipo5.config import (
     STUDY_YEAR,
 )
 from tc5061_proyecto_equipo5.modeling.common import (
+    EXPERIMENT_NAME,
     base_tags,
     data_version,
+    git_state,
     log_model_with_signature,
     log_run_context,
     log_training_input,
@@ -773,6 +775,56 @@ def search(model: str = "kmeans", seed: int = SEED) -> str:
         f"p3-search-{model}: K={winner['k']} wins (val_silhouette {winner['val_silhouette']:.4f})"
     )
     return study.info.run_id
+
+
+def select(run_id: str | None = None, allow_dirty: bool = False) -> str:
+    """Choose the P3 run on validation, score December once and make it the only selected run.
+
+    ``run_id`` skips ``choose_run``.  A run that is already selected is left as is, so December is
+    never scored twice.  The test evidence is logged before the ``selected`` tag moves, so a
+    failure keeps the previous choice and the call can be retried.
+    """
+    setup_experiment()
+    client = mlflow.MlflowClient()
+    if run_id is None:
+        runs = mlflow.search_runs(experiment_names=[EXPERIMENT_NAME])
+        chosen = choose_run(runs, allow_dirty=allow_dirty, git_commit=git_state()["git_commit"])
+        run_id = chosen["run_id"]
+    run = client.get_run(run_id)
+    if run.data.tags.get("question") != "p3":
+        raise ValueError(f"Run {run_id} is not a P3 run")
+    if run.data.tags.get("selected") == "true":
+        logger.info(f"Run {run_id} is already selected; December was already scored once")
+        return run_id
+    if run.data.tags.get("git_dirty") == "true" and not allow_dirty:
+        raise RuntimeError(
+            "The run was trained from a dirty tree. Commit and retrain, or use --allow-dirty "
+            "for a local test."
+        )
+    data = load_data(CLUSTERING_FEATURES_DIR)
+    if run.data.params.get("feature_data_version") != data["manifest"]["data_version"]:
+        raise RuntimeError("The P3 features changed since this run was trained; retrain it")
+
+    model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+    labels = {split: model.predict(data["matrices"][split]) for split in ("train", "test")}
+    metrics = cluster_metrics(data["matrices"]["test"], labels["test"], "test_")
+    metrics["test_temporal_ari"] = temporal_ari(
+        data["keys"]["train"], labels["train"], data["keys"]["test"], labels["test"]
+    )
+    rule = "max val_silhouette; ties: min val_davies_bouldin, then smaller K"
+    with mlflow.start_run(run_id=run_id):
+        mlflow.log_metrics(metrics)
+        mlflow.set_tag("selection_rule", rule)
+        mlflow.log_dict({"run_id": run_id, "rule": rule, **metrics}, "config/selection.json")
+
+    previous = client.search_runs(
+        [run.info.experiment_id], "tags.question = 'p3' and tags.selected = 'true'"
+    )
+    for old in previous:
+        client.delete_tag(old.info.run_id, "selected")
+    client.set_tag(run_id, "selected", "true")
+    logger.success(f"Selected P3 run {run_id}: test silhouette {metrics['test_silhouette']:.4f}")
+    return run_id
 
 
 @app.command()

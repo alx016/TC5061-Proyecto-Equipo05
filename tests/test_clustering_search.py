@@ -6,17 +6,21 @@ parent/child structure without real data, training or plots.
 
 import mlflow
 from mlflow import MlflowClient
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.cluster import KMeans
 from typer.testing import CliRunner
 
 from tc5061_proyecto_equipo5.modeling import search as search_cli
 from tc5061_proyecto_equipo5.modeling import train_clustering
+from tc5061_proyecto_equipo5.modeling.common import log_model_with_signature
 from tc5061_proyecto_equipo5.modeling.train_clustering import (
     K_VALUES,
     choose_run,
     search,
+    select,
     select_winner,
 )
 
@@ -64,7 +68,12 @@ def tracking_store(tmp_path, monkeypatch):
     # Outside `mlflow run` there is no entry-point run to resume
     monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
-    mlflow.set_experiment("p3-search-test")
+    # Artifacts in tmp_path too, so the tests leave nothing in the repo's mlruns/
+    mlflow.set_experiment(
+        experiment_id=mlflow.create_experiment(
+            "p3-search-test", artifact_location=(tmp_path / "artifacts").as_uri()
+        )
+    )
     yield MlflowClient()
     mlflow.set_tracking_uri(previous)
 
@@ -185,3 +194,74 @@ def test_choose_run_skips_dirty_runs_and_other_commits():
     assert choose_run(p3_runs(), git_commit="abc")["run_id"] == "ward"
     with pytest.raises(ValueError, match="No eligible"):
         choose_run(p3_runs(), git_commit="zzz")
+
+
+def select_data() -> dict:
+    """Two well separated groups of stations, the same in every window."""
+    names = ["departures_hour_08", "arrivals_hour_18"]
+    matrix = pd.DataFrame(
+        np.vstack([np.zeros((5, 2)), np.full((5, 2), 10.0)])
+        + np.random.default_rng(0).normal(scale=0.1, size=(10, 2)),
+        columns=names,
+    )
+    keys = pd.DataFrame({"station_id": range(10)})
+    return {
+        "manifest": {"data_version": "v1"},
+        "matrices": {split: matrix for split in ("train", "validation", "test")},
+        "keys": {split: keys for split in ("train", "validation", "test")},
+    }
+
+
+def log_p3_run(data: dict, selected: bool = False, feature_data_version: str = "v1") -> str:
+    """Log a clean P3 candidate with a real K-Means model, as train_and_log would."""
+    train = data["matrices"]["train"]
+    with mlflow.start_run() as run:
+        mlflow.set_tags({"question": "p3", "stage_of_work": "candidate", "git_dirty": "false"})
+        if selected:
+            mlflow.set_tag("selected", "true")
+        mlflow.log_param("feature_data_version", feature_data_version)
+        log_model_with_signature(
+            KMeans(n_clusters=2, n_init=10, random_state=0).fit(train),
+            train,
+            serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+        )
+    return run.info.run_id
+
+
+def test_select_scores_december_once_and_moves_the_selected_tag(tracking_store, monkeypatch):
+    data = select_data()
+    monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
+    monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
+    old = log_p3_run(data, selected=True)
+    new = log_p3_run(data)
+
+    assert select(run_id=new) == new
+
+    client = tracking_store
+    chosen = client.get_run(new)
+    assert {"test_silhouette", "test_davies_bouldin", "test_temporal_ari"} <= set(
+        chosen.data.metrics
+    )
+    assert chosen.data.metrics["test_temporal_ari"] == 1.0
+    assert chosen.data.tags["selected"] == "true"
+    assert "selected" not in client.get_run(old).data.tags
+    assert "config/selection.json" in [
+        artifact.path for artifact in client.list_artifacts(new, "config")
+    ]
+    # A second call must not score December again
+    select(run_id=new)
+    assert len(client.get_metric_history(new, "test_silhouette")) == 1
+
+
+def test_select_refuses_a_run_trained_on_other_features(tracking_store, monkeypatch):
+    data = select_data()
+    monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
+    monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
+    stale = log_p3_run(data, feature_data_version="v0")
+
+    with pytest.raises(RuntimeError, match="features changed"):
+        select(run_id=stale)
+
+    run = tracking_store.get_run(stale)
+    assert "selected" not in run.data.tags
+    assert not any(name.startswith("test_") for name in run.data.metrics)
