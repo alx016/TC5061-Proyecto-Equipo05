@@ -13,7 +13,7 @@ Este módulo documenta la especificación formal de los tres casos de uso analí
 | **Horizonte Temporal** | 1 hora hacia adelante ($t+1$) | 1 hora hacia adelante ($t+1$) | Perfil anual consolidado (24 horas) |
 | **Variable Objetivo** | Viajes iniciados ($Y_{s,t+1} \in \mathbb{N}_0$) | Riesgo tri-clase ($\text{Desabasto}, \text{Balanceado}, \text{Saturacion}$) | Asignación a tipología urbana ($k \in \{1,\dots,K\}$) |
 | **Señal Operativa Clave** | Lags de demanda ($t-1, t-2, t-24, t-168$) | Flujo neto normalizado ($\Delta_{s,t} = \frac{In - Out}{C_s}$) | Perfil horario medio normalizado ($L_1$) |
-| **Métrica Primaria** | WAPE $\le 18\%$ / RMSE | PR-AUC $\ge 0.82$ / Macro F1 | Silhouette Score $\ge 0.45$ / Inercia |
+| **Métrica Primaria** | WAPE $\le 18\%$ / RMSE | Macro F1 $\ge 0.72$ (primaria); PR-AUC $\ge 0.82$ | Silhouette Score $\ge 0.45$ / Inercia |
 | **Usuario Operativo** | Centro de control y planeación de flota | Cuadrillas de rebalanceo en campo | Dirección de planeación y expansión de red |
 
 ---

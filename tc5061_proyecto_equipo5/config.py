@@ -55,11 +55,13 @@ SEED = 42
 P2_FIT_AS_OF = "2024-09-30 23:40"
 P2_SELECTION_AS_OF = "2024-11-30 23:40"
 
-# P2 selection guardrails. The canvas asks for recall_shortage >= 0.85; the precision
-# floors are a first, documented choice for the operational alerts.
+# P2 selection guardrail: the operational decision needs at least 85% of the shortages
+# detected. The decision thresholds are searched jointly on validation to maximize macro-F1
+# subject to that recall; there are no precision floors because 0.7% prevalence makes them
+# unreachable (see the D2 report for the feasibility table).
 P2_MIN_RECALL_SHORTAGE = 0.85
-P2_MIN_PRECISION_SHORTAGE = 0.50
-P2_MIN_PRECISION_SATURATION = 0.50
+# 19 probability thresholds from 0.05 to 0.95 in steps of 0.05, shared by both risk classes.
+P2_THRESHOLD_GRID = tuple(round(0.05 * index, 2) for index in range(1, 20))
 
 # Small grid for the nested LightGBM search: 3 x 3 x 1 = 9 child runs.
 P2_SEARCH_GRID = {
