@@ -237,11 +237,13 @@ def test_split_months():
             "2024-12-31 23:00",
         ]
     )
-    panel = make_flow_panel(hours, {1: [0.0] * len(hours)})
+    panel = add_target(make_flow_panel(hours, {1: [0.0] * len(hours)}))
 
-    split = add_split(panel)["split"].tolist()
+    split = add_split(panel)["split"]
 
-    assert split == ["train", "train", "validation", "validation", "test", "test"]
+    # The last hour has no next hour, so its split is missing and it is not test.
+    assert split.iloc[:5].tolist() == ["train", "validation", "validation", "test", "test"]
+    assert pd.isna(split.iloc[5])
 
 
 def test_calendar():

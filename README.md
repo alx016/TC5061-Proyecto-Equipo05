@@ -103,10 +103,16 @@ uv run mlflow run . -e search -P question=p1 --env-manager local
 ## Experimento base (Entrega 1)
 
 Cada pregunta tiene su propio script de entrenamiento y todos registran sus runs en el
-experimento `mibici-equipo05` de MLflow (tracking local en `mlflow.db` y `mlruns/`). El
-pipeline completo, después de la ingesta:
+experimento `mibici-equipo05` de MLflow. Las corridas de evidencia usan el servidor local
+(`make mlflow-server`, SQLite en `mlflow.db` y artefactos en `mlartifacts/`) y
+`MLFLOW_TRACKING_URI=http://127.0.0.1:5001`. El pipeline completo, después de la ingesta:
 
 ```bash
+# 0. Servidor de tracking (terminal aparte)
+make mlflow-server
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
+export MLFLOW_EXPERIMENT_NAME=mibici-equipo05
+
 # 1. Features (los artefactos se escriben en data/processed/)
 uv run python -m tc5061_proyecto_equipo5.features main --problem p1 --prepare-ready \
   --input-dir data/interim/viajes --output-dir data/processed/fe_2024_v4
@@ -114,9 +120,17 @@ uv run python -m tc5061_proyecto_equipo5.features classification
 uv run python -m tc5061_proyecto_equipo5.features main --problem p3 --prepare-ready \
   --input-dir data/interim/viajes --output-dir data/processed/fe_2024_v4
 
-# 2. Entrenamiento (catálogo de cada pregunta)
+# 2. Entrenamiento
 uv run python -m tc5061_proyecto_equipo5.modeling.train_regression regression
-uv run python -m tc5061_proyecto_equipo5.modeling.train_classification classification
+
+# P2: un modelo por run; train no evalúa test
+uv run mlflow run . -e train -P question=p2 -P model=lightgbm \
+  -P stage=baseline --env-manager local
+uv run mlflow run . -e train -P question=p2 -P model=lightgbm_unweighted \
+  -P stage=candidate --env-manager local
+uv run mlflow run . -e search -P question=p2 -P model=lightgbm --env-manager local
+uv run mlflow run . -e select -P question=p2 --env-manager local
+
 uv run python -m tc5061_proyecto_equipo5.modeling.train_clustering clustering
 
 # 3. Resultados
@@ -130,8 +144,16 @@ puerto 5000 lo ocupa AirPlay, por eso se usa el 5001.
 | Pregunta | Script | Candidatos | Selección |
 |:---|:---|:---|:---|
 | P1 | `modeling/train_regression.py` | Promedio estacional, Ridge, LightGBM Poisson, LightGBM Tweedie, HistGradientBoosting Poisson | `regression` elige por WAPE de validación y evalúa solo su finalista en test |
-| P2 | `modeling/train_classification.py` | Clase mayoritaria, regresión logística, LightGBM | Comparación de macro-F1 y PR-AUC |
+| P2 | `modeling/train_classification.py` | Persistencia, clase mayoritaria, regresión logística, LightGBM balanceado y sin balancear, HistGradientBoosting y Random Forest | Mayor macro-F1 de validación con guardrails de recall de desabasto (`>= 0.85`) y precisión mínima; si ninguno los cumple, se elige el mayor macro-F1 y se marca `selection_fallback=true`. Solo el run `selected=true` se evalúa en test |
 | P3 | `modeling/train_clustering.py` | K-Means con K=4 de referencia, K-Means con el mejor K, Ward | K con la mayor silhouette de validación |
+
+P2 no usa `predict` directamente: entrena con `predict_proba`, calibra un umbral para
+desabasto y otro para saturación usando **solo validación**, y aplica esos umbrales antes de
+calcular las métricas. `train` y `search` nunca tocan diciembre; `select` carga el modelo
+elegido, evalúa test una sola vez y guarda las matrices de confusión, las curvas PR y el
+`classification_report.txt` en `plots/test/`. `select` se ejecuta como entry point para que la
+corrida quede registrada como proyecto MLflow; rechaza runs con `git_dirty=true`, así que las
+pruebas locales sobre un árbol sucio deben usar el módulo directo con `--allow-dirty`.
 
 ### Etapas de experimentación P1
 

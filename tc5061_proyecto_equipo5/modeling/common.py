@@ -126,16 +126,20 @@ def log_training_input(df: pd.DataFrame, source: Path, name: str) -> None:
     mlflow.log_input(dataset, context="train")
 
 
-def log_model_with_signature(model, X_example, flavor: str = "sklearn", **kwargs) -> None:
+def log_model_with_signature(
+    model, X_example, flavor: str = "sklearn", predict_fn: str = "predict", **kwargs
+) -> None:
     """Log the model with its signature, a 5-row input example and our package code.
 
-    Extra keyword arguments go to the flavor's log_model (e.g. P1's serialization_format).
+    The signature comes from ``predict_fn``; P2 passes ``predict_proba`` so the registered model
+    returns probabilities, while P1 keeps the default. Extra keyword arguments go to the
+    flavor's ``log_model``.
     """
     if flavor not in MODEL_FLAVORS:
         raise ValueError(f"flavor must be one of {sorted(MODEL_FLAVORS)}, got {flavor!r}")
 
     example = X_example[:5]
-    signature = infer_signature(example, model.predict(example))
+    signature = infer_signature(example, getattr(model, predict_fn)(example))
     getattr(mlflow, flavor).log_model(
         model,
         name="model",

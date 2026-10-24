@@ -26,6 +26,10 @@ entry_points:
       hp_n_estimators: {type: float, default: -1}
       hp_learning_rate: {type: float, default: -1}
       hp_num_leaves: {type: float, default: -1}
+      hp_min_child_samples: {type: float, default: -1}
+      hp_max_depth: {type: float, default: -1}
+      hp_min_samples_leaf: {type: float, default: -1}
+      hp_max_leaf_nodes: {type: float, default: -1}
       hp_alpha: {type: float, default: -1}
       hp_C: {type: float, default: -1}
       hp_n_clusters: {type: float, default: -1}
@@ -33,7 +37,10 @@ entry_points:
       python -m tc5061_proyecto_equipo5.modeling.train
       --question {question} --model {model} --stage {stage} --seed={hp_seed}
       --n-estimators={hp_n_estimators} --learning-rate={hp_learning_rate}
-      --num-leaves={hp_num_leaves} --alpha={hp_alpha} --c={hp_C} --n-clusters={hp_n_clusters}
+      --num-leaves={hp_num_leaves} --min-child-samples={hp_min_child_samples}
+      --max-depth={hp_max_depth} --min-samples-leaf={hp_min_samples_leaf}
+      --max-leaf-nodes={hp_max_leaf_nodes} --alpha={hp_alpha} --c={hp_C}
+      --n-clusters={hp_n_clusters}
 
   search:
     parameters:
@@ -42,3 +49,9 @@ entry_points:
     command: >-
       python -m tc5061_proyecto_equipo5.modeling.search
       --question {question} --model {model}
+
+  select:
+    parameters:
+      question: {type: string, default: p2}
+      run_id: {type: string, default: "none"}
+    command: "python -m tc5061_proyecto_equipo5.modeling.train_classification select --question {question} --run-id {run_id}"

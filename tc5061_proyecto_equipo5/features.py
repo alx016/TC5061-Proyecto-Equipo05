@@ -1301,21 +1301,27 @@ def add_target(panel: pd.DataFrame) -> pd.DataFrame:
     return panel
 
 
-def add_split(panel: pd.DataFrame) -> pd.DataFrame:
-    """Assign each row to train, validation or test by calendar month.
+def add_split(panel: pd.DataFrame, study_year: int = STUDY_YEAR) -> pd.DataFrame:
+    """Assign each row to train, validation or test by the target hour.
 
-    The split is temporal (whole months, not random rows) so the test set is really out-of-time:
-    December is never seen during training or validation.
+    Rows whose target hour falls outside the study year (the last hour of the panel) have no
+    label, so their split is missing (``pd.NA``): they are neither trained nor scored, and are
+    never counted as test.
     """
     panel = panel.copy()
-    month = panel["hour"].dt.month
+    target_time = panel["hour"] + pd.Timedelta(hours=1)
+    target_month = target_time.dt.month
+    in_study_year = target_time.dt.year.eq(study_year)
     panel["split"] = pd.Series("unknown", index=panel.index, dtype="string")
-    panel.loc[month.isin(TRAIN_MONTHS), "split"] = "train"
-    panel.loc[month.isin(VALIDATION_MONTHS), "split"] = "validation"
-    panel.loc[month.isin(TEST_MONTHS), "split"] = "test"
-    if (panel["split"] == "unknown").any():
+    panel.loc[in_study_year & target_month.isin(TRAIN_MONTHS), "split"] = "train"
+    panel.loc[in_study_year & target_month.isin(VALIDATION_MONTHS), "split"] = "validation"
+    panel.loc[in_study_year & target_month.isin(TEST_MONTHS), "split"] = "test"
+    unknown = (panel["split"] == "unknown") & panel["target"].notna()
+    if unknown.any():
         raise ValueError("Some rows fall outside the train/validation/test months")
-    logger.info(f"Split counts: {panel['split'].value_counts().to_dict()}")
+    # The remaining rows have no target; a missing split is honest and keeps them out of test.
+    panel.loc[panel["split"] == "unknown", "split"] = pd.NA
+    logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
     return panel
 
 
@@ -1346,7 +1352,7 @@ def build_classification_features(
     features = add_neighbors(features)
     features = add_lags(features)
     features = add_target(features)
-    features = add_split(features)
+    features = add_split(features, year)
     features = (
         features[CLASSIFICATION_COLUMNS].sort_values(["station_id", "hour"]).reset_index(drop=True)
     )
