@@ -165,34 +165,6 @@ Los contratos de features y el protocolo contra la fuga de información están e
 reciente y supone que la capacidad no cambió desde 2024; ese supuesto debe reportarse junto con
 los resultados.
 
-## Registrar y promover un modelo
-
-El registro exige `git_commit` y `data_version` conocidos. Una versión nueva entra como
-`challenger`; para promoverla se exige además `git_dirty=false` y `selected=true`.
-El registry no decide cuál modelo gana: esa decisión pertenece a cada pregunta.
-
-Para P3, compara las métricas de validación (silhouette y Davies-Bouldin) y los perfiles,
-sin usar diciembre para elegir. Registra tu elección explícita con una justificación:
-
-```bash
-uv run mlflow run . -e select_p3 -P run_id=<P3_RUN_ID> \
-  -P reason="Comparacion de validacion y perfiles revisada por el equipo" --env-manager local
-uv run mlflow run . -e register -P run_id=<RUN_ID> --env-manager local
-uv run mlflow run . -e register -P run_id=<RUN_ID> -P alias=champion --env-manager local
-```
-
-Los comandos usan el tracking configurado en `.env`; carga sus variables en la terminal como
-en el flujo de entrenamiento. `select_p3` no reentrena ni evalúa test: guarda `selected=true`,
-`selection_method` y `selection_reason` en un run P3 terminado que tenga modelo.
-P1 y P2 conservan sus protocolos de selección; ganar un grid de P1 no sustituye la revisión
-del finalista entre familias.
-
-Antes de mover `champion`, se carga la versión candidata por `models:/<nombre>/<version>`
-y se ejecuta inferencia sobre su `input_example`. Si falla o falta el ejemplo, no se cambian
-los aliases ni se aprueba la versión. Los modelos antiguos sin ejemplo deben volver a
-registrarse desde un nuevo entrenamiento que lo guarde; no se fabrican datos para validarlos.
-Tras promover, el consumidor carga `models:/<nombre>@champion`.
-
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
