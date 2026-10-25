@@ -42,8 +42,8 @@ usando solo información disponible en ese momento.
 
 ## Instalación
 
-Requisitos: Python 3.13, [uv](https://docs.astral.sh/uv/) y Git. En macOS, LightGBM necesita
-además OpenMP (`brew install libomp`).
+Requisitos: Python 3.13, [uv](https://docs.astral.sh/uv/) y Git. LightGBM necesita además
+OpenMP: en macOS `brew install libomp`; en Linux o WSL `sudo apt install libgomp1`.
 
 ```bash
 git clone https://github.com/alx016/TC5061-Proyecto-Equipo05.git
@@ -53,7 +53,8 @@ uv run pytest           # verifica la instalación
 ```
 
 Los comandos de este README usan `uv run`; si se activa el entorno (`source .venv/bin/activate`)
-basta con `python`.
+basta con `python`. En un clon nuevo, usar una terminal sin otro entorno activado (o `deactivate`)
+para que `uv` instale en el `.venv` del clon.
 
 ## Ingesta
 
@@ -71,7 +72,36 @@ Para verificar que los datos locales coinciden con el manifest del repositorio:
 uv run python tc5061_proyecto_equipo5/dataset.py manifest --check
 ```
 
-## Experimento base
+## MLflow Project (Entrega 2)
+
+Una sola vez, copiar las variables de MLflow:
+
+```bash
+cp .env.example .env
+```
+
+En una terminal aparte, levantar el servidor de tracking y dejarlo abierto:
+
+```bash
+make mlflow-server      # http://127.0.0.1:5001
+```
+
+En cada terminal nueva, cargar las variables y correr los entry points:
+
+```bash
+set -a; source .env; set +a
+uv run mlflow run . -e ingest --env-manager local
+uv run mlflow run . -e features -P question=p1 --env-manager local
+uv run mlflow run . -e train -P question=p1 -P model=seasonal_mean -P stage=baseline --env-manager local
+uv run mlflow run . -e search -P question=p1 --env-manager local
+```
+
+- `Connection refused` en el puerto 5001: el servidor no está corriendo.
+- `active experiment ID does not match`: faltó cargar `.env` (`MLFLOW_EXPERIMENT_NAME`).
+- `--env-manager local` usa el `.venv` del proyecto; sin esa opción MLflow construye el
+  entorno de `python_env.yaml` con pyenv y virtualenv.
+
+## Experimento base (Entrega 1)
 
 Cada pregunta tiene su propio script de entrenamiento y todos registran sus runs en el
 experimento `mibici-equipo05` de MLflow. Las corridas de evidencia usan el servidor local
@@ -165,6 +195,41 @@ Los contratos de features y el protocolo contra la fuga de información están e
 reciente y supone que la capacidad no cambió desde 2024; ese supuesto debe reportarse junto con
 los resultados.
 
+## Model Registry
+
+Cada pregunta tiene un modelo registrado: `mibici-equipo05-p1-demanda`,
+`mibici-equipo05-p2-riesgo` y `mibici-equipo05-p3-grupos`. El entry point `register` toma
+el run que ganó el `search` o `select` de su pregunta (tag `selected=true`) y lo registra
+en el modelo que corresponde a su tag `question`:
+
+```bash
+uv run mlflow run . -e register -P run_id=<run ganador> --env-manager local                     # entra como challenger
+uv run mlflow run . -e register -P run_id=<run ganador> -P alias=champion --env-manager local    # lo promueve
+```
+
+- **Aliases en lugar de stages.** Los stages están deprecados desde MLflow 2.9. `champion`
+  equivale a Production y `challenger` a un candidato en comparación. El código que consume el
+  modelo siempre carga `models:/<nombre>@champion`; promover o regresar a otra versión es
+  mover el alias, sin cambiar ese código.
+- Un registro nuevo entra como `challenger`, para no reemplazar al `champion` por accidente.
+  Promover reusa la misma versión y le quita `challenger`.
+- Cada versión guarda el linaje de su run: `source_run_id`, `git_commit`, `git_dirty`,
+  `data_version`, `features_data_version`, `selected` y los tags `selection_*` de su `select`.
+- De P1 se registra el Trial con `selected=true`, no la Study: la Study no guarda modelo.
+
+Para usar el modelo desde cualquier carpeta:
+
+```python
+import mlflow
+
+mlflow.set_tracking_uri("http://127.0.0.1:5001")
+model = mlflow.pyfunc.load_model("models:/mibici-equipo05-p1-demanda@champion")
+```
+
+El modelo carga fuera del repositorio porque se guarda con el código del paquete
+(`code_paths`). En MLflow 3, `runs:/<id>/model` apunta al logged model del run; el aviso
+"has no artifacts at artifact path 'model'" al registrar es normal.
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -210,7 +275,10 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
 ├── reports/                   <- Reportes y figuras generadas
 ├── tests/                     <- Pruebas unitarias con datos sintéticos (pytest)
-├── mlflow.db, mlruns/         <- Tracking local de MLflow; fuera de Git
+├── MLproject                  <- Entry points de MLflow: ingest, features, train, search, select, register
+├── python_env.yaml            <- Entorno de Python del MLflow Project
+├── .env.example               <- Variables de MLflow (tracking URI y experimento)
+├── mlflow.db, mlartifacts/    <- Servidor de tracking local; fuera de Git
 └── tc5061_proyecto_equipo5/   <- Código fuente
     ├── config.py              <- Rutas, años y constantes del estudio
     ├── dataset.py             <- Descarga, limpieza y manifest de los datos
@@ -218,6 +286,10 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
     ├── plots.py               <- Figuras de justificación
     └── modeling/
         ├── common.py                <- Utilidades compartidas de MLflow y reproducibilidad
+        ├── train.py                 <- Entry point train: un modelo de una pregunta por run
+        ├── search.py                <- Entry point search: Study con Trials anidados
+        ├── select.py                <- Entry point select: despacha P2 o P3 y evalúa diciembre una vez
+        ├── registry.py              <- Entry point register: Model Registry y aliases
         ├── train_regression.py      <- P1: regresión de demanda
         ├── train_classification.py  <- P2: clasificación de riesgo
         ├── train_clustering.py      <- P3: clustering de estaciones
