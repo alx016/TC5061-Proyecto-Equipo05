@@ -83,7 +83,7 @@ cp .env.example .env
 En una terminal aparte, levantar el servidor de tracking y dejarlo abierto:
 
 ```bash
-uv run make mlflow-server      # http://127.0.0.1:5001
+make mlflow-server      # http://127.0.0.1:5001
 ```
 
 En cada terminal nueva, cargar las variables y correr los entry points:
