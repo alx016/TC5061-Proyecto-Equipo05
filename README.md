@@ -288,6 +288,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
         ├── common.py                <- Utilidades compartidas de MLflow y reproducibilidad
         ├── train.py                 <- Entry point train: un modelo de una pregunta por run
         ├── search.py                <- Entry point search: Study con Trials anidados
+        ├── select.py                <- Entry point select: despacha P2 o P3 y evalúa diciembre una vez
         ├── registry.py              <- Entry point register: Model Registry y aliases
         ├── train_regression.py      <- P1: regresión de demanda
         ├── train_classification.py  <- P2: clasificación de riesgo
