@@ -82,6 +82,9 @@ def tracking(tmp_path, monkeypatch):
         monkeypatch.delenv(variable, raising=False)
     previous = mlflow.get_tracking_uri()
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+    # A previous test may have left an active experiment on its own store; create and select
+    # one in this throwaway store so start_run does not look for an experiment that is not here.
+    mlflow.set_experiment(experiment_id=mlflow.create_experiment("registry-test"))
     yield
     mlflow.set_tracking_uri(previous)
 
