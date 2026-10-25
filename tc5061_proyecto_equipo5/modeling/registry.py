@@ -34,6 +34,30 @@ MODEL_DESCRIPTIONS = {
 ALIASES = {"champion", "challenger"}
 # Training scripts have used several names for the feature table version; first non-empty wins
 FEATURES_VERSION_PARAMS = ("features_data_version", "feature_data_version", "feature_table_sha256")
+UNKNOWN_LINEAGE_VALUES = {"", "unknown", "none", "null"}
+
+
+def require_lineage(run) -> None:
+    """Do not create versions whose code or data origin cannot be audited."""
+    for key, value in (
+        ("git_commit", run.data.tags.get("git_commit")),
+        ("data_version", run.data.params.get("data_version")),
+    ):
+        if not value or value.strip().lower() in UNKNOWN_LINEAGE_VALUES:
+            raise typer.BadParameter(f"Run {run.info.run_id} needs a known {key}")
+
+
+def preflight(name: str, version: str) -> None:
+    """Prove the immutable candidate can predict before changing any serving alias."""
+    uri = f"models:/{name}/{version}"
+    try:
+        model = mlflow.pyfunc.load_model(uri)
+        example = model.metadata.load_input_example(uri)
+        if example is None:
+            raise ValueError("model has no saved input_example; log it again with an example")
+        model.predict(example)
+    except Exception as error:
+        raise typer.BadParameter(f"Model {uri} failed pre-flight: {error}") from error
 
 
 def lineage_tags(question: str, run, alias: str) -> dict:
@@ -89,10 +113,12 @@ def main(
     if question not in MODEL_NAMES:
         raise typer.BadParameter(f"Run {run_id} has no valid question tag, got {question!r}")
 
+    require_lineage(run)
+
     # A champion must be reproducible and chosen by its select step; a challenger only warns
     problems = []
-    if run.data.tags.get("git_dirty") == "true":
-        problems.append("was trained with uncommitted changes (git_dirty=true)")
+    if run.data.tags.get("git_dirty") != "false":
+        problems.append("has no confirmed clean code (git_dirty must be false)")
     if run.data.tags.get("selected") != "true":
         problems.append("was not marked by its select step (selected!=true)")
     for problem in problems:
@@ -127,6 +153,10 @@ def main(
     else:
         version = mlflow.register_model(model_uri=model_uri, name=name)
 
+    # Failed validation leaves the previous champion, challenger and approval tags untouched.
+    if alias == "champion":
+        preflight(name, version.version)
+
     # The registered model says what it answers; each version says where it came from
     client.update_registered_model(name, description=MODEL_DESCRIPTIONS[question])
     client.set_registered_model_tag(name, "question", question)
@@ -139,7 +169,10 @@ def main(
 
     # Lineage tags copied from the run, so the version can be traced without opening it
     for key, value in tags.items():
-        if value is not None and (key not in version.tags or key == "validation_status"):
+        missing = key not in version.tags
+        if key in {"git_commit", "data_version"}:
+            missing = version.tags.get(key, "").strip().lower() in UNKNOWN_LINEAGE_VALUES
+        if value is not None and (missing or key == "validation_status"):
             client.set_model_version_tag(name, version.version, key, value)
 
     # Selection decisions belong to each question's select step; the registry only carries them

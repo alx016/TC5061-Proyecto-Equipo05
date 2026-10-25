@@ -9,7 +9,7 @@ import pytest
 from sklearn.linear_model import LinearRegression
 from typer.testing import CliRunner
 
-from tc5061_proyecto_equipo5.modeling import registry
+from tc5061_proyecto_equipo5.modeling import registry, train_clustering
 
 P1_NAME = "mibici-equipo05-p1-demanda"
 
@@ -86,13 +86,17 @@ def tracking(tmp_path, monkeypatch):
     mlflow.set_tracking_uri(previous)
 
 
-def logged_run(tags: dict) -> str:
+def logged_run(tags: dict, *, fitted=True, example=True, data_version="abc123") -> str:
     """Log a tiny model with the tags the training scripts would set."""
     X = pd.DataFrame({"x": [0.0, 1.0, 2.0]})
     with mlflow.start_run() as run:
-        mlflow.set_tags(tags)
-        mlflow.log_param("data_version", "abc123")
-        mlflow.sklearn.log_model(LinearRegression().fit(X, [0.0, 1.0, 2.0]), name="model")
+        mlflow.set_tags({"git_commit": "abc123", **tags})
+        if data_version is not None:
+            mlflow.log_param("data_version", data_version)
+        model = LinearRegression()
+        if fitted:
+            model.fit(X, [0.0, 1.0, 2.0])
+        mlflow.sklearn.log_model(model, name="model", input_example=X if example else None)
     return run.info.run_id
 
 
@@ -245,3 +249,132 @@ def test_rejects_a_run_without_model_and_registers_nothing(tracking):
 
     assert result.exit_code == 2
     assert MlflowClient().search_registered_models() == []
+
+
+@pytest.mark.parametrize("field", ["git_commit", "data_version"])
+@pytest.mark.parametrize("value", [None, "", "unknown"])
+def test_rejects_incomplete_lineage_before_registration(tracking, field, value):
+    tags = {"question": "p1", "git_dirty": "false", "selected": "true"}
+    client = MlflowClient()
+    if field == "data_version":
+        run_id = logged_run(tags, data_version=value)
+    else:
+        run_id = logged_run({**tags, "git_commit": value or ""})
+        if value is None:
+            client.delete_tag(run_id, "git_commit")
+    result = register("--run-id", run_id, "--alias", "champion")
+    assert result.exit_code == 2, result.output
+    assert field in result.output
+    assert client.search_registered_models() == []
+
+
+@pytest.mark.parametrize("dirty", [None, "unknown", ""])
+def test_rejects_champion_without_confirmed_clean_code(tracking, dirty):
+    tags = {"question": "p1", "selected": "true"}
+    if dirty is not None:
+        tags["git_dirty"] = dirty
+    run_id = logged_run(tags)
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 2
+    assert MlflowClient().search_registered_models() == []
+
+
+@pytest.mark.parametrize("fitted,example", [(False, True), (True, False)])
+def test_failed_preflight_preserves_existing_aliases(tracking, fitted, example):
+    tags = {"question": "p1", "git_dirty": "false", "selected": "true"}
+    champion = logged_run(tags)
+    assert register("--run-id", champion, "--alias", "champion").exit_code == 0
+    candidate = logged_run(tags, fitted=fitted, example=example)
+    assert register("--run-id", candidate).exit_code == 0
+    client = MlflowClient()
+    before = client.get_registered_model(P1_NAME).aliases
+
+    result = register("--run-id", candidate, "--alias", "champion")
+
+    assert result.exit_code == 2, result.output
+    assert "pre-flight" in result.output
+    assert client.get_registered_model(P1_NAME).aliases == before
+    challenger = client.get_model_version_by_alias(P1_NAME, "challenger")
+    assert challenger.tags["validation_status"] == "pending"
+
+
+def test_p3_explicit_selection_can_be_promoted(tracking):
+    run_id = logged_run({"question": "p3", "git_dirty": "false"})
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 2
+    result = CliRunner().invoke(
+        train_clustering.app,
+        ["select", "--run-id", run_id, "--reason", "Reviewed validation silhouette and profiles"],
+    )
+    assert result.exit_code == 0, result.output
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+    version = MlflowClient().get_model_version_by_alias(registry.MODEL_NAMES["p3"], "champion")
+    assert version.tags["selected"] == "true"
+    assert version.tags["selection_reason"] == "Reviewed validation silhouette and profiles"
+
+
+def test_p3_training_logs_an_operational_example(tracking, monkeypatch):
+    import numpy as np
+    from sklearn.cluster import KMeans
+
+    from tc5061_proyecto_equipo5.modeling import common
+
+    matrix = np.array([[0.0], [0.1], [5.0], [5.1]])
+    monkeypatch.setattr(
+        common, "git_state", lambda: {"git_commit": "abc123", "git_dirty": "false"}
+    )
+    monkeypatch.setattr(train_clustering, "data_version", lambda: "abc123")
+    monkeypatch.setattr(train_clustering, "save_artifacts", lambda *args: None)
+    data = {
+        "matrices": {split: matrix for split in train_clustering.SPLITS},
+        "windows": {split: "2024" for split in train_clustering.SPLITS},
+        "manifest": {"feature_version": "v1", "data_version": "features123"},
+        "k_table": pd.DataFrame({"k": [2]}),
+        "keys": {"train": pd.DataFrame()},
+        "names": ["profile"],
+        "stations": pd.DataFrame(),
+    }
+    record = train_clustering.train_and_log(
+        "p3-test",
+        KMeans(n_clusters=2, n_init=1, random_state=42),
+        "kmeans",
+        data,
+        42,
+        {},
+        "Synthetic profiles",
+        True,
+    )
+    uri = f"runs:/{record['run_id']}/model"
+    model = mlflow.pyfunc.load_model(uri)
+    assert model.metadata.signature is not None
+    example = model.metadata.load_input_example(uri)
+    assert example is not None
+    assert len(model.predict(example)) == len(matrix)
+
+
+@pytest.mark.parametrize("question,reason", [("p1", "reviewed"), ("p3", " ")])
+def test_p3_selection_rejects_wrong_question_or_empty_reason(tracking, question, reason):
+    run_id = logged_run({"question": question, "git_dirty": "false"})
+    result = CliRunner().invoke(
+        train_clustering.app, ["select", "--run-id", run_id, "--reason", reason]
+    )
+    assert result.exit_code == 2, result.output
+    assert "selected" not in MlflowClient().get_run(run_id).data.tags
+
+
+def test_p3_selection_rejects_a_run_without_model(tracking):
+    with mlflow.start_run() as run:
+        mlflow.set_tag("question", "p3")
+    result = CliRunner().invoke(
+        train_clustering.app, ["select", "--run-id", run.info.run_id, "--reason", "reviewed"]
+    )
+    assert result.exit_code == 2, result.output
+    assert "selected" not in MlflowClient().get_run(run.info.run_id).data.tags
+
+
+def test_reused_version_repairs_unknown_lineage_from_known_source(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
+    assert register("--run-id", run_id).exit_code == 0
+    client = MlflowClient()
+    version = client.get_model_version_by_alias(P1_NAME, "challenger").version
+    client.set_model_version_tag(P1_NAME, version, "git_commit", "unknown")
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+    assert client.get_model_version(P1_NAME, version).tags["git_commit"] == "abc123"
