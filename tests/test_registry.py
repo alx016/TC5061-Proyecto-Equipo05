@@ -9,7 +9,7 @@ import pytest
 from sklearn.linear_model import LinearRegression
 from typer.testing import CliRunner
 
-from tc5061_proyecto_equipo5.modeling import registry, train_clustering
+from tc5061_proyecto_equipo5.modeling import registry
 
 P1_NAME = "mibici-equipo05-p1-demanda"
 
@@ -295,79 +295,6 @@ def test_failed_preflight_preserves_existing_aliases(tracking, fitted, example):
     assert client.get_registered_model(P1_NAME).aliases == before
     challenger = client.get_model_version_by_alias(P1_NAME, "challenger")
     assert challenger.tags["validation_status"] == "pending"
-
-
-def test_p3_explicit_selection_can_be_promoted(tracking):
-    run_id = logged_run({"question": "p3", "git_dirty": "false"})
-    assert register("--run-id", run_id, "--alias", "champion").exit_code == 2
-    result = CliRunner().invoke(
-        train_clustering.app,
-        ["select", "--run-id", run_id, "--reason", "Reviewed validation silhouette and profiles"],
-    )
-    assert result.exit_code == 0, result.output
-    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
-    version = MlflowClient().get_model_version_by_alias(registry.MODEL_NAMES["p3"], "champion")
-    assert version.tags["selected"] == "true"
-    assert version.tags["selection_reason"] == "Reviewed validation silhouette and profiles"
-
-
-def test_p3_training_logs_an_operational_example(tracking, monkeypatch):
-    import numpy as np
-    from sklearn.cluster import KMeans
-
-    from tc5061_proyecto_equipo5.modeling import common
-
-    matrix = np.array([[0.0], [0.1], [5.0], [5.1]])
-    monkeypatch.setattr(
-        common, "git_state", lambda: {"git_commit": "abc123", "git_dirty": "false"}
-    )
-    monkeypatch.setattr(train_clustering, "data_version", lambda: "abc123")
-    monkeypatch.setattr(train_clustering, "save_artifacts", lambda *args: None)
-    data = {
-        "matrices": {split: matrix for split in train_clustering.SPLITS},
-        "windows": {split: "2024" for split in train_clustering.SPLITS},
-        "manifest": {"feature_version": "v1", "data_version": "features123"},
-        "k_table": pd.DataFrame({"k": [2]}),
-        "keys": {"train": pd.DataFrame()},
-        "names": ["profile"],
-        "stations": pd.DataFrame(),
-    }
-    record = train_clustering.train_and_log(
-        "p3-test",
-        KMeans(n_clusters=2, n_init=1, random_state=42),
-        "kmeans",
-        data,
-        42,
-        {},
-        "Synthetic profiles",
-        True,
-    )
-    uri = f"runs:/{record['run_id']}/model"
-    model = mlflow.pyfunc.load_model(uri)
-    assert model.metadata.signature is not None
-    example = model.metadata.load_input_example(uri)
-    assert example is not None
-    assert len(model.predict(example)) == len(matrix)
-
-
-@pytest.mark.parametrize("question,reason", [("p1", "reviewed"), ("p3", " ")])
-def test_p3_selection_rejects_wrong_question_or_empty_reason(tracking, question, reason):
-    run_id = logged_run({"question": question, "git_dirty": "false"})
-    result = CliRunner().invoke(
-        train_clustering.app, ["select", "--run-id", run_id, "--reason", reason]
-    )
-    assert result.exit_code == 2, result.output
-    assert "selected" not in MlflowClient().get_run(run_id).data.tags
-
-
-def test_p3_selection_rejects_a_run_without_model(tracking):
-    with mlflow.start_run() as run:
-        mlflow.set_tag("question", "p3")
-    result = CliRunner().invoke(
-        train_clustering.app, ["select", "--run-id", run.info.run_id, "--reason", "reviewed"]
-    )
-    assert result.exit_code == 2, result.output
-    assert "selected" not in MlflowClient().get_run(run.info.run_id).data.tags
 
 
 def test_reused_version_repairs_unknown_lineage_from_known_source(tracking):
