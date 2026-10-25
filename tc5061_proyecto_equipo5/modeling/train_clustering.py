@@ -565,7 +565,7 @@ def train_and_log(
             "test_window": data["windows"]["test"],
             "feature_set": "station_profiles",
             "feature_version": data["manifest"]["feature_version"],
-            "feature_data_version": data["manifest"]["data_version"],
+            "features_data_version": data["manifest"]["data_version"],
             "data_version": data_version(),
             "k_selection": "validation silhouette; December never used"
             if kind == "kmeans"
@@ -802,7 +802,7 @@ def select(run_id: str | None = None, allow_dirty: bool = False) -> str:
             "for a local test."
         )
     data = load_data(CLUSTERING_FEATURES_DIR)
-    if run.data.params.get("feature_data_version") != data["manifest"]["data_version"]:
+    if run.data.params.get("features_data_version") != data["manifest"]["data_version"]:
         raise RuntimeError("The P3 features changed since this run was trained; retrain it")
 
     model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")

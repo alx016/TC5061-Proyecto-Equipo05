@@ -212,14 +212,14 @@ def select_data() -> dict:
     }
 
 
-def log_p3_run(data: dict, selected: bool = False, feature_data_version: str = "v1") -> str:
+def log_p3_run(data: dict, selected: bool = False, features_data_version: str = "v1") -> str:
     """Log a clean P3 candidate with a real K-Means model, as train_and_log would."""
     train = data["matrices"]["train"]
     with mlflow.start_run() as run:
         mlflow.set_tags({"question": "p3", "stage_of_work": "candidate", "git_dirty": "false"})
         if selected:
             mlflow.set_tag("selected", "true")
-        mlflow.log_param("feature_data_version", feature_data_version)
+        mlflow.log_param("features_data_version", features_data_version)
         log_model_with_signature(
             KMeans(n_clusters=2, n_init=10, random_state=0).fit(train),
             train,
@@ -257,7 +257,7 @@ def test_select_refuses_a_run_trained_on_other_features(tracking_store, monkeypa
     data = select_data()
     monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
     monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
-    stale = log_p3_run(data, feature_data_version="v0")
+    stale = log_p3_run(data, features_data_version="v0")
 
     with pytest.raises(RuntimeError, match="features changed"):
         select(run_id=stale)
