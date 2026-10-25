@@ -32,6 +32,8 @@ MODEL_DESCRIPTIONS = {
 }
 # champion serves; challenger waits for comparison. A new version starts as challenger.
 ALIASES = {"champion", "challenger"}
+# Training scripts have used several names for the feature table version; first non-empty wins
+FEATURES_VERSION_PARAMS = ("features_data_version", "feature_data_version", "feature_table_sha256")
 
 
 def lineage_tags(question: str, run, alias: str) -> dict:
@@ -42,13 +44,28 @@ def lineage_tags(question: str, run, alias: str) -> dict:
         "git_commit": run.data.tags.get("git_commit"),
         "git_dirty": run.data.tags.get("git_dirty"),
         "data_version": run.data.params.get("data_version"),
-        "features_data_version": run.data.params.get("features_data_version"),
+        "features_data_version": next(
+            (run.data.params[key] for key in FEATURES_VERSION_PARAMS if run.data.params.get(key)),
+            None,
+        ),
         "validation_status": "approved" if alias == "champion" else "pending",
         "source_run_id": run.info.run_id,
         "experiment_id": run.info.experiment_id,
         "task": run.data.tags.get("task"),
         "selected": run.data.tags.get("selected"),
     }
+
+
+def version_description(tags: dict, run_id: str) -> str:
+    """Where a version came from, leaving out what the run did not record."""
+    origin = f"entrenado en el run {run_id}"
+    origin = f"{tags['model_family']} {origin}" if tags["model_family"] else origin.capitalize()
+    details = [
+        f"{label} {tags[key]}"
+        for label, key in (("commit", "git_commit"), ("data_version", "data_version"))
+        if tags[key]
+    ]
+    return f"{origin} ({', '.join(details)})." if details else f"{origin}."
 
 
 @app.command()
@@ -72,11 +89,16 @@ def main(
     if question not in MODEL_NAMES:
         raise typer.BadParameter(f"Run {run_id} has no valid question tag, got {question!r}")
 
+    # A champion must be reproducible and chosen by its select step; a challenger only warns
+    problems = []
     if run.data.tags.get("git_dirty") == "true":
-        logger.warning(f"Run {run_id} was trained with uncommitted changes (git_dirty=true)")
-
-    if alias == "champion" and run.data.tags.get("selected") != "true":
-        logger.warning(f"Run {run_id} was not marked by its select step (selected!=true)")
+        problems.append("was trained with uncommitted changes (git_dirty=true)")
+    if run.data.tags.get("selected") != "true":
+        problems.append("was not marked by its select step (selected!=true)")
+    for problem in problems:
+        if alias == "champion":
+            raise typer.BadParameter(f"Run {run_id} {problem}; it cannot be champion")
+        logger.warning(f"Run {run_id} {problem}")
 
     # Check before register_model, which creates the registered model before it looks for the
     # artifact and would leave it empty. A search Study carries the question tag but no model
@@ -86,7 +108,7 @@ def main(
     except MlflowException as error:
         raise typer.BadParameter(
             f"Run {run_id} has no logged model ({error}); "
-            "if it is a Study, use its best_run_id tag"
+            "if it is a search Study, register its winning Trial (tag selected=true)"
         ) from error
 
     name = MODEL_NAMES[question]
@@ -111,24 +133,24 @@ def main(
     client.set_registered_model_tag(name, "team", "equipo05")
     tags = lineage_tags(question, run, alias)
 
+    # A reused version keeps what it already says: only missing tags and description are added,
+    # except validation_status, which always follows the alias it is getting
+    version = client.get_model_version(name, version.version)
+
     # Lineage tags copied from the run, so the version can be traced without opening it
     for key, value in tags.items():
-        if value is not None:
+        if value is not None and (key not in version.tags or key == "validation_status"):
             client.set_model_version_tag(name, version.version, key, value)
 
     # Selection decisions belong to each question's select step; the registry only carries them
     for key, value in run.data.tags.items():
-        if key.startswith("selection_"):
+        if key.startswith("selection_") and key not in version.tags:
             client.set_model_version_tag(name, version.version, key, value)
 
-    client.update_model_version(
-        name,
-        version.version,
-        description=(
-            f"{tags['model_family']} entrenado en el run {run_id} "
-            f"(commit {tags['git_commit']}, data_version {tags['data_version']})."
-        ),
-    )
+    if not version.description:
+        client.update_model_version(
+            name, version.version, description=version_description(tags, run_id)
+        )
 
     # The alias is the stable address that consumers load: models:/<name>@<alias>
     client.set_registered_model_alias(name, alias, version.version)

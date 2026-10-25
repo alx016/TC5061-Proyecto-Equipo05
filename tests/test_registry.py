@@ -51,6 +51,15 @@ def test_lineage_tags_preserve_run_data_and_code():
     assert tags["validation_status"] == "pending"
 
 
+def test_features_data_version_falls_back_to_feature_data_version():
+    run = fake_run()
+    run.data.params = {"data_version": "abc123", "feature_data_version": "f789"}
+
+    tags = registry.lineage_tags("p1", run, "challenger")
+
+    assert tags["features_data_version"] == "f789"
+
+
 def test_champion_is_approved():
     tags = registry.lineage_tags("p1", fake_run(), "champion")
 
@@ -64,7 +73,12 @@ def test_champion_is_approved():
 def tracking(tmp_path, monkeypatch):
     """Point MLflow to a throwaway SQLite store and hide the variables loaded from .env."""
     monkeypatch.chdir(tmp_path)
-    for variable in ("MLFLOW_RUN_ID", "MLFLOW_EXPERIMENT_NAME", "MLFLOW_TRACKING_URI"):
+    for variable in (
+        "MLFLOW_RUN_ID",
+        "MLFLOW_EXPERIMENT_NAME",
+        "MLFLOW_TRACKING_URI",
+        "MLFLOW_REGISTRY_URI",
+    ):
         monkeypatch.delenv(variable, raising=False)
     previous = mlflow.get_tracking_uri()
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
@@ -113,8 +127,8 @@ def test_register_adds_tags_and_challenger_alias(tracking):
 
 
 def test_new_champion_moves_the_alias(tracking):
-    first = logged_run({"question": "p1", "git_dirty": "false"})
-    second = logged_run({"question": "p1", "git_dirty": "false"})
+    first = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
+    second = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
 
     assert register("--run-id", first, "--alias", "champion").exit_code == 0
     assert register("--run-id", second, "--alias", "champion").exit_code == 0
@@ -125,7 +139,7 @@ def test_new_champion_moves_the_alias(tracking):
 
 
 def test_promoting_a_challenger_reuses_its_version(tracking):
-    run_id = logged_run({"question": "p1", "git_dirty": "false"})
+    run_id = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
 
     assert register("--run-id", run_id).exit_code == 0
     assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
@@ -144,9 +158,21 @@ def test_promoting_a_challenger_reuses_its_version(tracking):
     )
 
 
+def test_reusing_a_version_keeps_its_description(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
+    assert register("--run-id", run_id).exit_code == 0
+    client = MlflowClient()
+    version = client.get_model_version_by_alias(P1_NAME, "challenger").version
+    client.update_model_version(P1_NAME, version, description="Revisado por el equipo")
+
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+
+    assert client.get_model_version(P1_NAME, version).description == "Revisado por el equipo"
+
+
 def test_promoting_keeps_a_challenger_of_another_version(tracking):
-    promoted = logged_run({"question": "p1", "git_dirty": "false"})
-    newer = logged_run({"question": "p1", "git_dirty": "false"})
+    promoted = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
+    newer = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
 
     # Both start as challengers; the alias ends on the newer one, then the older is promoted
     assert register("--run-id", promoted).exit_code == 0
@@ -160,7 +186,7 @@ def test_promoting_keeps_a_challenger_of_another_version(tracking):
 
 
 def test_rejects_demoting_the_champion_to_challenger(tracking):
-    run_id = logged_run({"question": "p1", "git_dirty": "false"})
+    run_id = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
 
     assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
     assert register("--run-id", run_id).exit_code == 2
@@ -169,6 +195,29 @@ def test_rejects_demoting_the_champion_to_challenger(tracking):
     assert "challenger" not in client.get_registered_model(P1_NAME).aliases
     champion = client.get_model_version_by_alias(P1_NAME, "champion")
     assert champion.tags["validation_status"] == "approved"
+
+
+def test_champion_loads_by_alias_and_predicts(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false", "selected": "true"})
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 0
+
+    model = mlflow.pyfunc.load_model(f"models:/{P1_NAME}@champion")
+
+    assert list(model.predict(pd.DataFrame({"x": [3.0]}))) == pytest.approx([3.0])
+
+
+def test_rejects_a_dirty_champion(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "true", "selected": "true"})
+
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 2
+    assert MlflowClient().search_registered_models() == []
+
+
+def test_rejects_an_unselected_champion(tracking):
+    run_id = logged_run({"question": "p1", "git_dirty": "false"})
+
+    assert register("--run-id", run_id, "--alias", "champion").exit_code == 2
+    assert MlflowClient().search_registered_models() == []
 
 
 def test_rejects_an_unknown_alias(tracking):
