@@ -780,9 +780,9 @@ def search(model: str = "kmeans", seed: int = SEED) -> str:
 def select(run_id: str | None = None, allow_dirty: bool = False) -> str:
     """Choose the P3 run on validation, score December once and make it the only selected run.
 
-    ``run_id`` skips ``choose_run``.  A run that is already selected is left as is, so December is
-    never scored twice.  The test evidence is logged before the ``selected`` tag moves, so a
-    failure keeps the previous choice and the call can be retried.
+    ``run_id`` skips ``choose_run``.  A run that already has its December metrics only gets the
+    tag back, so December is never scored twice.  The test evidence is logged before the
+    ``selected`` tag moves, so a failure keeps the previous choice and the call can be retried.
     """
     setup_experiment()
     client = mlflow.MlflowClient()
@@ -793,29 +793,33 @@ def select(run_id: str | None = None, allow_dirty: bool = False) -> str:
     run = client.get_run(run_id)
     if run.data.tags.get("question") != "p3":
         raise ValueError(f"Run {run_id} is not a P3 run")
-    if run.data.tags.get("selected") == "true":
-        logger.info(f"Run {run_id} is already selected; December was already scored once")
-        return run_id
-    if run.data.tags.get("git_dirty") == "true" and not allow_dirty:
-        raise RuntimeError(
-            "The run was trained from a dirty tree. Commit and retrain, or use --allow-dirty "
-            "for a local test."
+    already_scored = any(name.startswith("test_") for name in run.data.metrics)
+    if already_scored:
+        logger.info(f"Run {run_id} already has its December metrics; only the tag moves")
+    else:
+        if run.data.tags.get("git_dirty") == "true" and not allow_dirty:
+            raise RuntimeError(
+                "The run was trained from a dirty tree. Commit and retrain, or use --allow-dirty "
+                "for a local test."
+            )
+        data = load_data(CLUSTERING_FEATURES_DIR)
+        for name, current in (
+            ("feature_version", data["manifest"]["feature_version"]),
+            ("features_data_version", data["manifest"]["data_version"]),
+        ):
+            if run.data.params.get(name) != str(current):
+                raise RuntimeError(f"The P3 {name} changed since this run was trained; retrain it")
+        model = mlflow.pyfunc.load_model(f"runs:/{run_id}/model")
+        labels = {split: model.predict(data["matrices"][split]) for split in ("train", "test")}
+        metrics = cluster_metrics(data["matrices"]["test"], labels["test"], "test_")
+        metrics["test_temporal_ari"] = temporal_ari(
+            data["keys"]["train"], labels["train"], data["keys"]["test"], labels["test"]
         )
-    data = load_data(CLUSTERING_FEATURES_DIR)
-    if run.data.params.get("features_data_version") != data["manifest"]["data_version"]:
-        raise RuntimeError("The P3 features changed since this run was trained; retrain it")
-
-    model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-    labels = {split: model.predict(data["matrices"][split]) for split in ("train", "test")}
-    metrics = cluster_metrics(data["matrices"]["test"], labels["test"], "test_")
-    metrics["test_temporal_ari"] = temporal_ari(
-        data["keys"]["train"], labels["train"], data["keys"]["test"], labels["test"]
-    )
-    rule = "max val_silhouette; ties: min val_davies_bouldin, then smaller K"
-    with mlflow.start_run(run_id=run_id):
-        mlflow.log_metrics(metrics)
-        mlflow.set_tag("selection_rule", rule)
-        mlflow.log_dict({"run_id": run_id, "rule": rule, **metrics}, "config/selection.json")
+        rule = "max val_silhouette; ties: min val_davies_bouldin, then smaller K"
+        with mlflow.start_run(run_id=run_id):
+            mlflow.log_metrics(metrics)
+            mlflow.set_tag("selection_rule", rule)
+            mlflow.log_dict({"run_id": run_id, "rule": rule, **metrics}, "config/selection.json")
 
     previous = client.search_runs(
         [run.info.experiment_id], "tags.question = 'p3' and tags.selected = 'true'"
@@ -823,7 +827,7 @@ def select(run_id: str | None = None, allow_dirty: bool = False) -> str:
     for old in previous:
         client.delete_tag(old.info.run_id, "selected")
     client.set_tag(run_id, "selected", "true")
-    logger.success(f"Selected P3 run {run_id}: test silhouette {metrics['test_silhouette']:.4f}")
+    logger.success(f"Selected P3 run {run_id}")
     return run_id
 
 

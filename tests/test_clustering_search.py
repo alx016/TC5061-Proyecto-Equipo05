@@ -206,13 +206,18 @@ def select_data() -> dict:
     )
     keys = pd.DataFrame({"station_id": range(10)})
     return {
-        "manifest": {"data_version": "v1"},
+        "manifest": {"feature_version": 4, "data_version": "v1"},
         "matrices": {split: matrix for split in ("train", "validation", "test")},
         "keys": {split: keys for split in ("train", "validation", "test")},
     }
 
 
-def log_p3_run(data: dict, selected: bool = False, features_data_version: str = "v1") -> str:
+def log_p3_run(
+    data: dict,
+    selected: bool = False,
+    features_data_version: str = "v1",
+    feature_version: str = "4",
+) -> str:
     """Log a clean P3 candidate with a real K-Means model, as train_and_log would."""
     train = data["matrices"]["train"]
     with mlflow.start_run() as run:
@@ -220,6 +225,7 @@ def log_p3_run(data: dict, selected: bool = False, features_data_version: str = 
         if selected:
             mlflow.set_tag("selected", "true")
         mlflow.log_param("features_data_version", features_data_version)
+        mlflow.log_param("feature_version", feature_version)
         log_model_with_signature(
             KMeans(n_clusters=2, n_init=10, random_state=0).fit(train),
             train,
@@ -257,11 +263,46 @@ def test_select_refuses_a_run_trained_on_other_features(tracking_store, monkeypa
     data = select_data()
     monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
     monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
-    stale = log_p3_run(data, features_data_version="v0")
+    stale_data = log_p3_run(data, features_data_version="v0")
+    stale_recipe = log_p3_run(data, feature_version="3")
 
-    with pytest.raises(RuntimeError, match="features changed"):
-        select(run_id=stale)
+    with pytest.raises(RuntimeError, match="features_data_version changed"):
+        select(run_id=stale_data)
+    with pytest.raises(RuntimeError, match="feature_version changed"):
+        select(run_id=stale_recipe)
 
-    run = tracking_store.get_run(stale)
-    assert "selected" not in run.data.tags
-    assert not any(name.startswith("test_") for name in run.data.metrics)
+    for stale in (stale_data, stale_recipe):
+        run = tracking_store.get_run(stale)
+        assert "selected" not in run.data.tags
+        assert not any(name.startswith("test_") for name in run.data.metrics)
+
+
+def test_select_back_and_forth_scores_december_once_per_run(tracking_store, monkeypatch):
+    data = select_data()
+    monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
+    monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
+    first, second = log_p3_run(data), log_p3_run(data)
+
+    # Comparing candidates: A, then B, then back to A
+    for run_id in (first, second, first):
+        select(run_id=run_id)
+
+    client = tracking_store
+    assert len(client.get_metric_history(first, "test_silhouette")) == 1
+    assert len(client.get_metric_history(second, "test_silhouette")) == 1
+    assert client.get_run(first).data.tags.get("selected") == "true"
+    assert "selected" not in client.get_run(second).data.tags
+
+
+def test_select_scores_a_run_tagged_selected_without_december_metrics(tracking_store, monkeypatch):
+    # Old search winners were tagged selected=true without ever scoring December
+    data = select_data()
+    monkeypatch.setattr(train_clustering, "setup_experiment", lambda: None)
+    monkeypatch.setattr(train_clustering, "load_data", lambda base_dir: data)
+    tagged = log_p3_run(data, selected=True)
+
+    select(run_id=tagged)
+
+    run = tracking_store.get_run(tagged)
+    assert {"test_silhouette", "test_davies_bouldin", "test_temporal_ari"} <= set(run.data.metrics)
+    assert run.data.tags["selected"] == "true"
