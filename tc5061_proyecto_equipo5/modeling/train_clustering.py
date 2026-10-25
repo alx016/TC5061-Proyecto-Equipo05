@@ -16,6 +16,7 @@ to the shared MLflow experiment with the helpers in modeling/common.py.
 import json
 from pathlib import Path
 import tempfile
+from typing import Annotated
 
 from loguru import logger
 import matplotlib
@@ -23,6 +24,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mlflow
+from mlflow.exceptions import MlflowException
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
@@ -38,7 +40,12 @@ from tc5061_proyecto_equipo5.config import (
     SEED,
     STUDY_YEAR,
 )
-from tc5061_proyecto_equipo5.modeling.common import base_tags, data_version, setup_experiment
+from tc5061_proyecto_equipo5.modeling.common import (
+    base_tags,
+    data_version,
+    log_model_with_signature,
+    setup_experiment,
+)
 
 app = typer.Typer()
 
@@ -364,7 +371,7 @@ def train_and_log(
             data["k_table"].to_csv(Path(folder) / "k_selection.csv", index=False)
             mlflow.log_artifacts(folder)
         if log_model:
-            mlflow.sklearn.log_model(model, name="model")
+            log_model_with_signature(model, data["matrices"]["train"])
         run_id = run.info.run_id
     logger.success(f"{name}: run {run_id} logged")
     return {"run_id": run_id, "run_name": name, **metrics}
@@ -373,6 +380,28 @@ def train_and_log(
 @app.callback()
 def main() -> None:
     """Train the MiBici clustering models (keeps ``clustering`` a subcommand)."""
+
+
+@app.command()
+def select(
+    run_id: Annotated[str, typer.Option(help="Finished P3 run chosen after validation review")],
+    reason: Annotated[str, typer.Option(help="Document the validation comparison and choice")],
+) -> None:
+    """Record an explicit P3 choice; never rank models or use December to select one."""
+    if not reason.strip():
+        raise typer.BadParameter("A nonempty validation review reason is required")
+    client = mlflow.MlflowClient()
+    try:
+        run = client.get_run(run_id)
+        if run.data.tags.get("question") != "p3" or run.info.status != "FINISHED":
+            raise typer.BadParameter("Choose a finished P3 run")
+        mlflow.models.get_model_info(f"runs:/{run_id}/model")
+    except MlflowException as error:
+        raise typer.BadParameter(f"P3 run {run_id} must have a logged model: {error}") from error
+    client.set_tag(run_id, "selection_method", "manual_validation_review")
+    client.set_tag(run_id, "selection_reason", reason.strip())
+    client.set_tag(run_id, "selected", "true")
+    logger.success(f"Selected P3 run {run_id}; registration and promotion remain separate")
 
 
 @app.command()

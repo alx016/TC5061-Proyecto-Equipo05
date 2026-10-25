@@ -56,6 +56,15 @@ entry_points:
       run_id: {type: string, default: "none"}
     command: "python -m tc5061_proyecto_equipo5.modeling.train_classification select --question {question} --run-id {run_id}"
 
+  # P3 selection is an explicit review of validation metrics and profile artifacts.
+  select_p3:
+    parameters:
+      run_id: {type: string}
+      reason: {type: string}
+    command: >-
+      python -m tc5061_proyecto_equipo5.modeling.train_clustering select
+      --run-id {run_id} --reason {reason}
+
   # Register the model of one run in the Model Registry. A new version starts as challenger;
   # promoting it to champion is an explicit decision (-P alias=champion)
   register:
