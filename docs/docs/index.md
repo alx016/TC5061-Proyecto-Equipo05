@@ -43,7 +43,7 @@
 
   - **Proxy de Estado:** Balance de flujo neto normalizado vs. capacidad física ($\Delta = \frac{In - Out}{C_s}$).
   - **Umbral Operativo:** $|\Delta| \ge 0.40$ (riesgo inminente con $40\%$ de rotación en 1h).
-  - **Métrica Primaria:** PR-AUC $\ge 0.82$, Recall $\ge 85\%$ en desabasto.
+  - **Métrica Primaria:** Macro F1 $\ge 0.72$; Recall $\ge 85\%$ en desabasto y PR-AUC $\ge 0.82$ como métricas de detección y separación.
 
 - [**P3 — Clustering Funcional de Estaciones**](canvases/p3-clustering.md)
 

@@ -95,5 +95,14 @@
     - **Métrica de Detección:** **Recall en Desabasto** $\ge 85\%$ (minimiza usuarios varados sin bici).
     - **Métrica de Separación:** **PR-AUC Multiclase** $\ge 0.82$.
 
+!!! note "Criterio de selección de candidatos"
+    **Macro F1-Score** sigue siendo la **métrica primaria reportada/evaluada** (objetivo $\ge 0.72$). La calibración de umbrales maximiza Macro F1 sujeto a `recall_desabasto >= 0.85`.
+
+    El **ranking de candidatos** en `search` y `choose_run` es un rol distinto: ordena por `val_pr_auc_minority_mean`, el *average precision* uno-contra-resto promediado de `Riesgo_Desabasto` y `Riesgo_Saturacion`, y desempata con `val_macro_f1`.
+
+    **Justificación formal.** Con `Balanceado` al 98.74% de las observaciones, un PR-AUC promediado macro queda dominado por la clase mayoritaria. Macro F1 es dependiente del umbral y un modelo que ignora por completo a las minorías aún conserva aproximadamente un tercio de su valor aportado por la clase mayoritaria. El AP de minorías es libre de umbral y mide directamente el ordenamiento de probabilidades que se usa para priorizar alertas de campo. El guardrail de recall y la condición `threshold_fallback=false` se aplican como filtro preferente: si ninguna corrida los cumple, se conserva la mejor AP y el fallback queda visible en `select`, de modo que el ranking no oculta la pérdida de detección de desabasto.
+
+    `pr_auc_macro` permanece como métrica descriptiva reportada, no como clave de ranking. Así, **métrica primaria reportada** y **métrica de ranking** son dos roles distintos: Macro F1 no fue reemplazada como métrica primaria de evaluación.
+
 !!! warning "Contrato temporal implementado"
     La receta baseline predice `[h,h+1)` a las `h-00:10` y solo usa buckets completos de `h-2` o anteriores. El flujo/capacidad no está acotado a ±1 ni mide inventario. Se requiere capacidad histórica acreditada; el catálogo de 2026 no prueba capacidad de 2024. Ver [contratos de features](../feature-engineering.md).
