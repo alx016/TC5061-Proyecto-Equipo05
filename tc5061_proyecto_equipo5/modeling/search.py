@@ -5,12 +5,16 @@ from typing import Annotated
 from loguru import logger
 import typer
 
-from tc5061_proyecto_equipo5.modeling import train_classification, train_regression
+from tc5061_proyecto_equipo5.modeling import (
+    train_classification,
+    train_clustering,
+    train_regression,
+)
 from tc5061_proyecto_equipo5.modeling.common import TASKS
 
 app = typer.Typer()
 
-SEARCHERS = {"p1": train_regression.search}
+SEARCHERS = {"p1": train_regression.search, "p3": train_clustering.search}
 # Classification joins as soon as its experiment work package provides the searcher.
 if callable(getattr(train_classification, "search", None)):
     SEARCHERS["p2"] = train_classification.search
@@ -18,7 +22,7 @@ if callable(getattr(train_classification, "search", None)):
 
 @app.command()
 def main(
-    question: Annotated[str, typer.Option(help="Question to search (p1 or p2)")],
+    question: Annotated[str, typer.Option(help="Question to search (p1, p2 or p3)")],
     model: Annotated[str, typer.Option(help="Model family to search")] = "lightgbm",
 ):
     """Run a search with the selected question's own configuration and seed defaults."""
