@@ -18,6 +18,7 @@
 | pip-audit (dependencias de ejecución) | 42 avisos en 3 paquetes | 0 |
 | pip-audit (entorno completo, con dev) | — | 0 |
 | detect-secrets (archivos versionados) | 53 coincidencias, todas falsos positivos | 0 secretos reales |
+| gitleaks (historial completo) | — | 0 fugas |
 | Credenciales en el historial de Git | — | Ninguna |
 
 ## Verificación funcional
@@ -30,9 +31,9 @@
 
 ## Herramientas y comandos
 
-Versiones usadas: Python 3.13.15, bandit 1.9.4, pip-audit 2.10.1 y detect-secrets 1.5.0.
-bandit y pip-audit quedaron en el grupo `dev` de `pyproject.toml`, así que se ejecutan con
-`uv run` y no forman parte de las dependencias de ejecución.
+Versiones usadas: Python 3.13.15, bandit 1.9.4, pip-audit 2.10.1, detect-secrets 1.5.0 y
+gitleaks 8.30.1. bandit y pip-audit quedaron en el grupo `dev` de `pyproject.toml`, así que
+se ejecutan con `uv run` y no forman parte de las dependencias de ejecución.
 
 ```bash
 # Código
@@ -48,6 +49,9 @@ uv run pip-audit -r /tmp/requirements-full.txt
 
 # Secretos en archivos versionados
 git ls-files -z | xargs -0 uvx detect-secrets scan > /tmp/detect-secrets.json
+
+# Secretos en todo el historial de Git
+gitleaks git --log-opts="--all" --report-format json --report-path /tmp/gitleaks.json .
 ```
 
 pip-audit omite el proyecto local `tc5061-proyecto-equipo5` porque no está publicado en
@@ -110,6 +114,11 @@ repositorio es `.env.example`, que solo contiene la URI local de MLflow y el nom
 experimento, sin valores sensibles. La búsqueda de nombres sensibles (`*.pem`, `*.key`,
 `id_rsa`, credenciales, secretos) en todo el historial tampoco encontró archivos.
 
+También se ejecutó `gitleaks 8.30.1` sobre todo el historial
+(`gitleaks git --log-opts="--all"`): **148 commits y ~6.8 MB escaneados, 0 fugas**. La
+búsqueda por patrones de claves de AWS, GitHub, OpenAI, Slack y encabezados de clave privada
+en `git log --all -p` también dio 0 coincidencias.
+
 ## Prácticas que ya existían
 
 - `.gitignore` excluye `/data/`, `.env`, `.venv`, `mlflow.db`, `mlruns/`, `mlartifacts/` y
@@ -139,9 +148,9 @@ de basura.
 - Las supresiones `# nosec` dependen de que las llamadas sigan usando argumentos fijos y de
   que el pickle siga siendo de escritura local. Cualquier cambio en esos flujos invalida la
   justificación.
-- `detect-secrets` es un detector por patrones y entropía; las salidas de notebooks producen
-  falsos positivos. No sustituye una revisión manual ni un escaneo de historial con una
-  herramienta especializada como gitleaks.
+- `detect-secrets` y gitleaks son detectores por reglas y entropía; las salidas de notebooks
+  producen falsos positivos en detect-secrets. El escaneo de historial con gitleaks no
+  encontró fugas, pero ninguno sustituye una auditoría manual.
 - No se agregó automatización en CI; este frente deja los comandos listos para que el
   `Makefile` y el README de la entrega los invoquen.
 - `python_env.yaml` lo resuelve `pip` al construir el entorno del MLflow Project, fuera del
