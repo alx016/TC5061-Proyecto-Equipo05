@@ -567,7 +567,8 @@ def _load_feature_trips(input_dir: Path):
 
 def _write_ready(result, target, *, fit_as_of, eligible=None, profiles=None):
     """Fit once on eligible train; export bounded-size CSR batches with aligned keys."""
-    import pickle
+    # The preprocessor is trusted local state; this module never unpickles input.
+    import pickle  # nosec B403
 
     from scipy import sparse
 
@@ -832,7 +833,8 @@ def prepare_feature_dataset(
         eligible = None
         fit_as_of = "2024-10-01 00:00:00" if profiles else "2024-09-30 23:40:00"
         if profiles is None:
-            assert result.y is not None
+            if result.y is None:
+                raise ValueError("P1 features require the target column")
             observed = result.keys.station_id.map(first_seen)
             keep = result.keys.target_time.ge("2024-01-01") & observed.le(result.keys.issue_time)
             positions = result.keys.index[keep]

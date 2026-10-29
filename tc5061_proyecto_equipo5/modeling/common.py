@@ -18,7 +18,8 @@ project root.
 
 import json
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import mlflow
@@ -56,9 +57,12 @@ def setup_experiment() -> None:
     """
     uri = mlflow.get_tracking_uri()
 
-    if uri.startswith("http"):
+    if urlsplit(uri).scheme in {"http", "https"}:
         try:
-            urlopen(f"{uri.rstrip('/')}/health", timeout=3)
+            with urlopen(  # nosec B310
+                f"{uri.rstrip('/')}/health", timeout=3
+            ) as response:
+                response.read(1)
         except OSError as exc:
             raise RuntimeError(
                 f"MLflow server not reachable at {uri}. Start it with `make mlflow-server`."
@@ -70,10 +74,15 @@ def setup_experiment() -> None:
 def git_state() -> dict[str, str]:
     """Commit hash and whether the working tree had uncommitted changes when the run started."""
     try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=PROJ_ROOT, capture_output=True, text=True, check=True
+        # Fixed argv, no shell; git comes from PATH like the rest of the toolchain.
+        commit = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJ_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
-        status = subprocess.run(
+        status = subprocess.run(  # nosec B603 B607
             ["git", "status", "--porcelain"],
             cwd=PROJ_ROOT,
             capture_output=True,
