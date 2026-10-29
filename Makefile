@@ -43,7 +43,7 @@ format:
 ## Run tests
 .PHONY: test
 test:
-	uv run pytest tests
+	uv run pytest 
 
 
 ## Run data integrity and train-test drift checks (DeepChecks isolated environment)
@@ -57,6 +57,20 @@ validate-data: data-checks
 
 
 
+
+## Run security checks: bandit, pip-audit (runtime + full) and detect-secrets
+.PHONY: security
+security:
+	uv run bandit -r tc5061_proyecto_equipo5
+	uv export --no-dev --format requirements-txt --no-hashes -o /tmp/requirements.txt
+	uv run pip-audit -r /tmp/requirements.txt
+	uv export --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
+	uv run pip-audit -r /tmp/requirements-full.txt
+	git ls-files -z | xargs -0 uvx detect-secrets scan
+
+## Run every check: tests, security and data checks
+.PHONY: check
+check: test security data-checks
 
 ## Set up Python interpreter environment
 .PHONY: create_environment

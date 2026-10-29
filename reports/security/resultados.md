@@ -123,9 +123,9 @@ experimento, sin valores sensibles. La búsqueda de nombres sensibles (`*.pem`, 
 `id_rsa`, credenciales, secretos) en todo el historial tampoco encontró archivos.
 
 También se ejecutó `gitleaks 8.30.1` sobre todo el historial
-(`gitleaks git --log-opts="--all"`): **148 commits y ~6.8 MB escaneados, 0 fugas**. La
-búsqueda por patrones de claves de AWS, GitHub, OpenAI, Slack y encabezados de clave privada
-en `git log --all -p` también dio 0 coincidencias.
+(`gitleaks git --log-opts="--all"`): **150 commits y ~6.8 MB escaneados, 0 fugas** (nueva
+corrida tras el merge a `main`). La búsqueda por patrones de claves de AWS, GitHub, OpenAI,
+Slack y encabezados de clave privada en `git log --all -p` también dio 0 coincidencias.
 
 ## Prácticas que ya existían
 
@@ -159,8 +159,9 @@ de basura.
 - `detect-secrets` y gitleaks son detectores por reglas y entropía; las salidas de notebooks
   producen falsos positivos en detect-secrets. El escaneo de historial con gitleaks no
   encontró fugas, pero ninguno sustituye una auditoría manual.
-- No se agregó automatización en CI; este frente deja los comandos listos para que el
-  `Makefile` y el README de la entrega los invoquen.
+- `make security` corre bandit, pip-audit (ejecución + completo) y detect-secrets con los
+  comandos de este reporte. Gitleaks no está en el target porque requiere su binario
+  (no es paquete PyPI); el comando documentado arriba sigue siendo la referencia.
 - `python_env.yaml` lo resuelve `pip` al construir el entorno del MLflow Project, fuera del
   corpus que audita pip-audit. Se mantuvo sincronizado con `pyproject.toml` y
   `tests/test_dependencies.py` verifica esa igualdad.
