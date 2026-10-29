@@ -23,11 +23,12 @@
 
 ## Verificación funcional
 
-- `uv run pytest -q`: **250 pruebas pasan** (12 min 56 s) en la rama, sin fallos.
+- `uv run pytest -q`: **260 pruebas pasan** en la rama, sin fallos (incluye las 9 de
+  reproducibilidad de WP-T1 tras el rebase sobre `main`).
 - `uv run ruff check` y `uv run ruff format --check`: sin errores.
 - `uv lock --check`: lockfile consistente con `pyproject.toml`.
-- Prueba directa del guard de descargas: `fetch_file("http://…")` lanza `ValueError` y no
-  invoca a `curl`.
+- Prueba del guard de descargas: `tests/test_dataset.py::test_fetch_file_rejects_non_https_without_calling_curl`
+  verifica que `fetch_file("http://…")` lanza `ValueError` sin invocar a `curl`.
 
 ## Herramientas y comandos
 
@@ -90,6 +91,7 @@ disponible.
 | `pillow` | 12.3.0 | 39 | 13.0.0 | `uv lock --upgrade-package pillow` (dependencia transitiva) |
 | `certifi` | 2026.7.22 | 2 | 2026.10.23 | `uv lock --upgrade-package certifi` (transitiva) |
 | `mlflow` | 3.17.1 | 1 | 3.17.2 | Versión fijada a `3.17.2` en `pyproject.toml` y `uv.lock` |
+| `tornado` | 6.5.10 | 3 | 6.6 | `uv lock --upgrade-package tornado` (transitiva vía jupyter/notebook) |
 
 Después de los cambios, pip-audit no reporta vulnerabilidades conocidas ni en las
 dependencias de ejecución ni en el entorno completo. El cambio de `mlflow` es un parche de
@@ -97,6 +99,12 @@ la misma serie; además de `pyproject.toml` y `uv.lock`, se actualizó el pin de
 `python_env.yaml` para que el entorno del MLflow Project coincida con el proyecto (lo
 verifica `tests/test_dependencies.py`). El cambio de `pillow` es una dependencia transitiva
 (no se declara directamente en `pyproject.toml`) y se validó con la suite de pruebas.
+
+Durante la revisión del PR se detectaron 3 CVEs nuevos en `tornado` 6.5.10
+(CVE-2026-115927, CVE-2026-116577 y CVE-2026-116578, publicados el 26 de octubre),
+dependencia transitiva de Jupyter. Se corrigieron con `uv lock --upgrade-package tornado`
+(6.5.10 → 6.6, sin cambios en `pyproject.toml`) y se repitieron ambas exportaciones de
+pip-audit con resultado de 0 vulnerabilidades conocidas.
 
 ## Revisión de secretos
 
