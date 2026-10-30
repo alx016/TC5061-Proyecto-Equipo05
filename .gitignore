@@ -4,6 +4,9 @@
 # Local-only scratch files (never committed)
 /local/
 
+# Local agent skill index
+/.atl/
+
 # Mac OS-specific storage files
 .DS_Store
 
@@ -207,3 +210,7 @@ models/*.pkl
 /reports/validation/*-adversarial.txt
 /reports/validation/*-environment.json
 /reports/validation/*-runtime-*.json
+
+/reports/verification/
+/docs/adr/
+/docs/requirements/
