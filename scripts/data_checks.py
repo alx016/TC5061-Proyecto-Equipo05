@@ -110,8 +110,8 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     return summary
 
 
-def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
-    """Run data integrity suite and export HTML + JSON."""
+def _prepare_dataset(df: pd.DataFrame) -> Dataset:
+    """Prepare a DeepChecks Dataset ensuring record_id, feature schema, and datetime metadata."""
     df = df.copy()
     if "record_id" not in df.columns:
         if "station_id" in df.columns and "hour" in df.columns:
@@ -123,7 +123,7 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
     available_cat = [col for col in CATEGORICAL_LIST if col in available_features]
     datetime_col = "hour" if "hour" in df.columns else None
 
-    ds = Dataset(
+    return Dataset(
         df,
         label="target" if "target" in df.columns else None,
         features=available_features,
@@ -132,6 +132,11 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
         index_name="record_id",
         label_type="multiclass" if "target" in df.columns else None,
     )
+
+
+def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
+    """Run data integrity suite and export HTML + JSON."""
+    ds = _prepare_dataset(df)
 
     suite = data_integrity()
     for check in suite.checks.values():
@@ -148,49 +153,25 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
 
 def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
     """Run train/test drift suite (Jan-Sep train vs Dec test) and export HTML + JSON."""
-    df = df.copy()
-    if "record_id" not in df.columns:
-        if "station_id" in df.columns and "hour" in df.columns:
-            df["record_id"] = df["station_id"].astype(str) + "_" + df["hour"].astype(str)
-        else:
-            df["record_id"] = [f"rec_{i}" for i in range(len(df))]
+    if (
+        "split" not in df.columns
+        or "train" not in df["split"].values
+        or "test" not in df["split"].values
+    ):
+        raise ValueError(
+            "DataFrame must contain a 'split' column with both 'train' and 'test' partitions."
+        )
 
-    if "split" in df.columns and "train" in df["split"].values and "test" in df["split"].values:
-        train_df = df[df["split"] == "train"]
-        test_df = df[df["split"] == "test"]
-    else:
-        sorted_df = df.sort_values("hour") if "hour" in df.columns else df
-        split_idx = int(len(sorted_df) * 0.8)
-        train_df = sorted_df.iloc[:split_idx]
-        test_df = sorted_df.iloc[split_idx:]
+    train_df = df[df["split"] == "train"]
+    test_df = df[df["split"] == "test"]
 
     if "target" in train_df.columns:
         train_df = train_df.dropna(subset=["target"])
     if "target" in test_df.columns:
         test_df = test_df.dropna(subset=["target"])
 
-    available_features = [col for col in FEATURE_COLUMNS if col in df.columns]
-    available_cat = [col for col in CATEGORICAL_LIST if col in available_features]
-    datetime_col = "hour" if "hour" in df.columns else None
-
-    train_ds = Dataset(
-        train_df,
-        label="target" if "target" in train_df.columns else None,
-        features=available_features,
-        cat_features=available_cat,
-        datetime_name=datetime_col,
-        index_name="record_id",
-        label_type="multiclass" if "target" in train_df.columns else None,
-    )
-    test_ds = Dataset(
-        test_df,
-        label="target" if "target" in test_df.columns else None,
-        features=available_features,
-        cat_features=available_cat,
-        datetime_name=datetime_col,
-        index_name="record_id",
-        label_type="multiclass" if "target" in test_df.columns else None,
-    )
+    train_ds = _prepare_dataset(train_df)
+    test_ds = _prepare_dataset(test_df)
 
     sample_size = min(50000, max(len(train_df), len(test_df)))
     suite = train_test_validation(n_samples=sample_size)

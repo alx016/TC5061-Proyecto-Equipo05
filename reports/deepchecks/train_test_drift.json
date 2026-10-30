@@ -1,8 +1,8 @@
 {
   "suite_name": "train_test_drift",
   "passed": false,
-  "total_checks": 11,
-  "passed_checks_count": 10,
+  "total_checks": 12,
+  "passed_checks_count": 11,
   "failed_checks_count": 1,
   "passed_checks": [
     null,
@@ -11,6 +11,7 @@
     null,
     "Date Train-Test Leakage (duplicates)",
     "Date Train-Test Leakage (overlap)",
+    "Index Train-Test Leakage",
     "Feature Label Correlation Change",
     "Feature Drift",
     "Label Drift",
@@ -26,10 +27,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Percentage of test data samples that appear in train data is less or equal to 5%",
+          "status": "FAIL",
           "category": null,
-          "details": null
+          "details": "Percent of test data samples that appear in train data: 6.75%"
         }
       ],
       "value": {
@@ -41,7 +42,7 @@
           "meta": {
             "dtypes_rle": [
               [
-                "pd/f64",
+                "pd/f",
                 6
               ],
               [
@@ -49,7 +50,7 @@
                 2
               ],
               [
-                "pd/f64",
+                "pd/f",
                 11
               ]
             ],
@@ -69,10 +70,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Test-Train size ratio is greater than 0.01",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Test-Train size ratio is 0.11"
         }
       ],
       "value": {
@@ -86,10 +87,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Number of new label values is less or equal to 0",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Found 0 new labels in test data: []"
         }
       ],
       "value": {
@@ -105,10 +106,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Ratio of samples with a new category is less or equal to 0%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 3 relevant features"
         }
       ],
       "value": "[{\"# New Categories\":0,\"Ratio of New Categories\":0,\"New categories\":[]},{\"# New Categories\":0,\"Ratio of New Categories\":0,\"New categories\":[]},{\"# New Categories\":0,\"Ratio of New Categories\":0,\"New categories\":[]}]"
@@ -119,13 +120,14 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "No new variants allowed in test data",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 2 relevant columns"
         }
       ],
       "value": {
+        "record_id": {},
         "split": {}
       }
     },
@@ -135,10 +137,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Date leakage ratio is less or equal to 0%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "No leaked dates found"
         }
       ],
       "value": 0
@@ -149,10 +151,24 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Date leakage ratio is less or equal to 0%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "No leaked dates found"
+        }
+      ],
+      "value": 0
+    },
+    {
+      "header": "Index Train-Test Leakage",
+      "check_name": "Index Train Test Leakage",
+      "type": "CheckResult",
+      "conditions": [
+        {
+          "name": "Ratio of leaking indices is less or equal to 0%",
+          "status": "PASS",
+          "category": null,
+          "details": "No index leakage found"
         }
       ],
       "value": 0
@@ -163,16 +179,16 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Train-Test features' Predictive Power Score difference is less than 0.2",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 18 relevant columns"
         },
         {
-          "name": null,
-          "status": null,
+          "name": "Train features' Predictive Power Score is less than 0.7",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 18 relevant columns"
         }
       ],
       "value": {
@@ -244,10 +260,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "categorical drift score < 0.2 and numerical drift score < 0.2",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 18 columns out of 18 columns.\nFound column \"day_of_week\" has the highest categorical drift score: 0.06\nFound column \"arrivals_lag1\" has the highest numerical drift score: 0.03"
         }
       ],
       "value": {
@@ -403,10 +419,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Label drift score < 0.15",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Label's drift score Cramer's V is 0.02"
         }
       ],
       "value": {
@@ -423,10 +439,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Drift value is less than 0.25",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Found drift value of: 0.15, corresponding to a domain classifier AUC of: 0.57"
         }
       ],
       "value": {
@@ -485,7 +501,7 @@
             "meta": {
               "dtypes_rle": [
                 [
-                  "pd/f64",
+                  "pd/f",
                   6
                 ],
                 [
@@ -493,7 +509,7 @@
                   2
                 ],
                 [
-                  "pd/f64",
+                  "pd/f",
                   11
                 ]
               ],
@@ -603,13 +619,14 @@
         },
         "header": "String Mismatch Comparison",
         "value": {
+          "record_id": {},
           "split": {}
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "No new variants allowed in test data",
-            "More Info": "Passed for 1 relevant column"
+            "More Info": "Passed for 2 relevant columns"
           }
         ],
         "display": null
@@ -653,6 +670,28 @@
             "Status": "PASS",
             "Condition": "Date leakage ratio is less or equal to 0%",
             "More Info": "No leaked dates found"
+          }
+        ],
+        "display": null
+      },
+      {
+        "type": "CheckResult",
+        "check": {
+          "name": "Index Train Test Leakage",
+          "params": {
+            "n_to_show": 5,
+            "n_samples": 50000,
+            "random_state": 42
+          },
+          "summary": "Check if test indexes are present in train data. <a href=\"https://docs.deepchecks.com/0.19/tabular/auto_checks/train_test_validation/plot_index_leakage.html?utm_source=display_output&utm_medium=referral&utm_campaign=check_link\" target=\"_blank\">Read More...</a>"
+        },
+        "header": "Index Train-Test Leakage",
+        "value": 0,
+        "conditions_results": [
+          {
+            "Status": "PASS",
+            "Condition": "Ratio of leaking indices is less or equal to 0%",
+            "More Info": "No index leakage found"
           }
         ],
         "display": null

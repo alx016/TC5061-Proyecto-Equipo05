@@ -43,7 +43,19 @@ format:
 ## Run tests
 .PHONY: test
 test:
-	python -m pytest tests
+	uv run pytest tests
+
+
+## Run data integrity and train-test drift checks (DeepChecks isolated environment)
+.PHONY: data-checks
+data-checks:
+	uv run scripts/data_checks.py
+
+## Run data integrity and train-test drift checks (alias)
+.PHONY: validate-data
+validate-data: data-checks
+
+
 
 
 ## Set up Python interpreter environment

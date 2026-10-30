@@ -49,6 +49,26 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
     return parquet_path
 
 
+def run_data_checks_script(data_path: Path, output_dir: Path) -> subprocess.CompletedProcess:
+    """Execute scripts/data_checks.py in isolated environment via subprocess."""
+    cmd = [
+        "uv",
+        "run",
+        str(SCRIPT_PATH),
+        "--data-path",
+        str(data_path),
+        "--output-dir",
+        str(output_dir),
+    ]
+    return subprocess.run(
+        cmd,
+        cwd=PROJ_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 @pytest.mark.slow
 def test_data_checks_execution_on_synthetic_data(
     synthetic_classification_parquet: Path, tmp_path: Path
@@ -56,23 +76,7 @@ def test_data_checks_execution_on_synthetic_data(
     """Execute scripts/data_checks.py via subprocess on synthetic data and verify JSON/HTML."""
     output_dir = tmp_path / "deepchecks_reports"
 
-    cmd = [
-        "uv",
-        "run",
-        str(SCRIPT_PATH),
-        "--data-path",
-        str(synthetic_classification_parquet),
-        "--output-dir",
-        str(output_dir),
-    ]
-
-    result = subprocess.run(
-        cmd,
-        cwd=PROJ_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_data_checks_script(synthetic_classification_parquet, output_dir)
 
     assert result.returncode == 0, (
         f"Execution failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
@@ -136,23 +140,7 @@ def test_data_checks_detects_injected_defects(
     df_defective.to_parquet(defective_parquet, engine="pyarrow", compression="zstd", index=False)
 
     output_dir = tmp_path / "defective_reports"
-    cmd = [
-        "uv",
-        "run",
-        str(SCRIPT_PATH),
-        "--data-path",
-        str(defective_parquet),
-        "--output-dir",
-        str(output_dir),
-    ]
-
-    result = subprocess.run(
-        cmd,
-        cwd=PROJ_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_data_checks_script(defective_parquet, output_dir)
     assert result.returncode == 0, f"Execution failed:\n{result.stderr}"
 
     with open(output_dir / "data_integrity.json", "r", encoding="utf-8") as f:
@@ -176,3 +164,20 @@ def test_data_checks_detects_injected_defects(
     )
     assert null_check is not None
     assert any(c["status"] == "FAIL" for c in null_check["conditions"])
+
+
+@pytest.mark.slow
+def test_data_checks_fails_without_split_partitions(
+    synthetic_classification_parquet: Path, tmp_path: Path
+):
+    """Verify that script raises an error when split column lacks required partitions."""
+    df = pd.read_parquet(synthetic_classification_parquet)
+    df_no_split = df.drop(columns=["split"])
+    no_split_parquet = tmp_path / "no_split_features.parquet"
+    df_no_split.to_parquet(no_split_parquet, engine="pyarrow", compression="zstd", index=False)
+
+    output_dir = tmp_path / "no_split_reports"
+    result = run_data_checks_script(no_split_parquet, output_dir)
+    assert result.returncode != 0
+    assert "DataFrame must contain a 'split' column" in result.stderr
+

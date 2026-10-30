@@ -27,10 +27,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Ambiguous sample ratio is less or equal to 0%",
+          "status": "FAIL",
           "category": null,
-          "details": null
+          "details": "Ratio of samples with conflicting labels: 0.3%"
         }
       ],
       "value": {
@@ -11823,10 +11823,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Does not contain only a single value",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 26 relevant columns"
         }
       ],
       "value": {
@@ -11854,7 +11854,8 @@
         "departures_lag2": 84,
         "departures_lag3": 84,
         "target": 3,
-        "split": 3
+        "split": 3,
+        "record_id": 3144672
       }
     },
     {
@@ -11863,10 +11864,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Ratio of samples containing solely special character is less or equal to 0.1%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 26 relevant columns"
         }
       ],
       "value": {
@@ -11894,7 +11895,8 @@
         "departures_lag2": 0,
         "departures_lag3": 0,
         "target": 0,
-        "split": 0
+        "split": 0,
+        "record_id": 0
       }
     },
     {
@@ -11903,10 +11905,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Number of different null types is less or equal to 1",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 26 relevant columns"
         }
       ],
       "value": {
@@ -11996,12 +11998,13 @@
               "count": 358,
               "percent": 0.00011384335154826958
             }
-          }
+          },
+          "record_id": {}
         },
         "feature_importance": {
           "name": null,
           "index": {
-            "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\"]",
+            "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\", \"record_id\"]",
             "txt": true,
             "meta": {
               "dtype": "object",
@@ -12009,9 +12012,9 @@
             }
           },
           "values": {
-            "values": "eJyL9kv001EYGCIWAAO8II4=",
+            "values": "eJyL9kv001EYQCIWAKlQIdc=",
             "shape": [
-              25
+              26
             ],
             "dtype": "object"
           }
@@ -12024,10 +12027,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Rare data types in column are either more than 10% or less than 1% of the data",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "26 columns passed: found 0 columns with negligible types mix, and 26 columns without any types mix"
         }
       ],
       "value": {
@@ -12055,7 +12058,8 @@
         "departures_lag2": {},
         "departures_lag3": {},
         "target": {},
-        "split": {}
+        "split": {},
+        "record_id": {}
       }
     },
     {
@@ -12064,21 +12068,22 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "No string variants",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 1 relevant column"
         }
       ],
       "value": {
         "n_samples": 1000000,
         "columns": {
-          "split": {}
+          "split": {},
+          "record_id": {}
         },
         "feature_importance": {
           "name": null,
           "index": {
-            "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\"]",
+            "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\", \"record_id\"]",
             "txt": true,
             "meta": {
               "dtype": "object",
@@ -12086,9 +12091,9 @@
             }
           },
           "values": {
-            "values": "eJyL9kv001EYGCIWAAO8II4=",
+            "values": "eJyL9kv001EYQCIWAKlQIdc=",
             "shape": [
-              25
+              26
             ],
             "dtype": "object"
           }
@@ -12101,10 +12106,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Duplicate data ratio is less or equal to 0%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Found 0% duplicate data"
         }
       ],
       "value": 0.0
@@ -12115,14 +12120,17 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Ratio of string length outliers is less or equal to 0%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 2 relevant columns"
         }
       ],
       "value": {
         "split": {
+          "outliers": []
+        },
+        "record_id": {
           "outliers": []
         }
       }
@@ -12133,10 +12141,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Features' Predictive Power Score is less than 0.8",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 18 relevant columns"
         }
       ],
       "value": {
@@ -12166,10 +12174,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Not more than 0 pairs are correlated above 0.9",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "All correlations are less than 0.9 except pairs []"
         }
       ],
       "value": "[{\"capacity\":1.0,\"latitude\":0.0746479879,\"longitude\":0.2184093109,\"hour_sin\":-0.0091380987,\"hour_cos\":-0.0223771099,\"neighbor_net_flow\":0.0547594568,\"net_flow_lag1\":0.0227862298,\"net_flow_lag2\":0.0398825607,\"net_flow_lag24\":0.0248213501,\"arrivals_lag1\":0.126030716,\"arrivals_lag2\":0.1237846154,\"arrivals_lag3\":0.1209424299,\"departures_lag1\":0.103843896,\"departures_lag2\":0.0920054646,\"departures_lag3\":0.1054059742,\"day_of_week\":0.0244244217,\"is_weekend\":0.0092668052,\"is_holiday\":0.0004178959},{\"capacity\":0.0746479879,\"latitude\":1.0,\"longitude\":-0.1205771387,\"hour_sin\":0.0123649991,\"hour_cos\":0.0004382971,\"neighbor_net_flow\":0.0421098814,\"net_flow_lag1\":0.0419675339,\"net_flow_lag2\":0.0305592436,\"net_flow_lag24\":0.0145545035,\"arrivals_lag1\":0.0810514564,\"arrivals_lag2\":0.0768054243,\"arrivals_lag3\":0.0809572515,\"departures_lag1\":0.0483482228,\"departures_lag2\":0.0511969368,\"departures_lag3\":0.0656465637,\"day_of_week\":0.0155757366,\"is_weekend\":0.0047610712,\"is_holiday\":0.0116583414},{\"capacity\":0.2184093109,\"latitude\":-0.1205771387,\"longitude\":1.0,\"hour_sin\":-0.0051588151,\"hour_cos\":-0.0103023274,\"neighbor_net_flow\":0.1261547489,\"net_flow_lag1\":0.0520949905,\"net_flow_lag2\":0.0909829712,\"net_flow_lag24\":0.0550091462,\"arrivals_lag1\":0.0788508069,\"arrivals_lag2\":0.1068426767,\"arrivals_lag3\":0.0899226439,\"departures_lag1\":0.0414062266,\"departures_lag2\":0.0308264383,\"departures_lag3\":0.0305602325,\"day_of_week\":0.0228608546,\"is_weekend\":0.00215881,\"is_holiday\":0.0114006578},{\"capacity\":-0.0091380987,\"latitude\":0.0123649991,\"longitude\":-0.0051588151,\"hour_sin\":1.0,\"hour_cos\":-0.0080398392,\"neighbor_net_flow\":-0.0195983447,\"net_flow_lag1\":-0.0135459942,\"net_flow_lag2\":-0.0030088815,\"net_flow_lag24\":-0.02273187,\"arrivals_lag1\":-0.346496339,\"arrivals_lag2\":-0.4098650171,\"arrivals_lag3\":-0.4479548942,\"departures_lag1\":-0.3241209866,\"departures_lag2\":-0.4059243218,\"departures_lag3\":-0.4450642954,\"day_of_week\":0.0369387165,\"is_weekend\":0.013555082,\"is_holiday\":0.0061510821},{\"capacity\":-0.0223771099,\"latitude\":0.0004382971,\"longitude\":-0.0103023274,\"hour_sin\":-0.0080398392,\"hour_cos\":1.0,\"neighbor_net_flow\":0.0502823628,\"net_flow_lag1\":0.0267064147,\"net_flow_lag2\":0.024177691,\"net_flow_lag24\":0.0120528281,\"arrivals_lag1\":-0.3010516066,\"arrivals_lag2\":-0.208120437,\"arrivals_lag3\":-0.0976412179,\"departures_lag1\":-0.3401125704,\"departures_lag2\":-0.2416154542,\"departures_lag3\":-0.1287914131,\"day_of_week\":0.0218535165,\"is_weekend\":0.0069218581,\"is_holiday\":0.0013219222},{\"capacity\":0.0547594568,\"latitude\":0.0421098814,\"longitude\":0.1261547489,\"hour_sin\":-0.0195983447,\"hour_cos\":0.0502823628,\"neighbor_net_flow\":1.0,\"net_flow_lag1\":0.1558254243,\"net_flow_lag2\":0.1547858445,\"net_flow_lag24\":0.1271208955,\"arrivals_lag1\":0.0467952315,\"arrivals_lag2\":0.0874266893,\"arrivals_lag3\":0.0862896009,\"departures_lag1\":-0.0458883322,\"departures_lag2\":-0.0153388098,\"departures_lag3\":0.0143776248,\"day_of_week\":0.0292212245,\"is_weekend\":0.0033502648,\"is_holiday\":0.0036243481},{\"capacity\":0.0227862298,\"latitude\":0.0419675339,\"longitude\":0.0520949905,\"hour_sin\":-0.0135459942,\"hour_cos\":0.0267064147,\"neighbor_net_flow\":0.1558254243,\"net_flow_lag1\":1.0,\"net_flow_lag2\":0.0779761017,\"net_flow_lag24\":0.121726854,\"arrivals_lag1\":0.3488657108,\"arrivals_lag2\":0.0480410366,\"arrivals_lag3\":0.0517829851,\"departures_lag1\":-0.3432582128,\"departures_lag2\":-0.0006601208,\"departures_lag3\":0.0063895915,\"day_of_week\":0.0265222283,\"is_weekend\":0.0025972337,\"is_holiday\":0.0066942073},{\"capacity\":0.0398825607,\"latitude\":0.0305592436,\"longitude\":0.0909829712,\"hour_sin\":-0.0030088815,\"hour_cos\":0.024177691,\"neighbor_net_flow\":0.1547858445,\"net_flow_lag1\":0.0779761017,\"net_flow_lag2\":1.0,\"net_flow_lag24\":0.0803044791,\"arrivals_lag1\":0.0146325546,\"arrivals_lag2\":0.3427781641,\"arrivals_lag3\":0.0245718873,\"departures_lag1\":-0.0237336781,\"departures_lag2\":-0.3570201755,\"departures_lag3\":-0.0159527456,\"day_of_week\":0.0223505425,\"is_weekend\":0.0044419279,\"is_holiday\":0.0038100527},{\"capacity\":0.0248213501,\"latitude\":0.0145545035,\"longitude\":0.0550091462,\"hour_sin\":-0.02273187,\"hour_cos\":0.0120528281,\"neighbor_net_flow\":0.1271208955,\"net_flow_lag1\":0.121726854,\"net_flow_lag2\":0.0803044791,\"net_flow_lag24\":1.0,\"arrivals_lag1\":0.0579163331,\"arrivals_lag2\":0.03573259,\"arrivals_lag3\":0.0434481656,\"departures_lag1\":-0.0278280645,\"departures_lag2\":-0.0208868946,\"departures_lag3\":0.004432123,\"day_of_week\":0.0171764953,\"is_weekend\":0.000454841,\"is_holiday\":0.0109492969},{\"capacity\":0.126030716,\"latitude\":0.0810514564,\"longitude\":0.0788508069,\"hour_sin\":-0.346496339,\"hour_cos\":-0.3010516066,\"neighbor_net_flow\":0.0467952315,\"net_flow_lag1\":0.3488657108,\"net_flow_lag2\":0.0146325546,\"net_flow_lag24\":0.0579163331,\"arrivals_lag1\":1.0,\"arrivals_lag2\":0.5919320413,\"arrivals_lag3\":0.5054367064,\"departures_lag1\":0.665119667,\"departures_lag2\":0.5805675137,\"departures_lag3\":0.4956200107,\"day_of_week\":0.0925897904,\"is_weekend\":0.0896004577,\"is_holiday\":0.0422256513},{\"capacity\":0.1237846154,\"latitude\":0.0768054243,\"longitude\":0.1068426767,\"hour_sin\":-0.4098650171,\"hour_cos\":-0.208120437,\"neighbor_net_flow\":0.0874266893,\"net_flow_lag1\":0.0480410366,\"net_flow_lag2\":0.3427781641,\"net_flow_lag24\":0.03573259,\"arrivals_lag1\":0.5919320413,\"arrivals_lag2\":1.0,\"arrivals_lag3\":0.587068382,\"departures_lag1\":0.5568394048,\"departures_lag2\":0.654070162,\"departures_lag3\":0.5759224121,\"day_of_week\":0.0835380353,\"is_weekend\":0.0808975095,\"is_holiday\":0.0493450737},{\"capacity\":0.1209424299,\"latitude\":0.0809572515,\"longitude\":0.0899226439,\"hour_sin\":-0.4479548942,\"hour_cos\":-0.0976412179,\"neighbor_net_flow\":0.0862896009,\"net_flow_lag1\":0.0517829851,\"net_flow_lag2\":0.0245718873,\"net_flow_lag24\":0.0434481656,\"arrivals_lag1\":0.5054367064,\"arrivals_lag2\":0.587068382,\"arrivals_lag3\":1.0,\"departures_lag1\":0.4616941658,\"departures_lag2\":0.5640717422,\"departures_lag3\":0.6663101617,\"day_of_week\":0.0760728051,\"is_weekend\":0.074236973,\"is_holiday\":0.0392287284},{\"capacity\":0.103843896,\"latitude\":0.0483482228,\"longitude\":0.0414062266,\"hour_sin\":-0.3241209866,\"hour_cos\":-0.3401125704,\"neighbor_net_flow\":-0.0458883322,\"net_flow_lag1\":-0.3432582128,\"net_flow_lag2\":-0.0237336781,\"net_flow_lag24\":-0.0278280645,\"arrivals_lag1\":0.665119667,\"arrivals_lag2\":0.5568394048,\"arrivals_lag3\":0.4616941658,\"departures_lag1\":1.0,\"departures_lag2\":0.5740856708,\"departures_lag3\":0.4888684728,\"day_of_week\":0.0946669774,\"is_weekend\":0.0918767083,\"is_holiday\":0.047595472},{\"capacity\":0.0920054646,\"latitude\":0.0511969368,\"longitude\":0.0308264383,\"hour_sin\":-0.4059243218,\"hour_cos\":-0.2416154542,\"neighbor_net_flow\":-0.0153388098,\"net_flow_lag1\":-0.0006601208,\"net_flow_lag2\":-0.3570201755,\"net_flow_lag24\":-0.0208868946,\"arrivals_lag1\":0.5805675137,\"arrivals_lag2\":0.654070162,\"arrivals_lag3\":0.5640717422,\"departures_lag1\":0.5740856708,\"departures_lag2\":1.0,\"departures_lag3\":0.5837781737,\"day_of_week\":0.0835477065,\"is_weekend\":0.0819257272,\"is_holiday\":0.044931862},{\"capacity\":0.1054059742,\"latitude\":0.0656465637,\"longitude\":0.0305602325,\"hour_sin\":-0.4450642954,\"hour_cos\":-0.1287914131,\"neighbor_net_flow\":0.0143776248,\"net_flow_lag1\":0.0063895915,\"net_flow_lag2\":-0.0159527456,\"net_flow_lag24\":0.004432123,\"arrivals_lag1\":0.4956200107,\"arrivals_lag2\":0.5759224121,\"arrivals_lag3\":0.6663101617,\"departures_lag1\":0.4888684728,\"departures_lag2\":0.5837781737,\"departures_lag3\":1.0,\"day_of_week\":0.0751282965,\"is_weekend\":0.0706046782,\"is_holiday\":0.0448389582},{\"capacity\":0.0244244217,\"latitude\":0.0155757366,\"longitude\":0.0228608546,\"hour_sin\":0.0369387165,\"hour_cos\":0.0218535165,\"neighbor_net_flow\":0.0292212245,\"net_flow_lag1\":0.0265222283,\"net_flow_lag2\":0.0223505425,\"net_flow_lag24\":0.0171764953,\"arrivals_lag1\":0.0925897904,\"arrivals_lag2\":0.0835380353,\"arrivals_lag3\":0.0760728051,\"departures_lag1\":0.0946669774,\"departures_lag2\":0.0835477065,\"departures_lag3\":0.0751282965,\"day_of_week\":1.0,\"is_weekend\":0.4675234537,\"is_holiday\":0.023407883},{\"capacity\":0.0092668052,\"latitude\":0.0047610712,\"longitude\":0.00215881,\"hour_sin\":0.013555082,\"hour_cos\":0.0069218581,\"neighbor_net_flow\":0.0033502648,\"net_flow_lag1\":0.0025972337,\"net_flow_lag2\":0.0044419279,\"net_flow_lag24\":0.000454841,\"arrivals_lag1\":0.0896004577,\"arrivals_lag2\":0.0808975095,\"arrivals_lag3\":0.074236973,\"departures_lag1\":0.0918767083,\"departures_lag2\":0.0819257272,\"departures_lag3\":0.0706046782,\"day_of_week\":0.4675234537,\"is_weekend\":1.0,\"is_holiday\":0.0218357512},{\"capacity\":0.0004178959,\"latitude\":0.0116583414,\"longitude\":0.0114006578,\"hour_sin\":0.0061510821,\"hour_cos\":0.0013219222,\"neighbor_net_flow\":0.0036243481,\"net_flow_lag1\":0.0066942073,\"net_flow_lag2\":0.0038100527,\"net_flow_lag24\":0.0109492969,\"arrivals_lag1\":0.0422256513,\"arrivals_lag2\":0.0493450737,\"arrivals_lag3\":0.0392287284,\"departures_lag1\":0.047595472,\"departures_lag2\":0.044931862,\"departures_lag3\":0.0448389582,\"day_of_week\":0.023407883,\"is_weekend\":0.0218357512,\"is_holiday\":1.0}]"
@@ -12180,13 +12188,14 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Identifier columns PPS is less or equal to 0",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 2 relevant columns"
         }
       ],
       "value": {
+        "record_id": 0,
         "hour": 0
       }
     },
@@ -12196,10 +12205,10 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": null,
-          "status": null,
+          "name": "Percent of null values in each column is not greater than 1%",
+          "status": "PASS",
           "category": null,
-          "details": null
+          "details": "Passed for 18 relevant columns. Top columns with null ratio: \n{'neighbor_net_flow': '0.01%', 'net_flow_lag1': '0.01%', 'net_flow_lag2': '0.02%', 'net_flow_lag24': '0.25%', 'arrivals_lag1': '0.01%'}"
         }
       ],
       "value": "[{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0},{\"Percent of nulls in sample\":0.0001},{\"Percent of nulls in sample\":0.0001},{\"Percent of nulls in sample\":0.0002},{\"Percent of nulls in sample\":0.00248},{\"Percent of nulls in sample\":0.0001},{\"Percent of nulls in sample\":0.0002},{\"Percent of nulls in sample\":0.00033},{\"Percent of nulls in sample\":0.0001},{\"Percent of nulls in sample\":0.0002},{\"Percent of nulls in sample\":0.00033}]"
@@ -25061,13 +25070,14 @@
           "departures_lag2": 84,
           "departures_lag3": 84,
           "target": 3,
-          "split": 3
+          "split": 3,
+          "record_id": 3144672
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "Does not contain only a single value",
-            "More Info": "Passed for 25 relevant columns"
+            "More Info": "Passed for 26 relevant columns"
           }
         ],
         "display": null
@@ -25112,13 +25122,14 @@
           "departures_lag2": 0,
           "departures_lag3": 0,
           "target": 0,
-          "split": 0
+          "split": 0,
+          "record_id": 0
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "Ratio of samples containing solely special character is less or equal to 0.1%",
-            "More Info": "Passed for 25 relevant columns"
+            "More Info": "Passed for 26 relevant columns"
           }
         ],
         "display": null
@@ -25227,12 +25238,13 @@
                 "count": 358,
                 "percent": 0.00011384335154826958
               }
-            }
+            },
+            "record_id": {}
           },
           "feature_importance": {
             "name": null,
             "index": {
-              "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\"]",
+              "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\", \"record_id\"]",
               "txt": true,
               "meta": {
                 "dtype": "object",
@@ -25240,9 +25252,9 @@
               }
             },
             "values": {
-              "values": "eJyL9kv001EYGCIWAAO8II4=",
+              "values": "eJyL9kv001EYQCIWAKlQIdc=",
               "shape": [
-                25
+                26
               ],
               "dtype": "object"
             }
@@ -25252,7 +25264,7 @@
           {
             "Status": "PASS",
             "Condition": "Number of different null types is less or equal to 1",
-            "More Info": "Passed for 25 relevant columns"
+            "More Info": "Passed for 26 relevant columns"
           }
         ],
         "display": null
@@ -25296,13 +25308,14 @@
           "departures_lag2": {},
           "departures_lag3": {},
           "target": {},
-          "split": {}
+          "split": {},
+          "record_id": {}
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "Rare data types in column are either more than 10% or less than 1% of the data",
-            "More Info": "25 columns passed: found 0 columns with negligible types mix, and 25 columns without any types mix"
+            "More Info": "26 columns passed: found 0 columns with negligible types mix, and 26 columns without any types mix"
           }
         ],
         "display": null
@@ -25325,12 +25338,13 @@
         "value": {
           "n_samples": 1000000,
           "columns": {
-            "split": {}
+            "split": {},
+            "record_id": {}
           },
           "feature_importance": {
             "name": null,
             "index": {
-              "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\"]",
+              "values": "[\"station_id\", \"hour\", \"departures\", \"arrivals\", \"net_flow\", \"capacity\", \"latitude\", \"longitude\", \"hour_sin\", \"hour_cos\", \"day_of_week\", \"is_weekend\", \"is_holiday\", \"neighbor_net_flow\", \"net_flow_lag1\", \"net_flow_lag2\", \"net_flow_lag24\", \"arrivals_lag1\", \"arrivals_lag2\", \"arrivals_lag3\", \"departures_lag1\", \"departures_lag2\", \"departures_lag3\", \"target\", \"split\", \"record_id\"]",
               "txt": true,
               "meta": {
                 "dtype": "object",
@@ -25338,9 +25352,9 @@
               }
             },
             "values": {
-              "values": "eJyL9kv001EYGCIWAAO8II4=",
+              "values": "eJyL9kv001EYQCIWAKlQIdc=",
               "shape": [
-                25
+                26
               ],
               "dtype": "object"
             }
@@ -25405,13 +25419,16 @@
         "value": {
           "split": {
             "outliers": []
+          },
+          "record_id": {
+            "outliers": []
           }
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "Ratio of string length outliers is less or equal to 0%",
-            "More Info": "Passed for 1 relevant column"
+            "More Info": "Passed for 2 relevant columns"
           }
         ],
         "display": null
@@ -25495,13 +25512,14 @@
         },
         "header": "Identifier Label Correlation",
         "value": {
+          "record_id": 0,
           "hour": 0
         },
         "conditions_results": [
           {
             "Status": "PASS",
             "Condition": "Identifier columns PPS is less or equal to 0",
-            "More Info": "Passed for 1 relevant column"
+            "More Info": "Passed for 2 relevant columns"
           }
         ],
         "display": null
