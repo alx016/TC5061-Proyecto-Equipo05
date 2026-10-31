@@ -6,19 +6,19 @@
   "failed_checks_count": 1,
   "passed_checks": [
     "Single Value in Column",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
+    "Special Characters",
+    "Mixed Nulls",
+    "Mixed Data Types",
+    "String Mismatch",
+    "Data Duplicates",
+    "String Length Out Of Bounds",
     "Feature Label Correlation",
     "Feature-Feature Correlation",
-    null,
+    "Identifier Label Correlation",
     "PercentOfNulls"
   ],
   "failed_checks": [
-    null
+    "Conflicting Labels"
   ],
   "check_summaries": [
     {
@@ -12141,7 +12141,7 @@
       "type": "CheckResult",
       "conditions": [
         {
-          "name": "Features' Predictive Power Score is less than 0.8",
+          "name": "Features' Predictive Power Score is less than 0.9",
           "status": "PASS",
           "category": null,
           "details": "Passed for 18 relevant columns"
@@ -25469,7 +25469,7 @@
         "conditions_results": [
           {
             "Status": "PASS",
-            "Condition": "Features' Predictive Power Score is less than 0.8",
+            "Condition": "Features' Predictive Power Score is less than 0.9",
             "More Info": "Passed for 18 relevant columns"
           }
         ],

@@ -100,6 +100,10 @@ def test_data_checks_execution_on_synthetic_data(
     assert integrity_data["total_checks"] > 0
     assert "passed_checks" in integrity_data
     assert "failed_checks" in integrity_data
+    assert None not in integrity_data["passed_checks"]
+    assert None not in integrity_data["failed_checks"]
+    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in integrity_data["passed_checks"])
+    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in integrity_data["failed_checks"])
     assert "check_summaries" in integrity_data
     assert len(integrity_data["check_summaries"]) == integrity_data["total_checks"]
 
@@ -111,6 +115,10 @@ def test_data_checks_execution_on_synthetic_data(
     assert drift_data["total_checks"] > 0
     assert "passed_checks" in drift_data
     assert "failed_checks" in drift_data
+    assert None not in drift_data["passed_checks"]
+    assert None not in drift_data["failed_checks"]
+    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in drift_data["passed_checks"])
+    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in drift_data["failed_checks"])
     assert "check_summaries" in drift_data
     assert len(drift_data["check_summaries"]) == drift_data["total_checks"]
 

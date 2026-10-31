@@ -25,10 +25,10 @@ Se implementó y ejecutó el protocolo de validación tabular mediante la suite 
 
 ## 2. Resumen Ejecutivo de Resultados
 
-| Suite de Validación | Chequeos Totales | Aprobados | No Aprobados | Veredicto General |
-| :--- | :---: | :---: | :---: | :--- |
-| **Data Integrity** | 13 | 12 | 1* | **Aprobado con observaciones operativas** |
-| **Train/Test Drift** | 11 | 10 | 1* | **Estable (Drift controlado dentro de tolerancias)** |
+| Suite de Validación | Chequeos Totales | Aprobados | No Aprobados | Informativos (Sin Condición) | Veredicto General |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Data Integrity** | 13 | 11 | 1* | 1 | **Aprobado con observaciones operativas** |
+| **Train/Test Drift** | 12 | 11 | 1* | 0 | **Estable (Drift controlado dentro de tolerancias)** |
 
 *\*Los chequeos con alerta corresponden a condiciones naturales del dominio de movilidad compartida (ambigüedad en horas valle y repetición de vectores estáticos en la madrugada), detallados a continuación.*
 
@@ -45,20 +45,41 @@ El reporte interactivo completo se generó en `reports/deepchecks/data_integrity
 | **Single Value Column** | 0 columnas univaluadas | Ninguna columna constante | **PASS** |
 | **Special Characters** | 0.0% caracteres anómalos | Ratio $\le 0.1\%$ | **PASS** |
 | **Mixed Data Types** | 0 columnas con tipos mixtos | 100% tipos puros por columna | **PASS** |
+| **Mixed Nulls** | 0 tipos de nulos mezclados | Coherencia estricta de nulos | **PASS** |
 | **String Mismatch** | 0 variantes no estandarizadas | 0 variantes espurias | **PASS** |
+| **String Length Out of Bounds** | 0 cadenas atípicas | 0 longitudes anómalas | **PASS** |
 | **Feature Correlation** | Correlación máx. $< 0.90$ | Correlaciones entre pares $< 0.90$ | **PASS** |
+| **Feature Label Correlation** | PPS máx. $< 0.90$ | PPS predictivo $< 0.90$ | **PASS** |
+| **Identifier Label Correlation** | PPS máx. $< 0.90$ | Claves sin fuga predictiva | **PASS** |
 | **Conflicting Labels** | 0.3% muestras idénticas | Ratio $\le 0.0\%$ | **Alerta (0.3%)** |
+| **Outlier Sample Detection** | Diagnóstico LoOP (muestras atípicas) | Diagnóstico informativo sin condición | **INFO** |
 
 ### Análisis de Hallazgos en Integridad
 1. **Ausencia estricta de duplicados**: La clave compuesta (`station_id`, `hour`) garantiza unicidad exacta en el panel.
 2. **Nulos controlados por diseño de rezagos**: El único predictor que presenta nulos es `net_flow_lag24` (0.25%, exactamente las primeras 24 horas del año requeridas para inicializar el historial), cumpliendo holgadamente el umbral de $<1.0\%$.
 3. **Muestras con etiquetas conflictivas (0.3%)**: En horas de inactividad nocturna (ej. 03:00 a 04:00 hrs), estaciones de baja afluencia registran flujos cero y rezagos cero. Si ocurre una intervención manual de rebalanceo de camiones o un viaje atípico aislado, el estado futuro puede variar entre balance normal y saturación a pesar de tener rezagos estáticos en cero. Esto refleja ruido estocástico real del servicio y no corrupción de datos.
+4. **Chequeo informativo de anomalías (`Outlier Sample Detection`)**: Se evalúa mediante el algoritmo LoOP (Local Outlier Probabilities). Al ser un análisis puramente exploratorio en DeepChecks, se ejecuta sin condiciones de aprobación o fallo binario (`conditions: []`), por lo que no altera la tasa de éxito técnico.
 
 ---
 
 ## 4. Chequeos de Drift Temporal (`train_test_drift`)
 
 El reporte interactivo completo se generó en `reports/deepchecks/train_test_drift.html` y su resumen estructurado en `reports/deepchecks/train_test_drift.json`.
+
+| Chequeo | Métrica Observada | Umbral de Política | Resultado |
+| :--- | :--- | :--- | :--- |
+| **Datasets Size Comparison** | Ratio 0.11 (266K test vs 2.35M train) | Proporción representativa | **PASS** |
+| **New Label Train Test** | 0 etiquetas nuevas | Mismas 3 clases operativas | **PASS** |
+| **New Category Train Test** | 0 categorías nuevas | Categorías válidas en calendario | **PASS** |
+| **String Mismatch Comparison** | 0 variantes no estandarizadas | Coherencia de cadenas | **PASS** |
+| **Date Train-Test Leakage (Duplicates)** | 0.0% fechas duplicadas | Ratio $\le 0.0\%$ | **PASS** |
+| **Date Train-Test Leakage (Overlap)** | 0.0% solapamiento temporal | Ratio $\le 0.0\%$ | **PASS** |
+| **Index Train-Test Leakage** | 0.0% identificadores solapados | Ratio $\le 0.0\%$ | **PASS** |
+| **Feature Label Correlation Change** | Correlaciones estables con target | Diferencia de PPS acotada | **PASS** |
+| **Multivariate Drift** | Drift value = 0.15 (AUC = 0.57) | Drift value $< 0.25$ | **PASS** |
+| **Feature Drift** | Max KS 0.03, Max Cramer V 0.06 | Scores $< 0.20$ | **PASS** |
+| **Label Drift** | Cramer's V = 0.02 | Score $< 0.15$ | **PASS** |
+| **Train Test Samples Mix** | 6.75% vectores idénticos | Umbral por defecto $\le 5.0\%$ | **Alerta (6.75%)** |
 
 ### 4.1 Aislamiento y Fuga Temporal (Leakage)
 - **Date Train-Test Leakage (Overlap)**: **0.0% fuga (PASS)**. No existe solapamiento temporal entre la ventana de entrenamiento (1 enero al 30 septiembre) y la de evaluación (1 diciembre al 31 diciembre).

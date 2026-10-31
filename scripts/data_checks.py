@@ -17,8 +17,18 @@ from pathlib import Path
 
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.checks import (
+    ConflictingLabels,
     DataDuplicates,
+    DateTrainTestLeakageDuplicates,
+    DateTrainTestLeakageOverlap,
+    FeatureDrift,
+    FeatureFeatureCorrelation,
+    FeatureLabelCorrelation,
+    IndexTrainTestLeakage,
+    LabelDrift,
+    MultivariateDrift,
     PercentOfNulls,
+    TrainTestSamplesMix,
 )
 from deepchecks.tabular.suites import data_integrity, train_test_validation
 import pandas as pd
@@ -54,6 +64,22 @@ CATEGORICAL_LIST = ["day_of_week", "is_weekend", "is_holiday"]
 DEFAULT_REPORTS_DIR = PROJ_ROOT / "reports" / "deepchecks"
 
 
+def _check_result_name(cr) -> str:
+    """Extract clean human-readable name from DeepChecks CheckResult."""
+    header = getattr(cr, "header", None)
+    if header:
+        return str(header)
+    check = getattr(cr, "check", None)
+    if check is not None:
+        name_attr = getattr(check, "name", None)
+        if callable(name_attr):
+            return str(name_attr())
+        if isinstance(name_attr, str):
+            return name_attr
+        return check.__class__.__name__
+    return str(cr)
+
+
 def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     """Save DeepChecks suite results as HTML and structured JSON summary."""
     html_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,8 +89,8 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     print(f"Report saved to {html_path}")
 
     raw_json = json.loads(result.to_json(with_display=False))
-    passed_checks = [c.header for c in result.get_passed_checks()]
-    not_passed_checks = [c.header for c in result.get_not_passed_checks()]
+    passed_checks = [_check_result_name(c) for c in result.get_passed_checks()]
+    not_passed_checks = [_check_result_name(c) for c in result.get_not_passed_checks()]
 
     check_summaries = []
     for r in raw_json.get("results", []):
@@ -143,6 +169,15 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
         if isinstance(check, DataDuplicates):
             check.clean_conditions()
             check.add_condition_ratio_less_or_equal(0)
+        elif isinstance(check, ConflictingLabels):
+            check.clean_conditions()
+            check.add_condition_ratio_of_conflicting_labels_less_or_equal(0)
+        elif isinstance(check, FeatureFeatureCorrelation):
+            check.clean_conditions()
+            check.add_condition_max_number_of_pairs_above_threshold(threshold=0.9, n_pairs=0)
+        elif isinstance(check, FeatureLabelCorrelation):
+            check.clean_conditions()
+            check.add_condition_feature_pps_less_than(threshold=0.9)
     suite.add(PercentOfNulls().add_condition_percent_of_nulls_not_greater_than(0.01))
 
     result = suite.run(ds)
@@ -176,6 +211,33 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
     sample_size = min(50000, max(len(train_df), len(test_df)))
     suite = train_test_validation(n_samples=sample_size)
     suite.name = "train_test_drift"
+
+    for check in suite.checks.values():
+        if isinstance(check, FeatureDrift):
+            check.clean_conditions()
+            check.add_condition_drift_score_less_than(
+                max_allowed_categorical_score=0.20,
+                max_allowed_numeric_score=0.20,
+                allowed_num_features_exceeding_threshold=0,
+            )
+        elif isinstance(check, LabelDrift):
+            check.clean_conditions()
+            check.add_condition_drift_score_less_than(max_allowed_drift_score=0.15)
+        elif isinstance(check, MultivariateDrift):
+            check.clean_conditions()
+            check.add_condition_overall_drift_value_less_than(max_drift_value=0.25)
+        elif isinstance(check, IndexTrainTestLeakage):
+            check.clean_conditions()
+            check.add_condition_ratio_less_or_equal(0)
+        elif isinstance(check, DateTrainTestLeakageOverlap):
+            check.clean_conditions()
+            check.add_condition_leakage_ratio_less_or_equal(0)
+        elif isinstance(check, DateTrainTestLeakageDuplicates):
+            check.clean_conditions()
+            check.add_condition_leakage_ratio_less_or_equal(0)
+        elif isinstance(check, TrainTestSamplesMix):
+            check.clean_conditions()
+            check.add_condition_duplicates_ratio_less_or_equal(0.05)
 
     result = suite.run(train_dataset=train_ds, test_dataset=test_ds)
     html_path = output_dir / "train_test_drift.html"

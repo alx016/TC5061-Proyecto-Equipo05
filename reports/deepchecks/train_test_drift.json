@@ -5,10 +5,10 @@
   "passed_checks_count": 11,
   "failed_checks_count": 1,
   "passed_checks": [
-    null,
-    null,
-    null,
-    null,
+    "Datasets Size Comparison",
+    "New Label Train Test",
+    "New Category Train Test",
+    "String Mismatch Comparison",
     "Date Train-Test Leakage (duplicates)",
     "Date Train-Test Leakage (overlap)",
     "Index Train-Test Leakage",
@@ -42,7 +42,7 @@
           "meta": {
             "dtypes_rle": [
               [
-                "pd/f",
+                "pd/f64",
                 6
               ],
               [
@@ -50,7 +50,7 @@
                 2
               ],
               [
-                "pd/f",
+                "pd/f64",
                 11
               ]
             ],
@@ -127,8 +127,8 @@
         }
       ],
       "value": {
-        "record_id": {},
-        "split": {}
+        "split": {},
+        "record_id": {}
       }
     },
     {
@@ -501,7 +501,7 @@
             "meta": {
               "dtypes_rle": [
                 [
-                  "pd/f",
+                  "pd/f64",
                   6
                 ],
                 [
@@ -509,7 +509,7 @@
                   2
                 ],
                 [
-                  "pd/f",
+                  "pd/f64",
                   11
                 ]
               ],
@@ -619,8 +619,8 @@
         },
         "header": "String Mismatch Comparison",
         "value": {
-          "record_id": {},
-          "split": {}
+          "split": {},
+          "record_id": {}
         },
         "conditions_results": [
           {
