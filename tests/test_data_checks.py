@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import subprocess
+import textwrap
 
 import numpy as np
 import pandas as pd
@@ -50,7 +51,7 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
 
 
 def run_data_checks_script(
-    data_path: Path, output_dir: Path, *, strict: bool = False
+    data_path: Path, output_dir: Path, *, strict: bool = False, report_only: bool = False
 ) -> subprocess.CompletedProcess:
     """Execute scripts/data_checks.py in isolated environment via subprocess."""
     cmd = [
@@ -64,6 +65,8 @@ def run_data_checks_script(
     ]
     if strict:
         cmd.append("--strict")
+    if report_only:
+        cmd.append("--report-only")
     return subprocess.run(
         cmd,
         cwd=PROJ_ROOT,
@@ -80,7 +83,7 @@ def test_data_checks_execution_on_synthetic_data(
     """Execute scripts/data_checks.py via subprocess on synthetic data and verify JSON/HTML."""
     output_dir = tmp_path / "deepchecks_reports"
 
-    result = run_data_checks_script(synthetic_classification_parquet, output_dir)
+    result = run_data_checks_script(synthetic_classification_parquet, output_dir, report_only=True)
 
     assert result.returncode == 0, (
         f"Execution failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
@@ -106,8 +109,14 @@ def test_data_checks_execution_on_synthetic_data(
     assert "failed_checks" in integrity_data
     assert None not in integrity_data["passed_checks"]
     assert None not in integrity_data["failed_checks"]
-    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in integrity_data["passed_checks"])
-    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in integrity_data["failed_checks"])
+    assert all(
+        isinstance(c, str) and not c.startswith("<bound method")
+        for c in integrity_data["passed_checks"]
+    )
+    assert all(
+        isinstance(c, str) and not c.startswith("<bound method")
+        for c in integrity_data["failed_checks"]
+    )
     assert "check_summaries" in integrity_data
     assert len(integrity_data["check_summaries"]) == integrity_data["total_checks"]
 
@@ -121,8 +130,14 @@ def test_data_checks_execution_on_synthetic_data(
     assert "failed_checks" in drift_data
     assert None not in drift_data["passed_checks"]
     assert None not in drift_data["failed_checks"]
-    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in drift_data["passed_checks"])
-    assert all(isinstance(c, str) and not c.startswith("<bound method") for c in drift_data["failed_checks"])
+    assert all(
+        isinstance(c, str) and not c.startswith("<bound method")
+        for c in drift_data["passed_checks"]
+    )
+    assert all(
+        isinstance(c, str) and not c.startswith("<bound method")
+        for c in drift_data["failed_checks"]
+    )
     assert "check_summaries" in drift_data
     assert len(drift_data["check_summaries"]) == drift_data["total_checks"]
 
@@ -152,7 +167,7 @@ def test_data_checks_detects_injected_defects(
     df_defective.to_parquet(defective_parquet, engine="pyarrow", compression="zstd", index=False)
 
     output_dir = tmp_path / "defective_reports"
-    result = run_data_checks_script(defective_parquet, output_dir)
+    result = run_data_checks_script(defective_parquet, output_dir, report_only=True)
     assert result.returncode == 0, f"Execution failed:\n{result.stderr}"
 
     with open(output_dir / "data_integrity.json", "r", encoding="utf-8") as f:
@@ -178,10 +193,10 @@ def test_data_checks_detects_injected_defects(
     assert any(c["status"] == "FAIL" for c in null_check["conditions"])
 
     strict_result = run_data_checks_script(
-        defective_parquet, tmp_path / "defective_reports_strict", strict=True
+        defective_parquet, tmp_path / "defective_reports_strict"
     )
     assert strict_result.returncode == 1, (
-        f"Expected exit code 1 with --strict:\nSTDOUT:\n{strict_result.stdout}\n"
+        f"Expected exit code 1 by default:\nSTDOUT:\n{strict_result.stdout}\n"
         f"STDERR:\n{strict_result.stderr}"
     )
     assert "NO PASA" in strict_result.stdout
@@ -201,5 +216,74 @@ def test_data_checks_fails_without_split_partitions(
     output_dir = tmp_path / "no_split_reports"
     result = run_data_checks_script(no_split_parquet, output_dir)
     assert result.returncode != 0
-    assert "DataFrame must contain a 'split' column" in result.stderr
+    assert "Missing required columns: split" in result.stderr
 
+
+@pytest.mark.parametrize("missing", ["target", "hour", "station_id", "capacity"])
+def test_data_checks_rejects_missing_required_columns(
+    synthetic_classification_parquet: Path, tmp_path: Path, missing: str
+):
+    df = pd.read_parquet(synthetic_classification_parquet).drop(columns=[missing])
+    path = tmp_path / "missing.parquet"
+    df.to_parquet(path, index=False)
+    result = run_data_checks_script(path, tmp_path / "reports")
+    assert result.returncode != 0
+    assert f"Missing required columns: {missing}" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "defect", ["invalid_target", "missing_test", "invalid_hour", "invalid_split"]
+)
+def test_data_checks_rejects_invalid_contract(
+    synthetic_classification_parquet: Path, tmp_path: Path, defect: str
+):
+    df = pd.read_parquet(synthetic_classification_parquet)
+    if defect == "invalid_target":
+        df.loc[0, "target"] = 9
+        expected = "targets must contain only labels"
+    elif defect == "missing_test":
+        df["split"] = "train"
+        expected = "split must contain both train and test"
+    elif defect == "invalid_hour":
+        df["hour"] = df["hour"].astype(str)
+        expected = "hour must be a datetime column"
+    else:
+        df.loc[0, "split"] = "unexpected"
+        expected = "split contains unexpected partition names"
+    path = tmp_path / "invalid.parquet"
+    df.to_parquet(path, index=False)
+    result = run_data_checks_script(path, tmp_path / "reports")
+    assert result.returncode != 0
+    assert expected in result.stderr
+
+
+def test_unrun_deepchecks_check_fails_the_gate(tmp_path: Path):
+    """A DeepChecks exception must fail the suite instead of looking successful."""
+    metadata = SCRIPT_PATH.read_text().split("# ///", 2)[0:2]
+    script = tmp_path / "check_failure.py"
+    script.write_text(
+        "# ///".join(metadata)
+        + "# ///\n"
+        + textwrap.dedent(
+            f"""
+            import importlib.util
+            from pathlib import Path
+            from deepchecks.core.check_result import CheckFailure
+            from deepchecks.core.suite import SuiteResult
+            from deepchecks.tabular.checks import DataDuplicates
+
+            spec = importlib.util.spec_from_file_location('data_checks', {str(SCRIPT_PATH)!r})
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            result = SuiteResult('broken', [CheckFailure(DataDuplicates(), ValueError('broken'))])
+            summary = module.save_suite_summary(result, Path('broken.html'), Path('broken.json'))
+            assert summary['passed'] is False
+            assert summary['not_run_checks'] == ['Data Duplicates']
+            assert module.print_summary([summary]) == 1
+            """
+        )
+    )
+    result = subprocess.run(
+        ["uv", "run", str(script)], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr

@@ -8,9 +8,10 @@ Esta política formaliza las reglas, métricas, umbrales y criterios de severida
 - **Ruta**: `data/processed/classification_features.parquet`
 - **Estructura**: Panel regular estación-hora 2024 (358 estaciones $\times$ 8,784 horas = 3,144,672 filas, 25 columnas).
 - **Partición temporal**:
-  - **Entrenamiento (Train)**: Enero a Septiembre de 2024 (Meses 1–9, 2,353,850 filas).
-  - **Prueba OOT (Test)**: Diciembre de 2024 (Mes 12, 266,352 filas).
+  - **Entrenamiento (Train)**: Etiquetas de enero a septiembre de 2024 (2,353,850 filas).
+  - **Prueba OOT (Test)**: Etiquetas de diciembre de 2024 (266,352 filas).
   - **Validación intermedia**: Octubre y Noviembre de 2024 (reservados, aislados de la prueba ciega).
+  - La partición usa `hour + 1h`, no el mes de `hour`. Por ejemplo, test empieza con la hora de entrada `2024-11-30 23:00`.
 
 ---
 
@@ -34,7 +35,7 @@ Esta política formaliza las reglas, métricas, umbrales y criterios de severida
 - `target`: Clasificación multiclase a 1 hora horizonte (0 = Balance normal, 1 = Falta de bicis, 2 = Saturación de puertos).
 
 ### 2.3 Variables Excluidas del Cálculo Estadístico de Drift
-- `station_id`: Identificador categórico de alta cardinalidad; su distribución estática se valida por ausencia de nulos y cardinalidad fija.
+- `station_id`: Identificador de alta cardinalidad. Se valida su ausencia de nulos, pero no se impone una cardinalidad fija.
 - `record_id`: Clave primaria sintética única (`station_id_hour`), empleada como índice.
 - `hour`: Marca temporal (`datetime`), evaluada exclusivamente para aserciones de cero solapamiento y secuencia cronológica.
 
@@ -44,19 +45,19 @@ Esta política formaliza las reglas, métricas, umbrales y criterios de severida
 
 | Regla / Chequeo | API DeepChecks | Métrica y Umbral | Tolerancia / Excepción Justificada | Severidad | Acción de Falla |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **Unicidad de Registros** | `DataDuplicates` | Ratio duplicados $\le 0.0\%$ | Cero tolerancia en la clave `station_id_hour`. | **CRÍTICA** | Bloquear pipeline de modelado. |
-| **Completitud de Atributos** | `PercentOfNulls` | Nulos por columna $\le 1.0\%$ | Se permite hasta $0.25\%$ únicamente en `net_flow_lag24` por las 24 hrs iniciales de inicialización temporal. | **CRÍTICA** | Bloquear si excede $1.0\%$ o si ocurre en `capacity`, `target` o coordenadas. |
+| **Filas duplicadas** | `DataDuplicates` | Ratio duplicados $\le 0.0\%$ | El chequeo de filas no sustituye una comprobación específica de unicidad de la clave `station_id_hour`. | **CRÍTICA** | Bloquear pipeline de modelado. |
+| **Completitud de Atributos** | `PercentOfNulls` | Nulos por columna $\le 1.0\%$ | Se permiten nulos dentro del límite. El contrato exige identificador y hora no nulos y etiquetas presentes en train/test. | **CRÍTICA** | Bloquear si se excede el límite o falla el contrato. |
 | **Columnas Univaluadas** | `SingleValueColumn` | 0 columnas constantes | Ninguna predictora puede ser invariable a lo largo del año. | **ALTA** | Bloquear pipeline. |
 | **Pureza de Tipos** | `MixedDataTypes` | 0 columnas con tipos mixtos | Cada columna debe tener un tipo primitivo estricto (float, int o datetime). | **CRÍTICA** | Bloquear pipeline. |
 | **Caracteres Especiales** | `SpecialCharacters` | Ratio anómalo $\le 0.1\%$ | Cero cadenas corruptas o caracteres invisibles. | **ALTA** | Bloquear pipeline. |
-| **Etiquetas Conflictivas** | `ConflictingLabels` | Ratio en conflicto $\le 0.0\%$ | Se permite alerta informativa ($\le 0.5\%$) por redundancia estática en madrugadas con intervención manual. | **MEDIA** | Registrar en bitácora de auditoría sin detener ejecución. |
+| **Etiquetas Conflictivas** | `ConflictingLabels` | Límite operativo $\le 0.5\%$ | Cualquier resultado mayor que cero se informa como alerta y la causa aún debe investigarse. | **MEDIA** | Bloquear si supera 0.5% y revisar también alertas menores. |
 
 ---
 
 ## 4. Especificación de Reglas de Drift Temporal (`train_test_drift`)
 
 ### 4.1 Política de Muestreo
-Para garantizar tiempos de ejecución acotados en suites de alta dimensionalidad sin pérdida de significancia estadística, se utiliza una muestra representativa estratificada de hasta $50,000$ registros (`n_samples=50000`). Los chequeos de fuga temporal y nulos se computan sobre el conjunto completo.
+Para acotar el costo se configura `n_samples=50000` en la suite train/test. El muestreo puede hacer que las métricas difieran entre corridas o no detecten todos los problemas. No se ha demostrado que sea estratificado ni que conserve significancia estadística. Los resultados deben interpretarse con ese límite.
 
 ### 4.2 Reglas y Umbrales
 | Dimensión de Drift | Chequeo DeepChecks | Métrica Estadística | Umbral de Alerta | Disposición |
@@ -66,17 +67,17 @@ Para garantizar tiempos de ejecución acotados en suites de alta dimensionalidad
 | **Drift de Predictoras Numéricas** | `FeatureDrift` | Prueba Kolmogorov-Smirnov (KS) | Estadístico KS $< 0.20$ | Alerta individual: evalúa si una feature específica requiere calibración. |
 | **Drift de Predictoras Categóricas** | `FeatureDrift` | V de Cramér | V de Cramér $< 0.20$ | Alerta individual de distribución temporal. |
 | **Drift de Etiqueta Objetivo** | `LabelDrift` | V de Cramér en `target` | V de Cramér $< 0.15$ | Alerta prioritaria: evalúa si cambió la prevalencia del riesgo operativo. |
-| **Mezcla de Vectores (Samples Mix)** | `TrainTestSamplesMix` | Vectores idénticos entre train y test | $\le 5.0\%$ (por defecto) | Alerta operativa tolerada hasta $10.0\%$ por vectores estáticos nocturnos (0 viajes continuos de madrugada). |
+| **Mezcla de muestras (Samples Mix)** | `TrainTestSamplesMix` | Filas con predictores y etiqueta idénticos entre muestras de train y test | Límite operativo $\le 10.0\%$ | Alerta por encima de 5% y bloquear por encima de 10%. La explicación por vectores nocturnos es una hipótesis pendiente de comprobación. |
 
 ---
 
 ## 5. Política de Respuestas y Salidas de Error
 
-1. **Falla de Integridad (`data_integrity['passed'] == False`)**:
+1. **Falla de integridad**:
    - Genera los reportes visuales `data_integrity.html` y estructurados `data_integrity.json`.
    - Se marca como condición no cumplida en la suite.
-   - En ejecución de pipeline productivo o pruebas Pytest (`tests/test_data_checks.py`), la violación de integridad genera un código de salida distinto de cero o falla de aserción.
+   - Por defecto el comando devuelve código distinto de cero ante cualquier condición fallida de cualquiera de las suites. `--report-only` se reserva para diagnóstico.
 2. **Advertencias de Drift Temporal**:
-   - El drift temporal natural (cambio estacional entre invierno y el resto del año) no invalida la integridad técnica del dataset.
+   - Las condiciones de drift que excedan los límites bloquean el comando. Su causa y el impacto requieren investigación.
    - Genera `train_test_drift.html` y `train_test_drift.json` para inspección en el PRR (Production Readiness Review).
    - Los hallazgos se documentan en `reports/deepchecks/hallazgos.md`.
