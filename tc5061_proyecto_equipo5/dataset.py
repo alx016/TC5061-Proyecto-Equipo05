@@ -4,7 +4,8 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
+import subprocess  # nosec B404
+from urllib.parse import urlsplit
 
 from loguru import logger
 import pandas as pd
@@ -73,7 +74,7 @@ SLASH_DATE_FORMAT = "%d/%m/%Y %H:%M"
 
 def fetch_page() -> str:
     """Return the HTML of the open data page."""
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603
         [*CURL_ARGS, "--max-time", "60", PAGE_URL], capture_output=True, text=True, check=True
     )
     return proc.stdout
@@ -96,12 +97,17 @@ def find_stations_url(html: str) -> str | None:
 
 
 def fetch_file(url: str, target: Path, header_fields: tuple[bytes, ...]) -> tuple[str, int, str]:
-    """Download url into target unless it exists. Returns (status, size in bytes, error detail)."""
+    """Download an HTTPS url into target unless it exists.
+
+    Returns (status, size in bytes, error detail).
+    """
+    if urlsplit(url).scheme != "https":
+        raise ValueError(f"refusing non-HTTPS url: {url}")
     temp = target.with_suffix(target.suffix + ".part")
     if target.exists():
         return ("EXISTS", target.stat().st_size, "")
     target.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603
         [*CURL_ARGS, "--max-time", "600", "--output", str(temp), url],
         capture_output=True,
         text=True,

@@ -1,7 +1,16 @@
+import subprocess
+
 import pandas as pd
 import pytest
 
-from tc5061_proyecto_equipo5.dataset import COLUMNS, build_manifest, check_header, clean_file
+from tc5061_proyecto_equipo5.dataset import (
+    COLUMNS,
+    TRIPS_HEADER_FIELDS,
+    build_manifest,
+    check_header,
+    clean_file,
+    fetch_file,
+)
 
 UNQUOTED = "Viaje_Id,Usuario_Id,Genero,Año_de_nacimiento,Inicio_del_viaje,Fin_del_viaje,Origen_Id,Destino_Id"
 QUOTED = ",".join(f'"{name}"' for name in UNQUOTED.split(","))
@@ -176,3 +185,13 @@ def test_build_manifest_version_changes_when_data_changes(tmp_path):
     assert after["total_rows"] == before["total_rows"]
     assert after["files"][0]["sha256"] != before["files"][0]["sha256"]
     assert after["data_version"] != before["data_version"]
+
+
+def test_fetch_file_rejects_non_https_without_calling_curl(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+    with pytest.raises(ValueError, match="non-HTTPS"):
+        fetch_file("http://www.mibici.net/x.csv", tmp_path / "x.csv", TRIPS_HEADER_FIELDS)
+
+    assert calls == []
