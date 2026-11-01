@@ -215,6 +215,11 @@ models/*.pkl
 /reports/validation/*-environment.json
 /reports/validation/*-runtime-*.json
 
+# Regenerable check outputs; keep the scripts, the policies and the findings write-ups
+/reports/deepchecks/*.html
+/reports/deepchecks/*.json
+/reports/security/detect-secrets.json
+
 /reports/verification/
 /docs/adr/
 /docs/requirements/
