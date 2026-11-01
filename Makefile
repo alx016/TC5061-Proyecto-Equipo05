@@ -4,7 +4,7 @@
 
 PROJECT_NAME = TC5061-Proyecto-Equipo05
 PYTHON_VERSION = 3.13
-PYTHON_INTERPRETER = python
+PYTHON_INTERPRETER = uv run python
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -49,6 +49,11 @@ test:
 ## Run data integrity and train-test drift checks (DeepChecks isolated environment)
 .PHONY: data-checks
 data-checks:
+	@test -f data/processed/classification_features.parquet || { \
+		echo ">>> Falta data/processed/classification_features.parquet."; \
+		echo ">>> Genera los datos con 'make data' y las features de P2 con el entry point 'features' de MLproject."; \
+		exit 1; \
+	}
 	uv run scripts/data_checks.py
 
 ## Run data integrity and train-test drift checks (alias)
@@ -57,6 +62,21 @@ validate-data: data-checks
 
 
 
+
+## Run security checks: bandit, pip-audit (runtime + full) and detect-secrets
+.PHONY: security
+security:
+	uv run bandit -q -r tc5061_proyecto_equipo5
+	uv export --quiet --no-dev --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
+	uv run pip-audit -r /tmp/requirements.txt
+	uv export --quiet --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
+	uv run pip-audit -r /tmp/requirements-full.txt
+	git ls-files -z | xargs -0 uv run detect-secrets scan --exclude-files '^\.secrets\.baseline$$' > reports/security/detect-secrets.json
+	git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline --exclude-files '^\.secrets\.baseline$$'
+
+## Run every check: tests, security and data checks
+.PHONY: check
+check: test security data-checks
 
 ## Set up Python interpreter environment
 .PHONY: create_environment

@@ -43,7 +43,9 @@ usando solo información disponible en ese momento.
 ## Instalación
 
 Requisitos: Python 3.13, [uv](https://docs.astral.sh/uv/) y Git. LightGBM necesita además
-OpenMP: en macOS `brew install libomp`; en Linux o WSL `sudo apt install libgomp1`.
+OpenMP: en macOS `brew install libomp`; en Linux o WSL `sudo apt install libgomp1`. Si
+`uv sync` falla al leer `uv.lock` por una versión vieja de uv, actualízalo con
+`uv self update`.
 
 ```bash
 git clone https://github.com/alx016/TC5061-Proyecto-Equipo05.git
@@ -230,6 +232,93 @@ El modelo carga fuera del repositorio porque se guarda con el código del paquet
 (`code_paths`). En MLflow 3, `runs:/<id>/model` apunta al logged model del run; el aviso
 "has no artifacts at artifact path 'model'" al registrar es normal.
 
+## Pruebas y chequeos (Entrega 3)
+
+Todo se corre desde la raíz del repositorio:
+
+```bash
+make test          # pruebas unitarias (pytest)
+make data-checks   # validación de datos con DeepChecks
+make security      # bandit, pip-audit y detect-secrets
+make check         # las tres anteriores
+```
+
+`make test` no necesita datos. `make data-checks` y `make check` sí: leen
+`data/processed/classification_features.parquet`, que se genera con `make data` y el entry
+point `features` de `MLproject`. Si el archivo no existe, el target se detiene con un mensaje
+antes de ejecutar DeepChecks.
+
+### Pruebas (pytest)
+
+`make test` corre `uv run pytest tests` (263 pruebas, entre 8 y 15 minutos según la máquina).
+Las pruebas usan datos sintéticos y un tracking de MLflow temporal (SQLite en una carpeta
+temporal), así que no necesitan `data/` ni el servidor local. La primera corrida necesita red,
+porque `tests/test_data_checks.py` levanta con `uv` el entorno aislado de
+`scripts/data_checks.py`. `tests/test_reproducibility.py` entrena dos veces con la misma
+semilla y verifica que los resultados son idénticos: predicciones en P1, probabilidades en P2
+y etiquetas de cluster en P3. También verifica que en P2 una semilla distinta cambia las
+probabilidades del Random Forest.
+Además de los casos normales, las pruebas cubren casos límite: 53 verificaciones con
+`pytest.raises` en 11 archivos comprueban que el código rechaza entradas inválidas, por
+ejemplo una URL que no es `https` en la descarga de datos.
+
+### Validación de datos (DeepChecks)
+
+`make data-checks` ejecuta `scripts/data_checks.py` sobre las features de P2
+(`data/processed/classification_features.parquet`) con dos suites: `data_integrity` y
+`train_test_drift` (train de enero a septiembre contra test de diciembre). Cada check tiene
+una condición explícita, descrita en `reports/deepchecks/check_policy.md`, y el script imprime
+al final el veredicto de cada suite con las condiciones que no se cumplieron.
+
+Con los datos de 2024 el resultado **no es todo verde**, y es lo esperado: `data_integrity` no
+cumple `Conflicting Labels` (0.3% de vectores idénticos con etiqueta distinta) y
+`train_test_drift` no cumple `Train Test Samples Mix` (6.75% de las muestras de diciembre
+aparecen también en entrenamiento). Ambas están analizadas en
+`reports/deepchecks/hallazgos.md`. Por eso el script termina con código 0 aunque haya
+condiciones sin cumplir; para que un fallo corte la ejecución, por ejemplo en CI, se usa
+`uv run scripts/data_checks.py --strict`.
+
+Los reportes HTML y JSON se escriben en `reports/deepchecks/` y no se versionan: se regeneran
+con el comando. La evidencia queda en `hallazgos.md`, en `check_policy.md` y en la captura de
+abajo.
+
+El script corre en un entorno aislado (PEP 723, Python 3.12), porque deepchecks no es
+compatible con la versión de scikit-learn del proyecto. Los avisos de `pkg_resources` al
+ejecutarlo son esperados.
+
+### Seguridad
+
+`make security` corre tres herramientas:
+
+- **bandit**: análisis estático del paquete `tc5061_proyecto_equipo5`.
+- **pip-audit**: vulnerabilidades conocidas en las dependencias, primero las de ejecución y
+  después todas (incluidas las de desarrollo).
+- **detect-secrets**: secretos en los archivos versionados. El escaneo completo se guarda en
+  `reports/security/detect-secrets.json` (fuera de Git) y `detect-secrets-hook` falla si
+  aparece un secreto que no esté en `.secrets.baseline`. El baseline contiene las 53
+  coincidencias ya revisadas; todas son falsos positivos: imágenes en base64 dentro de los
+  notebooks y los hashes SHA-256 de `references/viajes_manifest.json`.
+
+Los resultados y su análisis están en `reports/security/resultados.md`. El 1 de noviembre
+pip-audit detectó cuatro CVE nuevas en `pyasn1` 0.6.4 (dependencia indirecta de MLflow); se
+corrigieron actualizando a 0.6.5.
+
+`make security` no escanea el historial de Git: gitleaks no es un paquete de PyPI. El comando
+para hacerlo queda documentado en `resultados.md`.
+
+### Evidencia
+
+Capturas de la sesión de validación, con el comando que produjo cada una:
+
+- `uv run pytest -q --disable-warnings` → 263 passed
+  ![pytest](reports/figures/entrega3/01-pytest.png)
+- `make security` → bandit sin hallazgos y pip-audit sin vulnerabilidades
+  ![make security](reports/figures/entrega3/03-security.png)
+- reporte HTML de `make data-checks` → `Train Test Samples Mix` no cumplida
+  ![DeepChecks train/test drift](reports/figures/entrega3/02-deepchecks.png)
+- `make help` → targets disponibles
+  ![make help](reports/figures/entrega3/04-make-help.png)
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -261,7 +350,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ## Estructura del proyecto
 
 ```
-├── Makefile                   <- Comandos: make data, make lint, make format, make test
+├── Makefile                   <- Comandos: make data, make lint, make format, make test, make data-checks, make security y make check
 ├── README.md
 ├── pyproject.toml             <- Metadatos del paquete, dependencias y configuración de ruff
 ├── uv.lock                    <- Versiones exactas de las dependencias
@@ -273,12 +362,15 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── docs/                      <- Sitio MkDocs: canvases, feature engineering y justificaciones
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
-├── reports/                   <- Reportes y figuras generadas
+├── reports/                   <- Figuras y reportes generados; los HTML/JSON de deepchecks no se versionan
 ├── tests/                     <- Pruebas unitarias con datos sintéticos (pytest)
 ├── MLproject                  <- Entry points de MLflow: ingest, features, train, search, select, register
 ├── python_env.yaml            <- Entorno de Python del MLflow Project
 ├── .env.example               <- Variables de MLflow (tracking URI y experimento)
+├── .secrets.baseline          <- Falsos positivos auditados de detect-secrets
 ├── mlflow.db, mlartifacts/    <- Servidor de tracking local; fuera de Git
+├── scripts/
+│   └── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
 └── tc5061_proyecto_equipo5/   <- Código fuente
     ├── config.py              <- Rutas, años y constantes del estudio
     ├── dataset.py             <- Descarga, limpieza y manifest de los datos

@@ -23,8 +23,8 @@
 
 ## Verificación funcional
 
-- `uv run pytest -q`: **260 pruebas pasan** en la rama, sin fallos (incluye las 9 de
-  reproducibilidad de WP-T1 tras el rebase sobre `main`).
+- `uv run pytest -q`: **263 pruebas pasan** en la rama, sin fallos (incluye las 9 de
+  reproducibilidad de WP-T1 y las de DeepChecks de WP-T2).
 - `uv run ruff check` y `uv run ruff format --check`: sin errores.
 - `uv lock --check`: lockfile consistente con `pyproject.toml`.
 - Prueba del guard de descargas: `tests/test_dataset.py::test_fetch_file_rejects_non_https_without_calling_curl`
@@ -33,23 +33,25 @@
 ## Herramientas y comandos
 
 Versiones usadas: Python 3.13.15, bandit 1.9.4, pip-audit 2.10.1, detect-secrets 1.5.0 y
-gitleaks 8.30.1. bandit y pip-audit quedaron en el grupo `dev` de `pyproject.toml`, así que
-se ejecutan con `uv run` y no forman parte de las dependencias de ejecución.
+gitleaks 8.30.1. bandit, pip-audit y detect-secrets quedaron en el grupo `dev` de
+`pyproject.toml`, así que se ejecutan con `uv run` y no forman parte de las dependencias de
+ejecución.
 
 ```bash
 # Código
-uv run bandit -r tc5061_proyecto_equipo5
+uv run bandit -q -r tc5061_proyecto_equipo5
 
 # Dependencias de ejecución
-uv export --no-dev --format requirements-txt --no-hashes -o /tmp/requirements.txt
+uv export --quiet --no-dev --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
 uv run pip-audit -r /tmp/requirements.txt
 
 # Entorno completo, incluido el grupo dev
-uv export --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
+uv export --quiet --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
 uv run pip-audit -r /tmp/requirements-full.txt
 
-# Secretos en archivos versionados
-git ls-files -z | xargs -0 uvx detect-secrets scan > /tmp/detect-secrets.json
+# Secretos en archivos versionados: reporte completo y verificación contra el baseline
+git ls-files -z | xargs -0 uv run detect-secrets scan --exclude-files '^\.secrets\.baseline$' > reports/security/detect-secrets.json
+git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline --exclude-files '^\.secrets\.baseline$'
 
 # Secretos en todo el historial de Git
 gitleaks git --log-opts="--all" --report-format json --report-path /tmp/gitleaks.json .
@@ -106,9 +108,21 @@ dependencia transitiva de Jupyter. Se corrigieron con `uv lock --upgrade-package
 (6.5.10 → 6.6, sin cambios en `pyproject.toml`) y se repitieron ambas exportaciones de
 pip-audit con resultado de 0 vulnerabilidades conocidas.
 
+El 1 de noviembre, en la rama de WP-T4, pip-audit detectó 4 CVE nuevas en `pyasn1` 0.6.4
+(CVE-2026-119194, CVE-2026-119195, CVE-2026-119196 y CVE-2026-119197), dependencia
+transitiva de MLflow. Se corrigieron con `uv lock --upgrade-package pyasn1` (0.6.4 → 0.6.5,
+sin cambios en `pyproject.toml`) y ambas corridas de pip-audit volvieron a 0
+vulnerabilidades conocidas. En la misma rama los reportes HTML y JSON de DeepChecks dejaron
+de versionarse (`make data-checks` los regenera), así que el escaneo de detect-secrets ya no
+los ve y no hace falta excluirlos.
+
 ## Revisión de secretos
 
-`detect-secrets` marcó 53 coincidencias en archivos versionados:
+`detect-secrets` marcó 53 coincidencias en archivos versionados. Las 53 se revisaron una por
+una y quedaron registradas en `.secrets.baseline`, que es lo que versiona el repositorio:
+`make security` corre `detect-secrets-hook --baseline .secrets.baseline` y falla si aparece
+una coincidencia nueva que no esté en ese archivo. El escaneo completo se guarda en
+`reports/security/detect-secrets.json`, fuera de Git.
 
 | Archivo | Coincidencias | Clasificación |
 |:---|:---:|:---|
@@ -123,9 +137,9 @@ experimento, sin valores sensibles. La búsqueda de nombres sensibles (`*.pem`, 
 `id_rsa`, credenciales, secretos) en todo el historial tampoco encontró archivos.
 
 También se ejecutó `gitleaks 8.30.1` sobre todo el historial
-(`gitleaks git --log-opts="--all"`): **148 commits y ~6.8 MB escaneados, 0 fugas**. La
-búsqueda por patrones de claves de AWS, GitHub, OpenAI, Slack y encabezados de clave privada
-en `git log --all -p` también dio 0 coincidencias.
+(`gitleaks git --log-opts="--all"`): **150 commits y ~6.8 MB escaneados, 0 fugas** (nueva
+corrida tras el merge a `main`). La búsqueda por patrones de claves de AWS, GitHub, OpenAI,
+Slack y encabezados de clave privada en `git log --all -p` también dio 0 coincidencias.
 
 ## Prácticas que ya existían
 
@@ -159,8 +173,11 @@ de basura.
 - `detect-secrets` y gitleaks son detectores por reglas y entropía; las salidas de notebooks
   producen falsos positivos en detect-secrets. El escaneo de historial con gitleaks no
   encontró fugas, pero ninguno sustituye una auditoría manual.
-- No se agregó automatización en CI; este frente deja los comandos listos para que el
-  `Makefile` y el README de la entrega los invoquen.
+- `make security` corre bandit, pip-audit (ejecución + completo) y detect-secrets con los
+  comandos de este reporte; el paso de secretos falla si `detect-secrets-hook` encuentra algo
+  fuera de `.secrets.baseline`. Cuando se audite un falso positivo nuevo hay que regenerar el
+  baseline y versionarlo. Gitleaks no está en el target porque requiere su binario
+  (no es paquete PyPI); el comando documentado arriba sigue siendo la referencia.
 - `python_env.yaml` lo resuelve `pip` al construir el entorno del MLflow Project, fuera del
   corpus que audita pip-audit. Se mantuvo sincronizado con `pyproject.toml` y
   `tests/test_dependencies.py` verifica esa igualdad.

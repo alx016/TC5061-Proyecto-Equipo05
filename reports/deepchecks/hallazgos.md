@@ -36,7 +36,7 @@ Se implementó y ejecutó el protocolo de validación tabular mediante la suite 
 
 ## 3. Chequeos de Integridad de Datos (`data_integrity`)
 
-El reporte interactivo completo se generó en `reports/deepchecks/data_integrity.html` y su resumen estructurado en `reports/deepchecks/data_integrity.json`.
+El reporte interactivo completo se regenera con `make data-checks` en `reports/deepchecks/data_integrity.html` y su resumen estructurado en `reports/deepchecks/data_integrity.json` (no se versionan).
 
 | Chequeo | Métrica Observada | Umbral de Política | Resultado |
 | :--- | :--- | :--- | :--- |
@@ -64,7 +64,7 @@ El reporte interactivo completo se generó en `reports/deepchecks/data_integrity
 
 ## 4. Chequeos de Drift Temporal (`train_test_drift`)
 
-El reporte interactivo completo se generó en `reports/deepchecks/train_test_drift.html` y su resumen estructurado en `reports/deepchecks/train_test_drift.json`.
+El reporte interactivo completo se regenera con `make data-checks` en `reports/deepchecks/train_test_drift.html` y su resumen estructurado en `reports/deepchecks/train_test_drift.json` (no se versionan).
 
 | Chequeo | Métrica Observada | Umbral de Política | Resultado |
 | :--- | :--- | :--- | :--- |
@@ -123,4 +123,4 @@ El 100% de las 18 variables predictoras aprobó la condición de estabilidad (sc
 
 1. **Aptitud del Conjunto para Entrenamiento Fuera de Tiempo**: La partición temporal Ene-Sep (train) y Diciembre (test) demuestra ser rigurosa, no presentar filtraciones temporales y exhibir un drift marginal que no compromete la capacidad predictiva de los modelos de Machine Learning.
 2. **Capacidad de Generalización**: El clasificador de dominio con AUC de 0.57 y las distancias KS inferiores a 0.03 confirman que las relaciones funcionales aprendidas durante los primeros meses del año conservan su validez durante el cierre anual.
-3. **Trazabilidad de Reportes**: Tanto los reportes gráficos en HTML para inspección humana como los archivos JSON estandarizados para automatización se encuentran disponibles en `reports/deepchecks/`.
+3. **Trazabilidad de Reportes**: Tanto los reportes gráficos en HTML para inspección humana como los archivos JSON estandarizados para automatización se regeneran con `make data-checks` en `reports/deepchecks/`; este documento y `check_policy.md` sí se versionan.
