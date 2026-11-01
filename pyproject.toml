@@ -53,9 +53,13 @@ extend-select = ["I"]  # Add import sorting
 known-first-party = ["tc5061_proyecto_equipo5"]
 force-sort-within-sections = true
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
 ]
-
