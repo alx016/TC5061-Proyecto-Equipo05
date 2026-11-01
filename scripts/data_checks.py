@@ -245,6 +245,30 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
     return save_suite_summary(result, html_path, json_path)
 
 
+def print_summary(summaries: list[dict]) -> int:
+    """Print the per-suite verdict and the conditions that did not pass.
+
+    Returns the number of suites that did not pass, so `--strict` can turn it into an exit code.
+    """
+    print("\nResumen de suites:")
+    failed_suites = 0
+    for summary in summaries:
+        verdict = "OK" if summary["passed"] else "NO PASA"
+        print(
+            f"  {summary['suite_name']}: {verdict} "
+            f"({summary['passed_checks_count']}/{summary['total_checks']} checks)"
+        )
+        for name in summary["failed_checks"]:
+            print(f"    - condición no cumplida: {name}")
+        failed_suites += 0 if summary["passed"] else 1
+    if failed_suites:
+        print(
+            f"{failed_suites} suite(s) con condiciones no cumplidas; la interpretación está en "
+            "reports/deepchecks/hallazgos.md."
+        )
+    return failed_suites
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run DeepChecks data integrity and train/test drift suites."
@@ -261,6 +285,11 @@ def main():
         default=DEFAULT_REPORTS_DIR,
         help="Directory to save HTML and JSON reports",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with status 1 when a suite has conditions that did not pass",
+    )
     args = parser.parse_args()
 
     df = pd.read_parquet(args.data_path)
@@ -271,12 +300,15 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Running Data Integrity suite...")
-    run_data_integrity_check(df, args.output_dir)
+    summaries = [run_data_integrity_check(df, args.output_dir)]
 
     print("Running Train/Test Drift suite (train Jan-Sep vs test Dec)...")
-    run_train_test_drift_check(df, args.output_dir)
+    summaries.append(run_train_test_drift_check(df, args.output_dir))
 
     print("All DeepChecks reports successfully generated.")
+    failed_suites = print_summary(summaries)
+    if args.strict and failed_suites:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

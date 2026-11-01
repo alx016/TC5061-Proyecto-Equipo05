@@ -49,7 +49,9 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
     return parquet_path
 
 
-def run_data_checks_script(data_path: Path, output_dir: Path) -> subprocess.CompletedProcess:
+def run_data_checks_script(
+    data_path: Path, output_dir: Path, *, strict: bool = False
+) -> subprocess.CompletedProcess:
     """Execute scripts/data_checks.py in isolated environment via subprocess."""
     cmd = [
         "uv",
@@ -60,6 +62,8 @@ def run_data_checks_script(data_path: Path, output_dir: Path) -> subprocess.Comp
         "--output-dir",
         str(output_dir),
     ]
+    if strict:
+        cmd.append("--strict")
     return subprocess.run(
         cmd,
         cwd=PROJ_ROOT,
@@ -172,6 +176,16 @@ def test_data_checks_detects_injected_defects(
     )
     assert null_check is not None
     assert any(c["status"] == "FAIL" for c in null_check["conditions"])
+
+    strict_result = run_data_checks_script(
+        defective_parquet, tmp_path / "defective_reports_strict", strict=True
+    )
+    assert strict_result.returncode == 1, (
+        f"Expected exit code 1 with --strict:\nSTDOUT:\n{strict_result.stdout}\n"
+        f"STDERR:\n{strict_result.stderr}"
+    )
+    assert "NO PASA" in strict_result.stdout
+    assert "condición no cumplida" in strict_result.stdout
 
 
 @pytest.mark.slow
