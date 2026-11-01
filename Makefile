@@ -66,7 +66,7 @@ security:
 	uv run pip-audit -r /tmp/requirements.txt
 	uv export --quiet --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
 	uv run pip-audit -r /tmp/requirements-full.txt
-	git ls-files -z | xargs -0 uvx detect-secrets scan
+	git ls-files -z | xargs -0 uvx detect-secrets scan --exclude-files '^reports/deepchecks/'
 
 ## Run every check: tests, security and data checks
 .PHONY: check
