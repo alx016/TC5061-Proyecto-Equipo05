@@ -243,9 +243,10 @@ make check         # las tres anteriores
 
 ### Pruebas (pytest)
 
-`make test` corre `uv run pytest` sobre `tests/` (263 pruebas, unos 13 minutos). Las pruebas
-usan datos sintéticos y un servidor de MLflow temporal, así que no necesitan `data/` ni el
-servidor local. `tests/test_reproducibility.py` entrena dos veces con la misma semilla y
+`make test` corre `uv run pytest` sobre `tests/` (263 pruebas, unos 8 minutos). Las pruebas
+usan datos sintéticos y un tracking de MLflow temporal (SQLite en una carpeta temporal), así
+que no necesitan `data/` ni el servidor local. `tests/test_reproducibility.py` entrena dos
+veces con la misma semilla y
 verifica que los resultados son idénticos: predicciones en P1, probabilidades en P2 y
 etiquetas de cluster en P3. También verifica que en P2 una semilla distinta cambia las
 probabilidades del Random Forest.

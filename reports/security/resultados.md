@@ -41,15 +41,15 @@ se ejecutan con `uv run` y no forman parte de las dependencias de ejecución.
 uv run bandit -r tc5061_proyecto_equipo5
 
 # Dependencias de ejecución
-uv export --no-dev --format requirements-txt --no-hashes -o /tmp/requirements.txt
+uv export --quiet --no-dev --format requirements-txt --no-hashes -o /tmp/requirements.txt
 uv run pip-audit -r /tmp/requirements.txt
 
 # Entorno completo, incluido el grupo dev
-uv export --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
+uv export --quiet --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
 uv run pip-audit -r /tmp/requirements-full.txt
 
 # Secretos en archivos versionados
-git ls-files -z | xargs -0 uvx detect-secrets scan > /tmp/detect-secrets.json
+git ls-files -z | xargs -0 uvx detect-secrets scan --exclude-files '^reports/deepchecks/' > /tmp/detect-secrets.json
 
 # Secretos en todo el historial de Git
 gitleaks git --log-opts="--all" --report-format json --report-path /tmp/gitleaks.json .
@@ -105,6 +105,14 @@ Durante la revisión del PR se detectaron 3 CVEs nuevos en `tornado` 6.5.10
 dependencia transitiva de Jupyter. Se corrigieron con `uv lock --upgrade-package tornado`
 (6.5.10 → 6.6, sin cambios en `pyproject.toml`) y se repitieron ambas exportaciones de
 pip-audit con resultado de 0 vulnerabilidades conocidas.
+
+El 1 de noviembre, en la rama de WP-T4, pip-audit detectó 4 CVE nuevas en `pyasn1` 0.6.4
+(CVE-2026-119194, CVE-2026-119195, CVE-2026-119196 y CVE-2026-119197), dependencia
+transitiva de MLflow. Se corrigieron con `uv lock --upgrade-package pyasn1` (0.6.4 → 0.6.5,
+sin cambios en `pyproject.toml`) y ambas corridas de pip-audit volvieron a 0
+vulnerabilidades conocidas. En la misma rama, `make security` excluye
+`reports/deepchecks/` del escaneo de detect-secrets, porque los reportes HTML generados
+solo producían falsos positivos.
 
 ## Revisión de secretos
 
