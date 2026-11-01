@@ -230,6 +230,61 @@ El modelo carga fuera del repositorio porque se guarda con el código del paquet
 (`code_paths`). En MLflow 3, `runs:/<id>/model` apunta al logged model del run; el aviso
 "has no artifacts at artifact path 'model'" al registrar es normal.
 
+## Pruebas y chequeos (Entrega 3)
+
+Todo se corre desde la raíz del repositorio:
+
+```bash
+make test          # pruebas unitarias (pytest)
+make data-checks   # validación de datos con DeepChecks
+make security      # bandit, pip-audit y detect-secrets
+make check         # las tres anteriores
+```
+
+### Pruebas (pytest)
+
+`make test` corre `uv run pytest` sobre `tests/` (263 pruebas, unos 13 minutos). Las pruebas
+usan datos sintéticos y un servidor de MLflow temporal, así que no necesitan `data/` ni el
+servidor local. `tests/test_reproducibility.py` entrena dos veces con la misma semilla y
+verifica que los resultados son idénticos: predicciones en P1, probabilidades en P2 y
+etiquetas de cluster en P3. También verifica que en P2 una semilla distinta cambia las
+probabilidades del Random Forest.
+
+### Validación de datos (DeepChecks)
+
+`make data-checks` ejecuta `scripts/data_checks.py` sobre las features de P2
+(`data/processed/classification_features.parquet`) con dos suites: `data_integrity` y
+`train_test_drift` (train de enero a septiembre contra test de diciembre). Cada check tiene
+una condición explícita, descrita en `reports/deepchecks/check_policy.md`. Los reportes HTML
+y JSON quedan en `reports/deepchecks/` y la interpretación de los resultados está en
+`reports/deepchecks/hallazgos.md`.
+
+El script corre en un entorno aislado (PEP 723, Python 3.12), porque deepchecks no es
+compatible con la versión de scikit-learn del proyecto. Los avisos de `pkg_resources` al
+ejecutarlo son esperados.
+
+### Seguridad
+
+`make security` corre tres herramientas:
+
+- **bandit**: análisis estático del paquete `tc5061_proyecto_equipo5`.
+- **pip-audit**: vulnerabilidades conocidas en las dependencias, primero las de ejecución y
+  después todas (incluidas las de desarrollo).
+- **detect-secrets**: secretos en los archivos versionados.
+
+Los resultados y su análisis están en `reports/security/resultados.md`. Los hallazgos de
+detect-secrets son falsos positivos: imágenes en base64 dentro de los notebooks y los hashes
+SHA-256 de `references/viajes_manifest.json`. Los reportes HTML de DeepChecks se excluyen del
+escaneo por la misma razón. El 1 de noviembre pip-audit detectó cuatro CVE nuevas en
+`pyasn1` 0.6.4 (dependencia indirecta de MLflow); se corrigieron actualizando a 0.6.5.
+
+### Evidencia
+
+![pytest](reports/figures/entrega3/01-pytest.png)
+![DeepChecks train/test drift](reports/figures/entrega3/02-deepchecks.png)
+![make security](reports/figures/entrega3/03-security.png)
+![make help](reports/figures/entrega3/04-make-help.png)
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -261,7 +316,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ## Estructura del proyecto
 
 ```
-├── Makefile                   <- Comandos: make data, make lint, make format, make test
+├── Makefile                   <- Comandos: make data, make lint, make format, make test, make data-checks, make security y make check
 ├── README.md
 ├── pyproject.toml             <- Metadatos del paquete, dependencias y configuración de ruff
 ├── uv.lock                    <- Versiones exactas de las dependencias
@@ -279,6 +334,8 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── python_env.yaml            <- Entorno de Python del MLflow Project
 ├── .env.example               <- Variables de MLflow (tracking URI y experimento)
 ├── mlflow.db, mlartifacts/    <- Servidor de tracking local; fuera de Git
+├── scripts/
+│   └── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
 └── tc5061_proyecto_equipo5/   <- Código fuente
     ├── config.py              <- Rutas, años y constantes del estudio
     ├── dataset.py             <- Descarga, limpieza y manifest de los datos
