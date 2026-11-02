@@ -142,6 +142,37 @@ def test_data_checks_execution_on_synthetic_data(
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize(
+    "shift, expected_check",
+    [("feature", "Feature Drift"), ("label", "Label Drift")],
+)
+def test_data_checks_detects_injected_drift(
+    synthetic_classification_parquet: Path, tmp_path: Path, shift: str, expected_check: str
+):
+    """Shifting a distribution in test only must fail train_test_drift and block the command."""
+    df = pd.read_parquet(synthetic_classification_parquet)
+    is_test = df["split"] == "test"
+    if shift == "feature":
+        # Busier stations in test: arrivals move far above the train range
+        df.loc[is_test, "arrivals_lag1"] += 5
+    else:
+        # Shortages and saturation become the majority in test (train is 80% class 0)
+        rng = np.random.default_rng(0)
+        df.loc[is_test, "target"] = rng.choice([0, 1, 2], size=is_test.sum(), p=[0.2, 0.4, 0.4])
+    path = tmp_path / "drift.parquet"
+    df.to_parquet(path, index=False)
+
+    output_dir = tmp_path / "reports"
+    result = run_data_checks_script(path, output_dir)
+    assert result.returncode == 1, f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+
+    with open(output_dir / "train_test_drift.json", "r", encoding="utf-8") as f:
+        drift_data = json.load(f)
+    assert drift_data["passed"] is False
+    assert expected_check in drift_data["failed_checks"]
+
+
+@pytest.mark.slow
 def test_data_checks_detects_injected_defects(
     synthetic_classification_parquet: Path, tmp_path: Path
 ):
