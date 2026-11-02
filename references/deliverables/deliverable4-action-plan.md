@@ -8,17 +8,17 @@
 
 ## Registro de decisiones
 
-Para cerrar en la reunión de arranque del lunes 2. Cada fila trae una propuesta.
+Cerradas por Manuel el lunes 2 y pendientes de confirmar con el equipo en la reunión de arranque.
 
 | # | Decisión | Propuesta |
 |:---|:---|:---|
 | 4.1 | ✅ Modelo que se despliega | **P2 riesgo** (`mibici-equipo05-p2-riesgo@champion`). Recibe 18 columnas numéricas planas que se validan fácil con Pydantic, y la respuesta es una clase con probabilidades, que es fácil de explicar. P1 depende de clases propias y del histórico de la estación. P3 asigna grupos a estaciones, algo que no se le pide a una API una vez por petición |
-| 4.2 | Cómo llega el modelo al contenedor | **Se empaqueta en la imagen** el modelo descargado del Registry por nombre y versión. Para ejecutar el contenedor no hace falta MLflow. Con `MODEL_URI` se puede cargar desde el Registry en vivo (ver 4.3) |
-| 4.3 | Carga en vivo desde el Registry | Opcional. Si `MODEL_URI` empieza con `models:/`, la API lo carga usando `MLFLOW_TRACKING_URI=http://host.containers.internal:5001`. Para eso el servidor debe escuchar en `0.0.0.0` y no en `127.0.0.1` |
-| 4.4 | Motor de contenedores | **Podman** (el ejemplo del enunciado lo usa). El README también da el comando equivalente de Docker |
-| 4.5 | Estrategia de despliegue | **Inferencia en tiempo real** (REST, petición–respuesta). `POST /predict` acepta una lista de estaciones, así que la misma llamada sirve para un micro-lote horario de las ~300 estaciones |
-| 4.6 | Dependencias de la imagen | El `requirements.txt` que MLflow guardó con el modelo, más `fastapi` y `uvicorn`. No se instala `pyproject.toml` completo: trae jupyterlab, mkdocs, etc., que inflan la imagen |
-| 4.7 | Host del modelo | Quien entrena y registra el champion de P2 en su máquina, porque no hay MLflow compartido. Propuesta: **Oscar** (dueño de P2) |
+| 4.2 | ✅ Cómo llega el modelo al contenedor | **Opción B, camino principal: el modelo va dentro de la imagen.** `make export-model` descarga `models:/mibici-equipo05-p2-riesgo/<versión>` del Registry a `models/p2-riesgo/`, junto con un archivo de metadatos (nombre, versión, `source_run_id`, `git_commit`, `data_version`), y el Containerfile lo copia. El contenedor corre sin MLflow. `models/` sigue fuera de Git: quien construye la imagen exporta antes. Se descartó la opción A como camino principal porque no hay MLflow compartido: solo funcionaría en la máquina que registró el champion |
+| 4.3 | ✅ Carga en vivo desde el Registry | **Opción A, documentada como alternativa.** Si `MODEL_URI` empieza con `models:/`, la API lo carga del Registry al arrancar. El Makefile recibe `MLFLOW_HOST ?= 127.0.0.1` y para la demo se corre `make mlflow-server MLFLOW_HOST=0.0.0.0` (sin contraseña: solo mientras dura la demo). El contenedor usa `http://host.containers.internal:5001` en Podman o `http://host.docker.internal:5001` en Docker. Hay que probar si MLflow pide `--allowed-hosts` por el header `Host`. Se descartó un MLflow hospedado (DagsHub) para esta entrega |
+| 4.4 | ✅ Motor de contenedores | **Podman** es el motor oficial: los comandos del README y de `make image`, `make container` y `make smoke` usan `podman`. El README también da el comando equivalente de Docker, y el mismo Containerfile sirve para los dos. Si un integrante solo tiene Docker, hace con Docker la prueba en la segunda máquina (WP-5), y eso cuenta como evidencia de que funciona en otro entorno |
+| 4.5 | ✅ Estrategia de despliegue | **Inferencia en tiempo real** (REST, petición–respuesta). Las predicciones dependen de los flujos de la última hora, así que conviene calcularlas cuando se piden y no por adelantado. `POST /predict` acepta lotes, así que un proceso horario puede evaluar las ~300 estaciones en una sola llamada (micro-lote) y cubrir el escenario batch de la redistribución sin otro sistema. El modelo predice en milisegundos, así que tener el servicio siempre encendido cuesta poco. El README reconoce que el batch existe y explica por qué se eligió tiempo real |
+| 4.6 | ✅ Dependencias de la imagen | **Separar las dependencias en grupos.** `dependencies` se queda con lo que el código usa para entrenar y predecir (mlflow, lightgbm, scikit-learn, pandas, numpy, pyarrow, matplotlib, loguru, typer, python-dotenv, tqdm). El resto pasa a grupos: `notebooks` (jupyterlab, notebook, ipython, folium, seaborn), `docs` (mkdocs), `dev` (pytest, ruff, virtualenv, bandit…) y `api` (fastapi, uvicorn). Con `[tool.uv] default-groups` las laptops siguen instalando todo. El contenedor corre `uv sync --frozen --no-dev --group api`, con las versiones exactas de `uv.lock`, y `make security` audita la API. Se descartó el `requirements.txt` del modelo porque MLflow lo infiere (el `log_model` no pasa `pip_requirements`) y puede quedar incompleto, y se descartó instalar el proyecto completo porque mete Jupyter y mkdocs en la imagen |
+| 4.7 | ✅ Host del modelo | **Oscar** (dueño de P2) entrena el champion de P2, lo registra en su `mlflow.db` y corre `make export-model`. Como `models/` no está en Git: **(b)** para el trabajo de la semana, Oscar comparte la carpeta `models/p2-riesgo/` por la carpeta del equipo, con su archivo de metadatos (versión, run, commit), y **(a)** en WP-5, Emilio reproduce el entrenamiento desde `main` con las semillas fijas, registra, exporta y construye la imagen. Así se prueba la reproducibilidad completa, del entrenamiento al contenedor |
 
 ---
 
@@ -103,12 +103,13 @@ cumple, FastAPI responde 422 con el campo que falló. Los rangos salen de los da
 
 | WP | Responsable | Revisa | Entregable | Horas |
 |:---|:---|:---|:---|:---:|
-| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py` y `make export-model` | 3 |
+| WP-D Dependencias | Fernando | Manuel | PR propio, lunes o martes, antes del Containerfile: grupos en `pyproject.toml`, `default-groups`, `python_env.yaml` recortado igual que `dependencies` (lo exige `tests/test_dependencies.py`), `uv.lock` regenerado y `make test` y `make security` en verde. Avisar al equipo que corra `uv sync` | 1.5 |
+| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py` y `make export-model`. Compartir `models/p2-riesgo/` con el equipo (4.7b) | 3 |
 | WP-1 API | Manuel | Oscar | `api/model.py` y `api/main.py`, dependencias `fastapi` y `uvicorn` en `pyproject.toml` y `uv.lock`, `make api` (uvicorn local). Reemplazar o borrar `modeling/predict.py` | 4 |
 | WP-2 Esquemas y pruebas | Emilio | Manuel | `api/schemas.py` con los rangos tomados de los datos, y `tests/test_api.py` (casos válidos, 422 por campo faltante, extra o fuera de rango, lote vacío o demasiado grande, 503 sin modelo) con un modelo falso | 4 |
-| WP-3 Contenedor | Fernando | Emilio | `Containerfile` (slim, `libgomp1`, usuario sin root, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore`, `make image`, `make container` y `make smoke` (`curl` a `/health` y a `/predict`). Probar con Podman y con Docker | 4 |
-| WP-4 README y evidencia | Manuel | Fernando | Sección "API y contenedor (Entrega 4)": prerrequisitos, decisión 4.2, comandos, petición y respuesta reales, estrategia de despliegue, capturas en `reports/figures/entrega4/` y tabla de integrantes actualizada | 3 |
-| WP-5 Prueba en otra máquina | Emilio | — | Clonar `main`, construir la imagen y correr `make smoke` en una máquina distinta al host. Esta es la evidencia de reproducibilidad del criterio de 30% | 1 |
+| WP-3 Contenedor | Fernando | Emilio | `Containerfile` (slim, `libgomp1`, usuario sin root, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore`, `make image`, `make container` y `make smoke` (`curl` a `/health` y a `/predict`). `MLFLOW_HOST` en `make mlflow-server` y prueba de la opción A (4.3). Probar con Podman y con Docker | 5 |
+| WP-4 README y evidencia | Manuel | Fernando | Sección "API y contenedor (Entrega 4)": prerrequisitos, decisiones 4.2 (modelo en la imagen) y 4.3 (alternativa con Registry en vivo y sus pasos), comandos, petición y respuesta reales, estrategia de despliegue, capturas en `reports/figures/entrega4/` y tabla de integrantes actualizada | 3 |
+| WP-5 Prueba en otra máquina | Emilio | Oscar | En una máquina distinta al host, clonar `main`, generar las features de P2, entrenar y registrar con `mlflow run` (semillas fijas), correr `make export-model`, construir la imagen y correr `make smoke`. Comparar las métricas y una predicción contra las del champion de Oscar. Esta es la evidencia de reproducibilidad del criterio de 30% | 2.5 |
 
 Así cada integrante tiene al menos un PR propio y una revisión, que es lo que pide el criterio de
 Git. A Emilio le toca WP-2 y WP-5 para equilibrar sus commits.
@@ -118,6 +119,8 @@ Git. A Emilio le toca WP-2 y WP-5 para equilibrar sus commits.
 - WP-1 y WP-2 empiezan el lunes en paralelo. El contrato de `schemas.py` se acuerda en la
   reunión.
 - WP-1 puede probar con cualquier run local de P2 mientras WP-0 termina.
+- WP-D va primero porque cambia `uv.lock`: WP-1 agrega FastAPI sobre el grupo `api` y WP-3 lo
+  instala en la imagen.
 - WP-3 necesita `models/p2-riesgo/` (WP-0) y la app (WP-1).
 - WP-4 necesita la imagen funcionando (WP-3) para copiar la respuesta real.
 
