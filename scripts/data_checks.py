@@ -277,7 +277,7 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
 def print_summary(summaries: list[dict]) -> int:
     """Print the per-suite verdict and the conditions that did not pass.
 
-    Returns the number of suites that did not pass, so `--strict` can turn it into an exit code.
+    Returns the number of suites that did not pass, so `main` can turn it into an exit code.
     """
     print("\nResumen de suites:")
     failed_suites = 0
@@ -332,13 +332,7 @@ def main():
         default=DEFAULT_REPORTS_DIR,
         help="Directory to save HTML and JSON reports",
     )
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--strict",
-        action="store_true",
-        help="Exit with status 1 when a suite has conditions that did not pass (default)",
-    )
-    mode.add_argument(
+    parser.add_argument(
         "--report-only",
         action="store_true",
         help="Generate reports without failing the process for failed conditions",

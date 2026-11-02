@@ -51,7 +51,7 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
 
 
 def run_data_checks_script(
-    data_path: Path, output_dir: Path, *, strict: bool = False, report_only: bool = False
+    data_path: Path, output_dir: Path, *, report_only: bool = False
 ) -> subprocess.CompletedProcess:
     """Execute scripts/data_checks.py in isolated environment via subprocess."""
     cmd = [
@@ -63,8 +63,6 @@ def run_data_checks_script(
         "--output-dir",
         str(output_dir),
     ]
-    if strict:
-        cmd.append("--strict")
     if report_only:
         cmd.append("--report-only")
     return subprocess.run(
