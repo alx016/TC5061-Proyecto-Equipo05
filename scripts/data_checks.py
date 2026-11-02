@@ -64,6 +64,7 @@ CATEGORICAL_LIST = ["day_of_week", "is_weekend", "is_holiday"]
 DEFAULT_REPORTS_DIR = PROJ_ROOT / "reports" / "deepchecks"
 MAX_CONFLICT_RATIO = 0.005
 MAX_SAMPLES_MIX_RATIO = 0.10
+SAMPLES_MIX_ALERT_RATIO = 0.05
 
 
 def validate_input_schema(df: pd.DataFrame) -> None:
@@ -295,11 +296,15 @@ def print_summary(summaries: list[dict]) -> int:
             if check.get("header") == "Conflicting Labels":
                 ratio = value.get("percent_of_conflicting_samples")
                 if isinstance(ratio, (int, float)) and ratio > 0:
-                    print(f"    - alerta: etiquetas conflictivas {ratio:.2%} (límite 0.5%)")
+                    print(
+                        f"    - alerta: etiquetas conflictivas {ratio:.2%} (límite {MAX_CONFLICT_RATIO:.1%})"
+                    )
             if check.get("header") == "Train Test Samples Mix":
                 ratio = value.get("ratio")
-                if isinstance(ratio, (int, float)) and ratio > 0.05:
-                    print(f"    - alerta: mezcla train/test {ratio:.2%} (límite 10%)")
+                if isinstance(ratio, (int, float)) and ratio > SAMPLES_MIX_ALERT_RATIO:
+                    print(
+                        f"    - alerta: mezcla train/test {ratio:.2%} (límite {MAX_SAMPLES_MIX_RATIO:.0%})"
+                    )
         failed_suites += 0 if summary["passed"] else 1
     if failed_suites:
         print(
