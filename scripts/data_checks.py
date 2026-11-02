@@ -176,10 +176,7 @@ def _prepare_dataset(df: pd.DataFrame) -> Dataset:
     """Prepare a DeepChecks Dataset ensuring record_id, feature schema, and datetime metadata."""
     df = df.copy()
     if "record_id" not in df.columns:
-        if "station_id" in df.columns and "hour" in df.columns:
-            df["record_id"] = df["station_id"].astype(str) + "_" + df["hour"].astype(str)
-        else:
-            df["record_id"] = [f"rec_{i}" for i in range(len(df))]
+        df["record_id"] = df["station_id"].astype(str) + "_" + df["hour"].astype(str)
 
     return Dataset(
         df,
@@ -220,22 +217,8 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
 
 def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
     """Run train/test drift suite (Jan-Sep train vs Dec test) and export HTML + JSON."""
-    if (
-        "split" not in df.columns
-        or "train" not in df["split"].values
-        or "test" not in df["split"].values
-    ):
-        raise ValueError(
-            "DataFrame must contain a 'split' column with both 'train' and 'test' partitions."
-        )
-
     train_df = df[df["split"] == "train"]
     test_df = df[df["split"] == "test"]
-
-    if "target" in train_df.columns:
-        train_df = train_df.dropna(subset=["target"])
-    if "target" in test_df.columns:
-        test_df = test_df.dropna(subset=["target"])
 
     train_ds = _prepare_dataset(train_df)
     test_ds = _prepare_dataset(test_df)
@@ -342,8 +325,7 @@ def main():
     df = pd.read_parquet(args.data_path)
     validate_input_schema(df)
     print(f"Loaded dataset: {df.shape}")
-    if "split" in df.columns:
-        print(df["split"].value_counts())
+    print(df["split"].value_counts())
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
