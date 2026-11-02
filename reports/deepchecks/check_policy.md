@@ -45,7 +45,7 @@ Esta política formaliza las reglas, métricas, umbrales y criterios de severida
 
 | Regla / Chequeo | API DeepChecks | Métrica y Umbral | Tolerancia / Excepción Justificada | Severidad | Acción de Falla |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **Filas duplicadas** | `DataDuplicates` | Ratio duplicados $\le 0.0\%$ | La unicidad de la clave (`station_id`, `hour`) se valida aparte, antes de ejecutar las suites. | **CRÍTICA** | Bloquear pipeline de modelado. |
+| **Unicidad de la clave** | `DataDuplicates(columns=["station_id", "hour"])` | Ratio duplicados $\le 0.0\%$ | Compara solo la clave del panel, por lo que también detecta filas completas repetidas. DeepChecks muestra la condición como WARN, pero el script la trata como falla. | **CRÍTICA** | Bloquear pipeline de modelado. |
 | **Completitud de Atributos** | `PercentOfNulls` | Nulos por columna $\le 1.0\%$ | Se permiten nulos dentro del límite. El contrato exige identificador y hora no nulos y etiquetas presentes en train/test. | **CRÍTICA** | Bloquear si se excede el límite o falla el contrato. |
 | **Columnas Univaluadas** | `SingleValueColumn` | 0 columnas constantes | Ninguna predictora puede ser invariable a lo largo del año. | **ALTA** | Bloquear pipeline. |
 | **Pureza de Tipos** | `MixedDataTypes` | 0 columnas con tipos mixtos | Cada columna debe tener un tipo primitivo estricto (float, int o datetime). | **CRÍTICA** | Bloquear pipeline. |

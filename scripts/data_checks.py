@@ -82,8 +82,6 @@ def validate_input_schema(df: pd.DataFrame) -> None:
         raise ValueError("hour must be a datetime column")
     if df[["station_id", "hour"]].isna().any().any():
         raise ValueError("station_id and hour must not contain null values")
-    if df.duplicated(["station_id", "hour"]).any():
-        raise ValueError("station_id and hour must identify a single row")
     bad_features = [
         col
         for col in FEATURE_COLUMNS
@@ -114,6 +112,12 @@ def _tiered_ratio_condition(
     return ConditionResult(ConditionCategory.PASS, details)
 
 
+def _passed_conditions(check_result) -> bool:
+    """Only the tiered conditions may warn without failing; built-in WARN conditions block."""
+    tolerate_warning = isinstance(check_result.check, (ConflictingLabels, TrainTestSamplesMix))
+    return check_result.passed_conditions(fail_if_warning=not tolerate_warning)
+
+
 def _check_result_name(cr) -> str:
     """Extract clean human-readable name from DeepChecks CheckResult."""
     header = getattr(cr, "header", None)
@@ -139,14 +143,14 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     print(f"Report saved to {html_path}")
 
     raw_json = json.loads(result.to_json(with_display=False))
-    # Warnings are reported but only FAIL conditions and unrun checks fail the suite.
-    passed = result.get_passed_checks(fail_if_warning=False)
+    with_conditions = result.select_results(result.results_with_conditions)
+    passed = [c for c in with_conditions if _passed_conditions(c)]
     passed_checks = [_check_result_name(c) for c in passed]
     warned_checks = [
         _check_result_name(c) for c in passed if not c.passed_conditions(fail_if_warning=True)
     ]
     not_passed_checks = [
-        _check_result_name(c) for c in result.get_not_passed_checks(fail_if_warning=False)
+        _check_result_name(c) for c in with_conditions if not _passed_conditions(c)
     ]
     not_run_checks = [_check_result_name(c) for c in result.get_not_ran_checks()]
 
@@ -178,7 +182,7 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
 
     summary = {
         "suite_name": raw_json.get("name", getattr(result, "name", "suite")),
-        "passed": bool(result.passed(fail_if_warning=False, fail_if_check_not_run=True)),
+        "passed": not not_passed_checks and not not_run_checks,
         "total_checks": len(raw_json.get("results", [])),
         "passed_checks_count": len(passed_checks),
         "failed_checks_count": len(not_passed_checks),
@@ -218,10 +222,10 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
     ds = _prepare_dataset(df)
 
     suite = data_integrity()
-    for check in suite.checks.values():
+    for index, check in list(suite.checks.items()):
         if isinstance(check, DataDuplicates):
-            check.clean_conditions()
-            check.add_condition_ratio_less_or_equal(0)
+            # Replaced below by a check on the panel key, which also catches full-row duplicates.
+            suite.remove(index)
         elif isinstance(check, ConflictingLabels):
             check.clean_conditions()
             check.add_condition(
@@ -238,6 +242,7 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
         elif isinstance(check, FeatureLabelCorrelation):
             check.clean_conditions()
             check.add_condition_feature_pps_less_than(threshold=0.9)
+    suite.add(DataDuplicates(columns=["station_id", "hour"]).add_condition_ratio_less_or_equal(0))
     suite.add(PercentOfNulls().add_condition_percent_of_nulls_not_greater_than(0.01))
 
     result = suite.run(ds)
@@ -313,6 +318,8 @@ def print_summary(summaries: list[dict]) -> int:
         for name in summary["not_run_checks"]:
             print(f"    - check no ejecutado: {name}")
         for check in summary["check_summaries"]:
+            if check["header"] not in summary["warned_checks"]:
+                continue
             for condition in check["conditions"]:
                 if condition["status"] == "WARN":
                     print(f"    - advertencia: {check['header']}: {condition['details']}")
