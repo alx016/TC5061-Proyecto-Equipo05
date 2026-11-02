@@ -25,7 +25,7 @@ Se implementó y ejecutó el protocolo de validación tabular mediante la suite 
 
 ## 2. Resumen Ejecutivo de Resultados
 
-La tabla muestra la corrida con los umbrales originales de 0% y 5%. La política actual conserva las alertas y usa límites de 0.5% y 10% para detener la ejecución.
+La tabla muestra la corrida con los umbrales originales de 0% y 5%. La política actual conserva esos umbrales como condiciones WARN, visibles en los reportes, y usa límites operativos de 0.5% y 10% como condiciones FAIL que detienen la ejecución.
 
 | Suite de Validación | Chequeos Totales | Aprobados | No Aprobados | Informativos (Sin Condición) | Veredicto General |
 | :--- | :---: | :---: | :---: | :---: | :--- |

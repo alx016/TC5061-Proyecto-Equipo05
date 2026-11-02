@@ -251,33 +251,64 @@ def test_data_checks_rejects_invalid_contract(
     assert expected in result.stderr
 
 
-def test_unrun_deepchecks_check_fails_the_gate(tmp_path: Path):
-    """A DeepChecks exception must fail the suite instead of looking successful."""
+def run_in_data_checks_env(tmp_path: Path, body: str) -> subprocess.CompletedProcess:
+    """Run `body` in the script's isolated environment with the script loaded as `module`."""
     metadata = SCRIPT_PATH.read_text().split("# ///", 2)[0:2]
-    script = tmp_path / "check_failure.py"
+    script = tmp_path / "data_checks_probe.py"
     script.write_text(
         "# ///".join(metadata)
         + "# ///\n"
         + textwrap.dedent(
             f"""
             import importlib.util
-            from pathlib import Path
-            from deepchecks.core.check_result import CheckFailure
-            from deepchecks.core.suite import SuiteResult
-            from deepchecks.tabular.checks import DataDuplicates
 
             spec = importlib.util.spec_from_file_location('data_checks', {str(SCRIPT_PATH)!r})
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            result = SuiteResult('broken', [CheckFailure(DataDuplicates(), ValueError('broken'))])
-            summary = module.save_suite_summary(result, Path('broken.html'), Path('broken.json'))
-            assert summary['passed'] is False
-            assert summary['not_run_checks'] == ['Data Duplicates']
-            assert module.print_summary([summary]) == 1
             """
         )
+        + textwrap.dedent(body)
     )
-    result = subprocess.run(
+    return subprocess.run(
         ["uv", "run", str(script)], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+
+
+def test_unrun_deepchecks_check_fails_the_gate(tmp_path: Path):
+    """A DeepChecks exception must fail the suite instead of looking successful."""
+    result = run_in_data_checks_env(
+        tmp_path,
+        """
+        from pathlib import Path
+        from deepchecks.core.check_result import CheckFailure
+        from deepchecks.core.suite import SuiteResult
+        from deepchecks.tabular.checks import DataDuplicates
+
+        result = SuiteResult('broken', [CheckFailure(DataDuplicates(), ValueError('broken'))])
+        summary = module.save_suite_summary(result, Path('broken.html'), Path('broken.json'))
+        assert summary['passed'] is False
+        assert summary['not_run_checks'] == ['Data Duplicates']
+        assert module.print_summary([summary]) == 1
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_tiered_ratio_condition_passes_warns_and_fails(tmp_path: Path):
+    """Ratios up to the original threshold pass, up to the operational limit warn, then fail."""
+    result = run_in_data_checks_env(
+        tmp_path,
+        """
+        from deepchecks.core import ConditionCategory
+
+        def category(ratio):
+            value = {'ratio': ratio}
+            return module._tiered_ratio_condition(value, 'ratio', 0.05, 0.10).category
+
+        assert category(0.05) == ConditionCategory.PASS
+        assert category(0.0675) == ConditionCategory.WARN
+        assert category(0.10) == ConditionCategory.WARN
+        assert category(0.1001) == ConditionCategory.FAIL
+        """,
     )
     assert result.returncode == 0, result.stderr

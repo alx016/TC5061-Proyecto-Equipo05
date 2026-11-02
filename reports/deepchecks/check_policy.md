@@ -50,7 +50,7 @@ Esta política formaliza las reglas, métricas, umbrales y criterios de severida
 | **Columnas Univaluadas** | `SingleValueColumn` | 0 columnas constantes | Ninguna predictora puede ser invariable a lo largo del año. | **ALTA** | Bloquear pipeline. |
 | **Pureza de Tipos** | `MixedDataTypes` | 0 columnas con tipos mixtos | Cada columna debe tener un tipo primitivo estricto (float, int o datetime). | **CRÍTICA** | Bloquear pipeline. |
 | **Caracteres Especiales** | `SpecialCharacters` | Ratio anómalo $\le 0.1\%$ | Cero cadenas corruptas o caracteres invisibles. | **ALTA** | Bloquear pipeline. |
-| **Etiquetas Conflictivas** | `ConflictingLabels` | Límite operativo $\le 0.5\%$ | Cualquier resultado mayor que cero se informa como alerta y la causa aún debe investigarse. | **MEDIA** | Bloquear si supera 0.5% y revisar también alertas menores. |
+| **Etiquetas Conflictivas** | `ConflictingLabels` | WARN si ratio $> 0.0\%$ (umbral original); FAIL si ratio $> 0.5\%$ (límite operativo) | El WARN queda en el reporte HTML/JSON y no detiene la ejecución; la causa aún debe investigarse. | **MEDIA** | Bloquear si supera 0.5% y revisar cualquier WARN. |
 
 ---
 
@@ -67,7 +67,7 @@ Para acotar el costo se configura `n_samples=50000` en la suite train/test. El m
 | **Drift de Predictoras Numéricas** | `FeatureDrift` | Prueba Kolmogorov-Smirnov (KS) | Estadístico KS $< 0.20$ | Alerta individual: evalúa si una feature específica requiere calibración. |
 | **Drift de Predictoras Categóricas** | `FeatureDrift` | V de Cramér | V de Cramér $< 0.20$ | Alerta individual de distribución temporal. |
 | **Drift de Etiqueta Objetivo** | `LabelDrift` | V de Cramér en `target` | V de Cramér $< 0.15$ | Alerta prioritaria: evalúa si cambió la prevalencia del riesgo operativo. |
-| **Mezcla de muestras (Samples Mix)** | `TrainTestSamplesMix` | Filas con predictores y etiqueta idénticos entre muestras de train y test | Límite operativo $\le 10.0\%$ | Alerta por encima de 5% y bloquear por encima de 10%. La explicación por vectores nocturnos es una hipótesis pendiente de comprobación. |
+| **Mezcla de muestras (Samples Mix)** | `TrainTestSamplesMix` | Filas con predictores y etiqueta idénticos entre muestras de train y test | WARN si ratio $> 5.0\%$ (umbral original); FAIL si ratio $> 10.0\%$ (límite operativo) | El WARN queda en el reporte HTML/JSON y no detiene la ejecución. La explicación por vectores nocturnos es una hipótesis pendiente de comprobación. |
 
 ---
 

@@ -15,6 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
+from deepchecks.core import ConditionCategory, ConditionResult
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.checks import (
     ConflictingLabels,
@@ -62,9 +63,11 @@ FEATURE_COLUMNS = [
 
 CATEGORICAL_LIST = ["day_of_week", "is_weekend", "is_holiday"]
 DEFAULT_REPORTS_DIR = PROJ_ROOT / "reports" / "deepchecks"
-MAX_CONFLICT_RATIO = 0.005
-MAX_SAMPLES_MIX_RATIO = 0.10
-SAMPLES_MIX_ALERT_RATIO = 0.05
+# Original thresholds warn; the operational limits in check_policy.md fail the suite.
+CONFLICT_WARN_RATIO = 0.0
+CONFLICT_FAIL_RATIO = 0.005
+SAMPLES_MIX_WARN_RATIO = 0.05
+SAMPLES_MIX_FAIL_RATIO = 0.10
 
 
 def validate_input_schema(df: pd.DataFrame) -> None:
@@ -98,6 +101,19 @@ def validate_input_schema(df: pd.DataFrame) -> None:
         raise ValueError("train and test targets must contain only labels 0, 1 or 2")
 
 
+def _tiered_ratio_condition(
+    value: dict, key: str, warn_ratio: float, fail_ratio: float
+) -> ConditionResult:
+    """Pass up to warn_ratio, warn up to fail_ratio, and fail above it."""
+    ratio = value[key]
+    details = f"Ratio: {ratio:.2%} (warn > {warn_ratio:.1%}, fail > {fail_ratio:.1%})"
+    if ratio > fail_ratio:
+        return ConditionResult(ConditionCategory.FAIL, details)
+    if ratio > warn_ratio:
+        return ConditionResult(ConditionCategory.WARN, details)
+    return ConditionResult(ConditionCategory.PASS, details)
+
+
 def _check_result_name(cr) -> str:
     """Extract clean human-readable name from DeepChecks CheckResult."""
     header = getattr(cr, "header", None)
@@ -123,8 +139,15 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     print(f"Report saved to {html_path}")
 
     raw_json = json.loads(result.to_json(with_display=False))
-    passed_checks = [_check_result_name(c) for c in result.get_passed_checks()]
-    not_passed_checks = [_check_result_name(c) for c in result.get_not_passed_checks()]
+    # Warnings are reported but only FAIL conditions and unrun checks fail the suite.
+    passed = result.get_passed_checks(fail_if_warning=False)
+    passed_checks = [_check_result_name(c) for c in passed]
+    warned_checks = [
+        _check_result_name(c) for c in passed if not c.passed_conditions(fail_if_warning=True)
+    ]
+    not_passed_checks = [
+        _check_result_name(c) for c in result.get_not_passed_checks(fail_if_warning=False)
+    ]
     not_run_checks = [_check_result_name(c) for c in result.get_not_ran_checks()]
 
     check_summaries = []
@@ -155,12 +178,13 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
 
     summary = {
         "suite_name": raw_json.get("name", getattr(result, "name", "suite")),
-        "passed": bool(result.passed(fail_if_check_not_run=True)),
+        "passed": bool(result.passed(fail_if_warning=False, fail_if_check_not_run=True)),
         "total_checks": len(raw_json.get("results", [])),
         "passed_checks_count": len(passed_checks),
         "failed_checks_count": len(not_passed_checks),
         "passed_checks": passed_checks,
         "failed_checks": not_passed_checks,
+        "warned_checks": warned_checks,
         "not_run_checks": not_run_checks,
         "check_summaries": check_summaries,
         "raw": raw_json,
@@ -200,7 +224,14 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
             check.add_condition_ratio_less_or_equal(0)
         elif isinstance(check, ConflictingLabels):
             check.clean_conditions()
-            check.add_condition_ratio_of_conflicting_labels_less_or_equal(MAX_CONFLICT_RATIO)
+            check.add_condition(
+                f"Ratio of conflicting labels warns above {CONFLICT_WARN_RATIO:.0%} "
+                f"and fails above {CONFLICT_FAIL_RATIO:.1%}",
+                _tiered_ratio_condition,
+                key="percent_of_conflicting_samples",
+                warn_ratio=CONFLICT_WARN_RATIO,
+                fail_ratio=CONFLICT_FAIL_RATIO,
+            )
         elif isinstance(check, FeatureFeatureCorrelation):
             check.clean_conditions()
             check.add_condition_max_number_of_pairs_above_threshold(threshold=0.9, n_pairs=0)
@@ -249,7 +280,14 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
             check.add_condition_leakage_ratio_less_or_equal(0)
         elif isinstance(check, TrainTestSamplesMix):
             check.clean_conditions()
-            check.add_condition_duplicates_ratio_less_or_equal(MAX_SAMPLES_MIX_RATIO)
+            check.add_condition(
+                f"Ratio of test samples found in train warns above {SAMPLES_MIX_WARN_RATIO:.0%} "
+                f"and fails above {SAMPLES_MIX_FAIL_RATIO:.0%}",
+                _tiered_ratio_condition,
+                key="ratio",
+                warn_ratio=SAMPLES_MIX_WARN_RATIO,
+                fail_ratio=SAMPLES_MIX_FAIL_RATIO,
+            )
 
     result = suite.run(train_dataset=train_ds, test_dataset=test_ds)
     html_path = output_dir / "train_test_drift.html"
@@ -275,21 +313,9 @@ def print_summary(summaries: list[dict]) -> int:
         for name in summary["not_run_checks"]:
             print(f"    - check no ejecutado: {name}")
         for check in summary["check_summaries"]:
-            value = check.get("value")
-            if not isinstance(value, dict):
-                continue
-            if check.get("header") == "Conflicting Labels":
-                ratio = value.get("percent_of_conflicting_samples")
-                if isinstance(ratio, (int, float)) and ratio > 0:
-                    print(
-                        f"    - alerta: etiquetas conflictivas {ratio:.2%} (límite {MAX_CONFLICT_RATIO:.1%})"
-                    )
-            if check.get("header") == "Train Test Samples Mix":
-                ratio = value.get("ratio")
-                if isinstance(ratio, (int, float)) and ratio > SAMPLES_MIX_ALERT_RATIO:
-                    print(
-                        f"    - alerta: mezcla train/test {ratio:.2%} (límite {MAX_SAMPLES_MIX_RATIO:.0%})"
-                    )
+            for condition in check["conditions"]:
+                if condition["status"] == "WARN":
+                    print(f"    - advertencia: {check['header']}: {condition['details']}")
         failed_suites += 0 if summary["passed"] else 1
     if failed_suites:
         print(
