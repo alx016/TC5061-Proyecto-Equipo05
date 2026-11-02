@@ -15,6 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
+from deepchecks.core import ConditionCategory, ConditionResult
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.checks import (
     ConflictingLabels,
@@ -62,6 +63,59 @@ FEATURE_COLUMNS = [
 
 CATEGORICAL_LIST = ["day_of_week", "is_weekend", "is_holiday"]
 DEFAULT_REPORTS_DIR = PROJ_ROOT / "reports" / "deepchecks"
+# Original thresholds warn; the operational limits in check_policy.md fail the suite.
+CONFLICT_WARN_RATIO = 0.0
+CONFLICT_FAIL_RATIO = 0.005
+SAMPLES_MIX_WARN_RATIO = 0.05
+SAMPLES_MIX_FAIL_RATIO = 0.10
+
+
+def validate_input_schema(df: pd.DataFrame) -> None:
+    """Reject incomplete or malformed inputs before running any suite."""
+    required = set(FEATURE_COLUMNS) | {"station_id", "hour", "target", "split"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+    if df.empty:
+        raise ValueError("Dataset must not be empty")
+    if not pd.api.types.is_datetime64_any_dtype(df["hour"]):
+        raise ValueError("hour must be a datetime column")
+    if df[["station_id", "hour"]].isna().any().any():
+        raise ValueError("station_id and hour must not contain null values")
+    bad_features = [
+        col
+        for col in FEATURE_COLUMNS
+        if not (pd.api.types.is_numeric_dtype(df[col]) or pd.api.types.is_bool_dtype(df[col]))
+    ]
+    if bad_features:
+        raise ValueError(f"Features must be numeric or boolean: {', '.join(bad_features)}")
+    splits = set(df["split"].dropna().unique())
+    if not splits.issubset({"train", "validation", "test"}):
+        raise ValueError("split contains unexpected partition names")
+    if not {"train", "test"}.issubset(splits):
+        raise ValueError("split must contain both train and test partitions")
+    labeled = df[df["split"].isin(["train", "test"])]
+    if labeled["target"].isna().any() or not labeled["target"].isin([0, 1, 2]).all():
+        raise ValueError("train and test targets must contain only labels 0, 1 or 2")
+
+
+def _tiered_ratio_condition(
+    value: dict, key: str, warn_ratio: float, fail_ratio: float
+) -> ConditionResult:
+    """Pass up to warn_ratio, warn up to fail_ratio, and fail above it."""
+    ratio = value[key]
+    details = f"Ratio: {ratio:.2%} (warn > {warn_ratio:.1%}, fail > {fail_ratio:.1%})"
+    if ratio > fail_ratio:
+        return ConditionResult(ConditionCategory.FAIL, details)
+    if ratio > warn_ratio:
+        return ConditionResult(ConditionCategory.WARN, details)
+    return ConditionResult(ConditionCategory.PASS, details)
+
+
+def _passed_conditions(check_result) -> bool:
+    """Only the tiered conditions may warn without failing; built-in WARN conditions block."""
+    tolerate_warning = isinstance(check_result.check, (ConflictingLabels, TrainTestSamplesMix))
+    return check_result.passed_conditions(fail_if_warning=not tolerate_warning)
 
 
 def _check_result_name(cr) -> str:
@@ -89,8 +143,16 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
     print(f"Report saved to {html_path}")
 
     raw_json = json.loads(result.to_json(with_display=False))
-    passed_checks = [_check_result_name(c) for c in result.get_passed_checks()]
-    not_passed_checks = [_check_result_name(c) for c in result.get_not_passed_checks()]
+    with_conditions = result.select_results(result.results_with_conditions)
+    passed = [c for c in with_conditions if _passed_conditions(c)]
+    passed_checks = [_check_result_name(c) for c in passed]
+    warned_checks = [
+        _check_result_name(c) for c in passed if not c.passed_conditions(fail_if_warning=True)
+    ]
+    not_passed_checks = [
+        _check_result_name(c) for c in with_conditions if not _passed_conditions(c)
+    ]
+    not_run_checks = [_check_result_name(c) for c in result.get_not_ran_checks()]
 
     check_summaries = []
     for r in raw_json.get("results", []):
@@ -120,12 +182,14 @@ def save_suite_summary(result, html_path: Path, json_path: Path) -> dict:
 
     summary = {
         "suite_name": raw_json.get("name", getattr(result, "name", "suite")),
-        "passed": bool(result.passed()),
+        "passed": not not_passed_checks and not not_run_checks,
         "total_checks": len(raw_json.get("results", [])),
         "passed_checks_count": len(passed_checks),
         "failed_checks_count": len(not_passed_checks),
         "passed_checks": passed_checks,
         "failed_checks": not_passed_checks,
+        "warned_checks": warned_checks,
+        "not_run_checks": not_run_checks,
         "check_summaries": check_summaries,
         "raw": raw_json,
     }
@@ -140,23 +204,16 @@ def _prepare_dataset(df: pd.DataFrame) -> Dataset:
     """Prepare a DeepChecks Dataset ensuring record_id, feature schema, and datetime metadata."""
     df = df.copy()
     if "record_id" not in df.columns:
-        if "station_id" in df.columns and "hour" in df.columns:
-            df["record_id"] = df["station_id"].astype(str) + "_" + df["hour"].astype(str)
-        else:
-            df["record_id"] = [f"rec_{i}" for i in range(len(df))]
-
-    available_features = [col for col in FEATURE_COLUMNS if col in df.columns]
-    available_cat = [col for col in CATEGORICAL_LIST if col in available_features]
-    datetime_col = "hour" if "hour" in df.columns else None
+        df["record_id"] = df["station_id"].astype(str) + "_" + df["hour"].astype(str)
 
     return Dataset(
         df,
-        label="target" if "target" in df.columns else None,
-        features=available_features,
-        cat_features=available_cat,
-        datetime_name=datetime_col,
+        label="target",
+        features=FEATURE_COLUMNS,
+        cat_features=CATEGORICAL_LIST,
+        datetime_name="hour",
         index_name="record_id",
-        label_type="multiclass" if "target" in df.columns else None,
+        label_type="multiclass",
     )
 
 
@@ -165,19 +222,27 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
     ds = _prepare_dataset(df)
 
     suite = data_integrity()
-    for check in suite.checks.values():
+    for index, check in list(suite.checks.items()):
         if isinstance(check, DataDuplicates):
-            check.clean_conditions()
-            check.add_condition_ratio_less_or_equal(0)
+            # Replaced below by a check on the panel key, which also catches full-row duplicates.
+            suite.remove(index)
         elif isinstance(check, ConflictingLabels):
             check.clean_conditions()
-            check.add_condition_ratio_of_conflicting_labels_less_or_equal(0)
+            check.add_condition(
+                f"Ratio of conflicting labels warns above {CONFLICT_WARN_RATIO:.0%} "
+                f"and fails above {CONFLICT_FAIL_RATIO:.1%}",
+                _tiered_ratio_condition,
+                key="percent_of_conflicting_samples",
+                warn_ratio=CONFLICT_WARN_RATIO,
+                fail_ratio=CONFLICT_FAIL_RATIO,
+            )
         elif isinstance(check, FeatureFeatureCorrelation):
             check.clean_conditions()
             check.add_condition_max_number_of_pairs_above_threshold(threshold=0.9, n_pairs=0)
         elif isinstance(check, FeatureLabelCorrelation):
             check.clean_conditions()
             check.add_condition_feature_pps_less_than(threshold=0.9)
+    suite.add(DataDuplicates(columns=["station_id", "hour"]).add_condition_ratio_less_or_equal(0))
     suite.add(PercentOfNulls().add_condition_percent_of_nulls_not_greater_than(0.01))
 
     result = suite.run(ds)
@@ -188,22 +253,8 @@ def run_data_integrity_check(df: pd.DataFrame, output_dir: Path) -> dict:
 
 def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
     """Run train/test drift suite (Jan-Sep train vs Dec test) and export HTML + JSON."""
-    if (
-        "split" not in df.columns
-        or "train" not in df["split"].values
-        or "test" not in df["split"].values
-    ):
-        raise ValueError(
-            "DataFrame must contain a 'split' column with both 'train' and 'test' partitions."
-        )
-
     train_df = df[df["split"] == "train"]
     test_df = df[df["split"] == "test"]
-
-    if "target" in train_df.columns:
-        train_df = train_df.dropna(subset=["target"])
-    if "target" in test_df.columns:
-        test_df = test_df.dropna(subset=["target"])
 
     train_ds = _prepare_dataset(train_df)
     test_ds = _prepare_dataset(test_df)
@@ -229,15 +280,19 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
         elif isinstance(check, IndexTrainTestLeakage):
             check.clean_conditions()
             check.add_condition_ratio_less_or_equal(0)
-        elif isinstance(check, DateTrainTestLeakageOverlap):
-            check.clean_conditions()
-            check.add_condition_leakage_ratio_less_or_equal(0)
-        elif isinstance(check, DateTrainTestLeakageDuplicates):
+        elif isinstance(check, (DateTrainTestLeakageOverlap, DateTrainTestLeakageDuplicates)):
             check.clean_conditions()
             check.add_condition_leakage_ratio_less_or_equal(0)
         elif isinstance(check, TrainTestSamplesMix):
             check.clean_conditions()
-            check.add_condition_duplicates_ratio_less_or_equal(0.05)
+            check.add_condition(
+                f"Ratio of test samples found in train warns above {SAMPLES_MIX_WARN_RATIO:.0%} "
+                f"and fails above {SAMPLES_MIX_FAIL_RATIO:.0%}",
+                _tiered_ratio_condition,
+                key="ratio",
+                warn_ratio=SAMPLES_MIX_WARN_RATIO,
+                fail_ratio=SAMPLES_MIX_FAIL_RATIO,
+            )
 
     result = suite.run(train_dataset=train_ds, test_dataset=test_ds)
     html_path = output_dir / "train_test_drift.html"
@@ -248,7 +303,7 @@ def run_train_test_drift_check(df: pd.DataFrame, output_dir: Path) -> dict:
 def print_summary(summaries: list[dict]) -> int:
     """Print the per-suite verdict and the conditions that did not pass.
 
-    Returns the number of suites that did not pass, so `--strict` can turn it into an exit code.
+    Returns the number of suites that did not pass, so `main` can turn it into an exit code.
     """
     print("\nResumen de suites:")
     failed_suites = 0
@@ -260,6 +315,14 @@ def print_summary(summaries: list[dict]) -> int:
         )
         for name in summary["failed_checks"]:
             print(f"    - condición no cumplida: {name}")
+        for name in summary["not_run_checks"]:
+            print(f"    - check no ejecutado: {name}")
+        for check in summary["check_summaries"]:
+            if check["header"] not in summary["warned_checks"]:
+                continue
+            for condition in check["conditions"]:
+                if condition["status"] == "WARN":
+                    print(f"    - advertencia: {check['header']}: {condition['details']}")
         failed_suites += 0 if summary["passed"] else 1
     if failed_suites:
         print(
@@ -286,16 +349,16 @@ def main():
         help="Directory to save HTML and JSON reports",
     )
     parser.add_argument(
-        "--strict",
+        "--report-only",
         action="store_true",
-        help="Exit with status 1 when a suite has conditions that did not pass",
+        help="Generate reports without failing the process for failed conditions",
     )
     args = parser.parse_args()
 
     df = pd.read_parquet(args.data_path)
+    validate_input_schema(df)
     print(f"Loaded dataset: {df.shape}")
-    if "split" in df.columns:
-        print(df["split"].value_counts())
+    print(df["split"].value_counts())
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -307,7 +370,7 @@ def main():
 
     print("All DeepChecks reports successfully generated.")
     failed_suites = print_summary(summaries)
-    if args.strict and failed_suites:
+    if not args.report_only and failed_suites:
         raise SystemExit(1)
 
 

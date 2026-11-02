@@ -250,41 +250,24 @@ antes de ejecutar DeepChecks.
 
 ### Pruebas (pytest)
 
-`make test` corre `uv run pytest tests` (263 pruebas, entre 8 y 15 minutos según la máquina).
-Las pruebas usan datos sintéticos y un tracking de MLflow temporal (SQLite en una carpeta
-temporal), así que no necesitan `data/` ni el servidor local. La primera corrida necesita red,
-porque `tests/test_data_checks.py` levanta con `uv` el entorno aislado de
-`scripts/data_checks.py`. `tests/test_reproducibility.py` entrena dos veces con la misma
-semilla y verifica que los resultados son idénticos: predicciones en P1, probabilidades en P2
-y etiquetas de cluster en P3. También verifica que en P2 una semilla distinta cambia las
-probabilidades del Random Forest.
-Además de los casos normales, las pruebas cubren casos límite: 53 verificaciones con
-`pytest.raises` en 11 archivos comprueban que el código rechaza entradas inválidas, por
-ejemplo una URL que no es `https` en la descarga de datos.
+`make test` corre `uv run pytest tests`. Las pruebas usan datos sintéticos y un tracking temporal de MLflow, por lo que no necesitan los datos del proyecto ni el servidor local. La primera corrida necesita conexión para crear el entorno aislado de DeepChecks. También se comprueba que el entrenamiento con la misma semilla produzca los mismos resultados en los modelos de regresión, clasificación y clustering. Las pruebas incluyen casos normales y entradas inválidas.
 
 ### Validación de datos (DeepChecks)
 
-`make data-checks` ejecuta `scripts/data_checks.py` sobre las features de P2
-(`data/processed/classification_features.parquet`) con dos suites: `data_integrity` y
-`train_test_drift` (train de enero a septiembre contra test de diciembre). Cada check tiene
-una condición explícita, descrita en `reports/deepchecks/check_policy.md`, y el script imprime
-al final el veredicto de cada suite con las condiciones que no se cumplieron.
+`make data-checks` ejecuta las suites de integridad y de comparación entre entrenamiento y prueba sobre las features de P2. Antes de ejecutar los chequeos valida las columnas, los tipos, las particiones y las etiquetas.
 
-Con los datos de 2024 el resultado **no es todo verde**, y es lo esperado: `data_integrity` no
-cumple `Conflicting Labels` (0.3% de vectores idénticos con etiqueta distinta) y
-`train_test_drift` no cumple `Train Test Samples Mix` (6.75% de las muestras de diciembre
-aparecen también en entrenamiento). Ambas están analizadas en
-`reports/deepchecks/hallazgos.md`. Por eso el script termina con código 0 aunque haya
-condiciones sin cumplir; para que un fallo corte la ejecución, por ejemplo en CI, se usa
-`uv run scripts/data_checks.py --strict`.
+En la corrida con los datos de 2024 encontramos 0.30% de etiquetas conflictivas y 6.75% de muestras con las mismas características y etiqueta en entrenamiento y prueba. Ambos superan los umbrales originales de 0% y 5%, por lo que aparecen como advertencias (WARN) en los reportes y en la consola, pero quedan dentro de los límites operativos de 0.5% y 10%, que son los que detienen la ejecución (FAIL). El comando termina con error si se supera alguno de los límites, falla otra condición o no se puede ejecutar un chequeo. Los detalles están en `reports/deepchecks/hallazgos.md` y `reports/deepchecks/check_policy.md`. Para generar los reportes sin detener la ejecución por una condición fallida se puede usar `uv run scripts/data_checks.py --report-only`.
 
 Los reportes HTML y JSON se escriben en `reports/deepchecks/` y no se versionan: se regeneran
 con el comando. La evidencia queda en `hallazgos.md`, en `check_policy.md` y en la captura de
 abajo.
 
 El script corre en un entorno aislado (PEP 723, Python 3.12), porque deepchecks no es
-compatible con la versión de scikit-learn del proyecto. Los avisos de `pkg_resources` al
-ejecutarlo son esperados.
+compatible con la versión de scikit-learn del proyecto. Por eso la validación vive en
+`scripts/data_checks.py` y no dentro de `tc5061_proyecto_equipo5/`: necesita Python 3.12 y
+versiones anteriores de numpy, pandas y scikit-learn, que no se pueden instalar junto con las
+del proyecto, y dentro del paquete quedaría un módulo que no se puede importar. Los avisos de
+`pkg_resources` al ejecutarlo son esperados.
 
 ### Seguridad
 
@@ -308,13 +291,13 @@ para hacerlo queda documentado en `resultados.md`.
 
 ### Evidencia
 
-Capturas de la sesión de validación, con el comando que produjo cada una:
+En la última revisión, `make test` terminó con 275 pruebas aprobadas, y `make security` y `make data-checks` también terminaron correctamente. Capturas de la sesión de validación, con el comando que produjo cada una:
 
-- `uv run pytest -q --disable-warnings` → 263 passed
+- `uv run pytest -q --disable-warnings` → 275 passed
   ![pytest](reports/figures/entrega3/01-pytest.png)
 - `make security` → bandit sin hallazgos y pip-audit sin vulnerabilidades
   ![make security](reports/figures/entrega3/03-security.png)
-- reporte HTML de `make data-checks` → `Train Test Samples Mix` no cumplida
+- reporte HTML de `make data-checks` → `Train Test Samples Mix` con advertencia (6.75%: WARN arriba de 5%, FAIL arriba de 10%)
   ![DeepChecks train/test drift](reports/figures/entrega3/02-deepchecks.png)
 - `make help` → targets disponibles
   ![make help](reports/figures/entrega3/04-make-help.png)

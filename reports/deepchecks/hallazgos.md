@@ -25,12 +25,14 @@ Se implementó y ejecutó el protocolo de validación tabular mediante la suite 
 
 ## 2. Resumen Ejecutivo de Resultados
 
+La tabla muestra la corrida con los umbrales originales de 0% y 5%. La política actual conserva esos umbrales como condiciones WARN, visibles en los reportes, y usa límites operativos de 0.5% y 10% como condiciones FAIL que detienen la ejecución.
+
 | Suite de Validación | Chequeos Totales | Aprobados | No Aprobados | Informativos (Sin Condición) | Veredicto General |
 | :--- | :---: | :---: | :---: | :---: | :--- |
 | **Data Integrity** | 13 | 11 | 1* | 1 | **Aprobado con observaciones operativas** |
 | **Train/Test Drift** | 12 | 11 | 1* | 0 | **Estable (Drift controlado dentro de tolerancias)** |
 
-*\*Los chequeos con alerta corresponden a condiciones naturales del dominio de movilidad compartida (ambigüedad en horas valle y repetición de vectores estáticos en la madrugada), detallados a continuación.*
+*\*Los dos resultados excedieron los umbrales de diagnóstico originales. Las posibles causas descritas abajo son hipótesis, no una causa raíz demostrada. La política documenta límites operativos acotados y las alertas siguen visibles y requieren revisión.*
 
 ---
 
@@ -55,10 +57,12 @@ El reporte interactivo completo se regenera con `make data-checks` en `reports/d
 | **Outlier Sample Detection** | Diagnóstico LoOP (muestras atípicas) | Diagnóstico informativo sin condición | **INFO** |
 
 ### Análisis de Hallazgos en Integridad
-1. **Ausencia estricta de duplicados**: La clave compuesta (`station_id`, `hour`) garantiza unicidad exacta en el panel.
+1. **Duplicados**: El chequeo de filas no detectó duplicados en la corrida registrada. Desde la versión actual, `Data Duplicates` evalúa la clave compuesta (`station_id`, `hour`), así que una clave repetida aparece en el reporte y detiene la ejecución.
 2. **Nulos controlados por diseño de rezagos**: El único predictor que presenta nulos es `net_flow_lag24` (0.25%, exactamente las primeras 24 horas del año requeridas para inicializar el historial), cumpliendo holgadamente el umbral de $<1.0\%$.
-3. **Muestras con etiquetas conflictivas (0.3%)**: En horas de inactividad nocturna (ej. 03:00 a 04:00 hrs), estaciones de baja afluencia registran flujos cero y rezagos cero. Si ocurre una intervención manual de rebalanceo de camiones o un viaje atípico aislado, el estado futuro puede variar entre balance normal y saturación a pesar de tener rezagos estáticos en cero. Esto refleja ruido estocástico real del servicio y no corrupción de datos.
-4. **Chequeo informativo de anomalías (`Outlier Sample Detection`)**: Se evalúa mediante el algoritmo LoOP (Local Outlier Probabilities). Al ser un análisis puramente exploratorio en DeepChecks, se ejecuta sin condiciones de aprobación o fallo binario (`conditions: []`), por lo que no altera la tasa de éxito técnico.
+3. **Muestras con etiquetas conflictivas (0.3%)**: Una hipótesis es que vectores iguales de flujos y rezagos puedan preceder resultados distintos. También podrían existir errores en datos o etiquetas. Los resultados disponibles no identifican la causa. Deben inspeccionarse los grupos conflictivos y contrastarse con la fuente antes de descartarlos como ruido.
+4. **Chequeo informativo de anomalías (`Outlier Sample Detection`)**: Se evalúa mediante el algoritmo LoOP (Local Outlier Probabilities). Al ser un análisis puramente exploratorio en DeepChecks, se ejecuta sin condiciones de aprobación o fallo binario, por lo que no altera la tasa de éxito técnico.
+
+Al revisar los resultados históricos encontramos 1,215 grupos con características iguales. De ellos, 1,145 tienen más de una etiqueta no nula y 70 incluyen una etiqueta ausente. La mayoría de las filas corresponde a las 05:00 o 06:00 y el 91.6% tiene cero llegadas y salidas en el primer rezago. Esto apunta a periodos de baja actividad, aunque no explica por sí solo las diferencias en las etiquetas.
 
 ---
 
@@ -79,10 +83,10 @@ El reporte interactivo completo se regenera con `make data-checks` en `reports/d
 | **Multivariate Drift** | Drift value = 0.15 (AUC = 0.57) | Drift value $< 0.25$ | **PASS** |
 | **Feature Drift** | Max KS 0.03, Max Cramer V 0.06 | Scores $< 0.20$ | **PASS** |
 | **Label Drift** | Cramer's V = 0.02 | Score $< 0.15$ | **PASS** |
-| **Train Test Samples Mix** | 6.75% vectores idénticos | Umbral por defecto $\le 5.0\%$ | **Alerta (6.75%)** |
+| **Train Test Samples Mix** | 6.75% filas idénticas de predictores y etiqueta | Umbral original $\le 5.0\%$ | **Alerta (6.75%)** |
 
 ### 4.1 Aislamiento y Fuga Temporal (Leakage)
-- **Date Train-Test Leakage (Overlap)**: **0.0% fuga (PASS)**. No existe solapamiento temporal entre la ventana de entrenamiento (1 enero al 30 septiembre) y la de evaluación (1 diciembre al 31 diciembre).
+- **Date Train-Test Leakage (Overlap)**: **0.0% solapamiento detectado (PASS)**. Las particiones se asignan por la fecha de la etiqueta (`hour + 1h`). Las horas de entrada de prueba empiezan el 30 de noviembre a las 23:00.
 - **Date Train-Test Leakage (Duplicates)**: **0.0% fechas duplicadas (PASS)**.
 - **Relación de tamaños (Size Ratio)**: 0.11 (266,352 filas de test vs. 2,353,850 filas de train), consistente con una proporción esperada de 1 mes contra 9 meses.
 
@@ -90,7 +94,7 @@ El reporte interactivo completo se regenera con `make data-checks` en `reports/d
 - **Multivariate Drift (Domain Classifier)**:
   - **Métrica observada**: Drift value = 0.15 (AUC de clasificador de dominio = 0.57).
   - **Umbral**: Drift value $< 0.25$.
-  - **Interpretación**: Un clasificador supervisado entrenado para discriminar si una muestra proviene de Ene-Sep o de Diciembre apenas alcanza un AUC de 0.57 (cercano al azar 0.50). La distribución conjunta de predictoras se mantiene muy estable entre estaciones del año.
+  - **Interpretación**: En la muestra evaluada, el clasificador que distingue entrenamiento y prueba obtuvo un AUC cercano a 0.57, próximo al azar (0.50). Este resultado por sí solo no garantiza estabilidad para todos los periodos o segmentos.
 
 ### 4.3 Drift de Características Individuales (Feature Drift)
 El 100% de las 18 variables predictoras aprobó la condición de estabilidad (score $< 0.20$):
@@ -114,13 +118,14 @@ El 100% de las 18 variables predictoras aprobó la condición de estabilidad (sc
 - **Veredicto**: **PASS**. La prevalencia relativa de desbalances operativos (eventos raros de falta o saturación) se conserva casi idéntica en diciembre frente al periodo base anual.
 
 ### 4.5 Mezcla de Muestras (Train Test Samples Mix)
-- **Métrica observada**: 6.75% de las muestras de prueba contienen un vector de predictoras idéntico al de alguna muestra en entrenamiento (umbral por defecto de DeepChecks: 5.0%).
-- **Causa raíz**: En el sistema MiBici, de 00:00 a 05:00 horas casi todas las estaciones presentan 0 viajes continuos, lo que genera vectores estáticos de rezagos nulos con coordenadas y capacidad fijas. Esta redundancia nocturna esperada eleva ligeramente la similitud de filas sin representar fuga de información ni alteración de causalidad temporal.
+- **Métrica observada**: 6.75% de las muestras de prueba evaluadas tienen predictores y etiqueta idénticos a alguna muestra de entrenamiento evaluada (umbral original: 5.0%). DeepChecks incluye la etiqueta en esta comparación, así que no cuantifica todas las coincidencias de predictores con etiquetas distintas.
+- **Hipótesis pendiente de comprobar**: La repetición podría deberse a periodos de baja actividad y características estáticas de estación. La coincidencia de predictores por sí sola no demuestra fuga, pero tampoco la descarta. Hay que examinar filas coincidentes y la construcción temporal de cada variable.
+- **Revisión adicional**: Encontramos 2,586 combinaciones distintas que aparecen en ambas muestras. Todas tienen etiqueta 0 y el 99.6% tiene cero llegadas y salidas en el primer rezago. Esto apoya la hipótesis de baja actividad, pero no explica la causa de todos los casos.
 
 ---
 
 ## 5. Conclusiones y Recomendaciones de Modelado
 
-1. **Aptitud del Conjunto para Entrenamiento Fuera de Tiempo**: La partición temporal Ene-Sep (train) y Diciembre (test) demuestra ser rigurosa, no presentar filtraciones temporales y exhibir un drift marginal que no compromete la capacidad predictiva de los modelos de Machine Learning.
-2. **Capacidad de Generalización**: El clasificador de dominio con AUC de 0.57 y las distancias KS inferiores a 0.03 confirman que las relaciones funcionales aprendidas durante los primeros meses del año conservan su validez durante el cierre anual.
+1. **Partición temporal**: Los chequeos de fechas no detectaron solapamiento en la corrida documentada. Esto no descarta otros tipos de fuga en las variables o etiquetas.
+2. **Generalización**: Las métricas de drift describen diferencias de distribución en la muestra evaluada. No prueban que el modelo mantenga su desempeño. La capacidad predictiva debe medirse con métricas de clasificación sobre datos de prueba reservados y por segmentos relevantes.
 3. **Trazabilidad de Reportes**: Tanto los reportes gráficos en HTML para inspección humana como los archivos JSON estandarizados para automatización se regeneran con `make data-checks` en `reports/deepchecks/`; este documento y `check_policy.md` sí se versionan.
