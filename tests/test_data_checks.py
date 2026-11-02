@@ -13,8 +13,13 @@ SCRIPT_PATH = PROJ_ROOT / "scripts" / "data_checks.py"
 
 @pytest.fixture
 def synthetic_classification_parquet(tmp_path: Path) -> Path:
-    """Generate a valid synthetic classification features dataset for testing."""
-    n_samples = 200
+    """Generate a valid synthetic dataset that passes every condition of both suites.
+
+    Six whole weeks keep hours and weekdays balanced between the chronological partitions
+    (four weeks of train, two of test), and one holiday in each keeps is_holiday variable.
+    """
+    n_samples = 24 * 7 * 6
+    n_train = 24 * 7 * 4
     dates = pd.date_range("2024-01-01", periods=n_samples, freq="h")
 
     rng = np.random.default_rng(42)
@@ -29,7 +34,7 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
             "hour_cos": np.cos(2 * np.pi * dates.hour / 24.0),
             "day_of_week": dates.dayofweek.astype(int),
             "is_weekend": (dates.dayofweek >= 5).astype(int),
-            "is_holiday": np.zeros(n_samples, dtype=int),
+            "is_holiday": np.isin(dates.dayofyear, [3, 31]).astype(int),
             "neighbor_net_flow": rng.normal(0, 1.5, size=n_samples),
             "net_flow_lag1": rng.normal(0, 1.0, size=n_samples),
             "net_flow_lag2": rng.normal(0, 1.0, size=n_samples),
@@ -41,7 +46,7 @@ def synthetic_classification_parquet(tmp_path: Path) -> Path:
             "departures_lag2": rng.poisson(2, size=n_samples).astype(float),
             "departures_lag3": rng.poisson(2, size=n_samples).astype(float),
             "target": rng.choice([0, 1, 2], size=n_samples, p=[0.8, 0.1, 0.1]),
-            "split": ["train"] * 160 + ["test"] * 40,
+            "split": ["train"] * n_train + ["test"] * (n_samples - n_train),
         }
     )
 
@@ -74,75 +79,66 @@ def run_data_checks_script(
     )
 
 
+# Checks from check_policy.md that a clean run must evaluate and pass, per report file
+EXPECTED_PASSED_CHECKS = {
+    "data_integrity": (
+        "Data Integrity Suite",
+        [
+            "Data Duplicates",
+            "PercentOfNulls",
+            "Single Value in Column",
+            "Mixed Data Types",
+            "Special Characters",
+            "Conflicting Labels",
+        ],
+    ),
+    "train_test_drift": (
+        "train_test_drift",
+        [
+            "Feature Drift",
+            "Label Drift",
+            "Multivariate Drift",
+            "Train Test Samples Mix",
+            "Date Train-Test Leakage (overlap)",
+            "Index Train-Test Leakage",
+        ],
+    ),
+}
+
+
 @pytest.mark.slow
 def test_data_checks_execution_on_synthetic_data(
     synthetic_classification_parquet: Path, tmp_path: Path
 ):
-    """Execute scripts/data_checks.py via subprocess on synthetic data and verify JSON/HTML."""
+    """A clean dataset must pass every condition of both suites and exit with status 0."""
     output_dir = tmp_path / "deepchecks_reports"
 
-    result = run_data_checks_script(synthetic_classification_parquet, output_dir, report_only=True)
+    result = run_data_checks_script(synthetic_classification_parquet, output_dir)
 
     assert result.returncode == 0, (
         f"Execution failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
 
-    integrity_html = output_dir / "data_integrity.html"
-    integrity_json = output_dir / "data_integrity.json"
-    drift_html = output_dir / "train_test_drift.html"
-    drift_json = output_dir / "train_test_drift.json"
+    for report, (suite_name, expected_checks) in EXPECTED_PASSED_CHECKS.items():
+        assert (output_dir / f"{report}.html").exists(), f"{report}.html was not generated"
+        with open(output_dir / f"{report}.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    assert integrity_html.exists(), "data_integrity.html was not generated"
-    assert integrity_json.exists(), "data_integrity.json was not generated"
-    assert drift_html.exists(), "train_test_drift.html was not generated"
-    assert drift_json.exists(), "train_test_drift.json was not generated"
+        assert data["suite_name"] == suite_name
+        assert data["passed"] is True
+        assert data["failed_checks"] == []
+        assert data["warned_checks"] == []
+        assert data["not_run_checks"] == []
+        assert all(
+            isinstance(c, str) and not c.startswith("<bound method") for c in data["passed_checks"]
+        )
+        assert set(expected_checks) <= set(data["passed_checks"])
 
-    # Verify JSON content and structure for Data Integrity
-    with open(integrity_json, "r", encoding="utf-8") as f:
-        integrity_data = json.load(f)
-
-    assert integrity_data["suite_name"] == "Data Integrity Suite"
-    assert integrity_data["total_checks"] > 0
-    assert "passed_checks" in integrity_data
-    assert "failed_checks" in integrity_data
-    assert None not in integrity_data["passed_checks"]
-    assert None not in integrity_data["failed_checks"]
-    assert all(
-        isinstance(c, str) and not c.startswith("<bound method")
-        for c in integrity_data["passed_checks"]
-    )
-    assert all(
-        isinstance(c, str) and not c.startswith("<bound method")
-        for c in integrity_data["failed_checks"]
-    )
-    assert "check_summaries" in integrity_data
-    assert len(integrity_data["check_summaries"]) == integrity_data["total_checks"]
-
-    # Verify JSON content and structure for Train/Test Drift
-    with open(drift_json, "r", encoding="utf-8") as f:
-        drift_data = json.load(f)
-
-    assert drift_data["suite_name"] == "train_test_drift"
-    assert drift_data["total_checks"] > 0
-    assert "passed_checks" in drift_data
-    assert "failed_checks" in drift_data
-    assert None not in drift_data["passed_checks"]
-    assert None not in drift_data["failed_checks"]
-    assert all(
-        isinstance(c, str) and not c.startswith("<bound method")
-        for c in drift_data["passed_checks"]
-    )
-    assert all(
-        isinstance(c, str) and not c.startswith("<bound method")
-        for c in drift_data["failed_checks"]
-    )
-    assert "check_summaries" in drift_data
-    assert len(drift_data["check_summaries"]) == drift_data["total_checks"]
-
-    drift_headers = [cs["header"] for cs in drift_data["check_summaries"]]
-    assert "Feature Drift" in drift_headers
-    assert "Label Drift" in drift_headers
-    assert "Multivariate Drift" in drift_headers
+        assert len(data["check_summaries"]) == data["total_checks"]
+        with_conditions = [cs for cs in data["check_summaries"] if cs["conditions"]]
+        assert data["passed_checks_count"] == len(with_conditions)
+        for cs in with_conditions:
+            assert all(c["status"] == "PASS" for c in cs["conditions"]), cs["header"]
 
 
 @pytest.mark.slow
