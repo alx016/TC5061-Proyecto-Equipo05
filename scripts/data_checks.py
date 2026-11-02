@@ -79,6 +79,8 @@ def validate_input_schema(df: pd.DataFrame) -> None:
         raise ValueError("hour must be a datetime column")
     if df[["station_id", "hour"]].isna().any().any():
         raise ValueError("station_id and hour must not contain null values")
+    if df.duplicated(["station_id", "hour"]).any():
+        raise ValueError("station_id and hour must identify a single row")
     bad_features = [
         col
         for col in FEATURE_COLUMNS

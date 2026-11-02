@@ -57,7 +57,7 @@ El reporte interactivo completo se regenera con `make data-checks` en `reports/d
 | **Outlier Sample Detection** | Diagnóstico LoOP (muestras atípicas) | Diagnóstico informativo sin condición | **INFO** |
 
 ### Análisis de Hallazgos en Integridad
-1. **Duplicados**: El chequeo de filas no detectó duplicados en la corrida registrada. Esto no demuestra por sí solo la unicidad de la clave compuesta (`station_id`, `hour`).
+1. **Duplicados**: El chequeo de filas no detectó duplicados en la corrida registrada. La unicidad de la clave compuesta (`station_id`, `hour`) se valida aparte en `scripts/data_checks.py` antes de ejecutar las suites.
 2. **Nulos controlados por diseño de rezagos**: El único predictor que presenta nulos es `net_flow_lag24` (0.25%, exactamente las primeras 24 horas del año requeridas para inicializar el historial), cumpliendo holgadamente el umbral de $<1.0\%$.
 3. **Muestras con etiquetas conflictivas (0.3%)**: Una hipótesis es que vectores iguales de flujos y rezagos puedan preceder resultados distintos. También podrían existir errores en datos o etiquetas. Los resultados disponibles no identifican la causa. Deben inspeccionarse los grupos conflictivos y contrastarse con la fuente antes de descartarlos como ruido.
 4. **Chequeo informativo de anomalías (`Outlier Sample Detection`)**: Se evalúa mediante el algoritmo LoOP (Local Outlier Probabilities). Al ser un análisis puramente exploratorio en DeepChecks, se ejecuta sin condiciones de aprobación o fallo binario, por lo que no altera la tasa de éxito técnico.

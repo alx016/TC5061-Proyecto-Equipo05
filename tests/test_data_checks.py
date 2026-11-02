@@ -151,17 +151,17 @@ def test_data_checks_execution_on_synthetic_data(
 def test_data_checks_detects_injected_defects(
     synthetic_classification_parquet: Path, tmp_path: Path
 ):
-    """Verify that data_integrity detects deliberately injected duplicates and excess nulls."""
+    """Verify that data_integrity detects deliberately injected excess nulls.
+
+    Duplicate rows are rejected earlier by the key check, covered by the
+    duplicate_key case of test_data_checks_rejects_invalid_contract.
+    """
     df = pd.read_parquet(synthetic_classification_parquet)
 
     df_defective = df.copy()
 
     # Inject excess nulls (> 1%) in arrivals_lag1
     df_defective.loc[:30, "arrivals_lag1"] = np.nan
-
-    # Inject duplicate rows
-    dupes = df_defective.iloc[50:70].copy()
-    df_defective = pd.concat([df_defective, dupes], ignore_index=True)
 
     defective_parquet = tmp_path / "defective_features.parquet"
     df_defective.to_parquet(defective_parquet, engine="pyarrow", compression="zstd", index=False)
@@ -174,15 +174,6 @@ def test_data_checks_detects_injected_defects(
         integrity_data = json.load(f)
 
     assert integrity_data["passed"] is False
-
-    # Verify that Data Duplicates detected the injected duplicates
-    duplicate_check = next(
-        (cs for cs in integrity_data["check_summaries"] if cs["header"] == "Data Duplicates"),
-        None,
-    )
-    assert duplicate_check is not None
-    assert duplicate_check["value"] > 0
-    assert any(c["status"] in ("FAIL", "WARN") for c in duplicate_check["conditions"])
 
     # Verify that PercentOfNulls failed condition
     null_check = next(
@@ -232,7 +223,8 @@ def test_data_checks_rejects_missing_required_columns(
 
 
 @pytest.mark.parametrize(
-    "defect", ["invalid_target", "missing_test", "invalid_hour", "invalid_split"]
+    "defect",
+    ["invalid_target", "missing_test", "invalid_hour", "invalid_split", "duplicate_key"],
 )
 def test_data_checks_rejects_invalid_contract(
     synthetic_classification_parquet: Path, tmp_path: Path, defect: str
@@ -247,6 +239,10 @@ def test_data_checks_rejects_invalid_contract(
     elif defect == "invalid_hour":
         df["hour"] = df["hour"].astype(str)
         expected = "hour must be a datetime column"
+    elif defect == "duplicate_key":
+        df.loc[1, "station_id"] = df.loc[0, "station_id"]
+        df.loc[1, "hour"] = df.loc[0, "hour"]
+        expected = "station_id and hour must identify a single row"
     else:
         df.loc[0, "split"] = "unexpected"
         expected = "split contains unexpected partition names"
