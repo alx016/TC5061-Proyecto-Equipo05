@@ -139,41 +139,56 @@ cambio, se platica en el chat del equipo antes de hacerlo y se actualiza esta se
 
 ## 3. Paquetes de trabajo
 
+**Nadie espera a WP-D para empezar.** `fastapi` (0.143.3), `uvicorn` (0.54.0) y `pydantic` ya
+están instalados porque los trae `mlflow`, y `httpx` (para `TestClient`) lo trae `jupyterlab`.
+WP-1 y WP-2 pueden programar y correr la API desde hoy. WP-D solo declara esos paquetes en
+grupos con las mismas versiones, y lo único que lo necesita es el build de la imagen (WP-3).
+
 | WP | Responsable | Revisa | Entregable | Horas |
 |:---|:---|:---|:---|:---:|
-| WP-D Dependencias | Fernando | Manuel | PR propio, lunes o martes, antes del Containerfile: grupos en `pyproject.toml`, `default-groups`, `python_env.yaml` recortado igual que `dependencies` (lo exige `tests/test_dependencies.py`), `uv.lock` regenerado y `make test` y `make security` en verde. Avisar al equipo que corra `uv sync` | 1.5 |
-| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py` y `make export-model`. El archivo de metadatos lleva nombre, versión, `source_run_id`, `git_commit`, `data_version` y los umbrales `threshold_shortage` y `threshold_saturation` del run. Compartir `models/p2-riesgo/` con el equipo (4.7b) y confirmar las unidades de `net_flow_lag*` (sección 2, punto 5) | 3 |
-| WP-1 API | Manuel | Oscar | `api/model.py` y `api/main.py`, dependencias `fastapi` y `uvicorn` en `pyproject.toml` y `uv.lock`, `make api` (uvicorn local). Reemplazar o borrar `modeling/predict.py` | 4 |
-| WP-2 Esquemas y pruebas | Emilio | Manuel | `api/schemas.py` con los rangos tomados de los datos, y `tests/test_api.py` (casos válidos, 422 por campo faltante, extra o fuera de rango, lote vacío o demasiado grande, 503 sin modelo) con un modelo falso | 4 |
-| WP-3 Contenedor | Fernando | Emilio | `Containerfile` (slim, `libgomp1`, usuario sin root, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore`, `make image`, `make container` y `make smoke` (`curl` a `/health` y a `/predict`). `MLFLOW_HOST` en `make mlflow-server` y prueba de la opción A (4.3). Probar con Podman y con Docker | 5 |
-| WP-4 README y evidencia | Manuel | Fernando | Sección "API y contenedor (Entrega 4)": prerrequisitos, decisiones 4.2 (modelo en la imagen) y 4.3 (alternativa con Registry en vivo y sus pasos), comandos, petición y respuesta reales, estrategia de despliegue, capturas en `reports/figures/entrega4/` y tabla de integrantes actualizada | 3 |
-| WP-5 Prueba en otra máquina | Emilio | Oscar | En una máquina distinta al host, clonar `main`, generar las features de P2, entrenar y registrar con `mlflow run` (semillas fijas), correr `make export-model`, construir la imagen y correr `make smoke`. Comparar las métricas y una predicción contra las del champion de Oscar. Esta es la evidencia de reproducibilidad del criterio de 30% | 2.5 |
+| WP-D Dependencias | Fernando | Manuel | Grupos en `pyproject.toml` (`notebooks`, `docs`, `dev`, `api`) y `default-groups`. `fastapi==0.143.3` y `uvicorn==0.54.0` en `api` y `httpx` en `dev`, con las versiones que ya están en `uv.lock`. `python_env.yaml` recortado igual que `dependencies` (lo exige `tests/test_dependencies.py`). `uv.lock` regenerado y `make test` y `make security` en verde. Avisar al equipo que corra `uv sync` | 1.5 |
+| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py`: descarga el modelo a `models/p2-riesgo/` y escribe el archivo de metadatos (nombre, versión, `source_run_id`, `git_commit`, `data_version`, `threshold_shortage`, `threshold_saturation`). Compartir la carpeta (4.7b) y confirmar las unidades de `net_flow_lag*` (sección 2, punto 5) | 3 |
+| WP-1 API | Manuel | Oscar | `api/__init__.py`, `api/model.py` (carga `MODEL_URI` y los metadatos, convierte a los tipos de la firma, aplica los umbrales con `apply_thresholds` y toma el orden de las clases de `model.get_raw_model().classes_`) y `api/main.py` (endpoints, con el modelo inyectado por una dependencia de FastAPI que las pruebas reemplazan con `app.dependency_overrides`). Reemplazar o borrar `modeling/predict.py` | 4 |
+| WP-2 Esquemas y pruebas | Emilio | Manuel | **2a:** `api/schemas.py` y `tests/test_schemas.py` (válidos, campo faltante, extra, fuera de rango, `is_weekend` incoherente, lote vacío o de 501). **2b**, cuando se mergea WP-1: `tests/test_api.py` con un modelo falso (200, 422, 503 y la forma de la respuesta) | 4 |
+| WP-3 Contenedor y Makefile | Fernando | Emilio | **3a:** `Containerfile` (slim, `libgomp1`, usuario sin root, `uv sync --frozen --no-dev --group api`, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore` y **todos los targets nuevos del Makefile**: `export-model`, `api`, `image`, `container`, `smoke` y `MLFLOW_HOST` en `mlflow-server`. **3b:** build con el modelo real, `make smoke` en verde, prueba de la opción A (4.3) y prueba con Docker | 5 |
+| WP-4 README y evidencia | Manuel | Fernando | Sección "API y contenedor (Entrega 4)": prerrequisitos (`podman machine`), decisiones 4.2 y 4.3, comandos, petición y respuesta reales, estrategia de despliegue (4.5), capturas en `reports/figures/entrega4/` y tabla de integrantes actualizada | 3 |
+| WP-5 Prueba en otra máquina | Emilio | Oscar | En una máquina distinta al host, clonar `main`, generar las features de P2, entrenar y registrar con `mlflow run` (semillas fijas), correr `make export-model`, construir la imagen y correr `make smoke`. Comparar métricas y una predicción contra el champion de Oscar. Esta es la evidencia de reproducibilidad del criterio de 30% | 2.5 |
 
 Así cada integrante tiene al menos un PR propio y una revisión, que es lo que pide el criterio de
-Git. A Emilio le toca WP-2 y WP-5 para equilibrar sus commits.
+Git.
 
-**Dependencias**
+**Un dueño por archivo**, para que los PR en paralelo no choquen:
 
-- WP-1 y WP-2 empiezan el lunes en paralelo, con el contrato de la sección 2.
-- WP-1 puede probar con cualquier run local de P2 mientras WP-0 termina.
-- WP-D va primero porque cambia `uv.lock`: WP-1 agrega FastAPI sobre el grupo `api` y WP-3 lo
-  instala en la imagen.
-- WP-3 necesita `models/p2-riesgo/` (WP-0) y la app (WP-1).
-- WP-4 necesita la imagen funcionando (WP-3) para copiar la respuesta real.
+| Archivo | Dueño |
+|:---|:---|
+| `pyproject.toml`, `uv.lock`, `python_env.yaml` | WP-D (Fernando) |
+| `Makefile`, `Containerfile`, `.containerignore` | WP-3 (Fernando). Los demás le pasan el comando que necesitan y mientras tanto usan `uv run ...` |
+| `scripts/export_model.py` | WP-0 (Oscar) |
+| `api/model.py`, `api/main.py`, `modeling/predict.py` | WP-1 (Manuel) |
+| `api/schemas.py`, `tests/test_schemas.py`, `tests/test_api.py` | WP-2 (Emilio) |
+| `README.md`, `reports/figures/entrega4/` | WP-4 (Manuel) |
+
+**Dependencias reales**
+
+- WP-1 importa las clases de `schemas.py`. Mientras Emilio no las sube, Manuel trabaja con el
+  contrato de la sección 2, y el que haga merge después ajusta los imports.
+- WP-1 prueba con cualquier run local de P2 hasta que WP-0 comparte el champion.
+- 2b necesita `main.py` (WP-1). 3b necesita WP-D, WP-0 y WP-1. WP-4 necesita 3b para copiar la
+  respuesta real. WP-5 necesita todo en `main`, pero el entrenamiento puede empezar el jueves.
 
 ---
 
 ## 4. Calendario
 
-| Día | Trabajo | Hito |
-|:---|:---|:---|
-| Lun 2 | Se comparte el plan con el equipo. Fernando empieza WP-D, Oscar WP-0, Manuel WP-1 y Emilio WP-2 | Plan compartido |
-| Mar 3 | WP-0 registra el champion. Termina el primer borrador de WP-1 y WP-2. Fernando arma el Containerfile con un modelo local | Champion de P2 en el Registry y su versión anotada |
-| Mié 4 | `make export-model`. WP-1 y WP-2 se integran y `uv run uvicorn` responde | PR de WP-1 y PR de WP-2 abiertos |
-| Jue 5 | Merge de WP-1 y WP-2. WP-3 construye la imagen con el modelo exportado y `make smoke` pasa | Imagen funcionando en el host |
-| Vie 6 | Merge de WP-3. WP-5 en la máquina de Emilio. Manuel empieza el README | Reproducible en una segunda máquina |
-| Sáb 7 | WP-4: README, capturas, `make test`, `make security`, prueba en amd64. Merge final a `main` | `main` listo para entregar |
-| Dom 8 | Colchón. Recorrer el README desde cero en un clon limpio y enviar | Entregado |
+| Fase | Día | Trabajo | Hito |
+|:---|:---|:---|:---|
+| 1. Arranque en paralelo | Lun 2 | Se comparte el plan. Empiezan WP-D, WP-0, WP-1, 2a y 3a | Plan compartido |
+| | Mar 3 | **Merge de WP-D.** WP-0 registra el champion | Grupos de dependencias en `main`; champion de P2 registrado |
+| | Mié 4 | WP-0 exporta y comparte `models/p2-riesgo/`. PR de 2a y PR de WP-1. PR de 3a con el Containerfile y el Makefile | `uv run uvicorn` responde con el champion |
+| 2. Integración | Jue 5 | Merge de 2a, WP-1 y 3a. 2b escribe `test_api.py`. 3b construye la imagen con el modelo real y `make smoke` pasa. Emilio empieza a entrenar para WP-5 | Imagen funcionando en el host |
+| | Vie 6 | Merge de 2b y 3b. WP-5 construye la imagen y corre `make smoke` en la máquina de Emilio. Manuel empieza el README | Reproducible en una segunda máquina |
+| 3. Cierre | Sáb 7 | WP-4: README, capturas, `make test`, `make security`, prueba en amd64. Merge final a `main` | `main` listo para entregar |
+| | Dom 8 | Colchón. Recorrer el README desde cero en un clon limpio y enviar | Entregado |
 
 ---
 
