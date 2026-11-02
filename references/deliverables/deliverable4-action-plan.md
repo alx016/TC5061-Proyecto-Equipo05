@@ -134,6 +134,32 @@ cambio, se platica en el chat del equipo antes de hacerlo y se actualiza esta se
 
    `PredictResponse` = `{"model_name", "model_version", "thresholds", "predictions": [...]}`.
    Se valida con `response_model`.
+7. **Archivo de metadatos de la exportación.** Lo escribe WP-0 (`export_model.py`) y lo lee
+   WP-1 (`api/model.py`): `models/p2-riesgo/registry_metadata.json`.
+
+   ```json
+   {
+     "model_name": "mibici-equipo05-p2-riesgo",
+     "model_version": "3",
+     "model_alias": "champion",
+     "source_run_id": "<run id>",
+     "git_commit": "<tag git_commit del run>",
+     "data_version": "<param data_version del run>",
+     "thresholds": {"shortage": 0.4, "saturation": 0.95},
+     "exported_at": "2026-11-03T18:00:00Z"
+   }
+   ```
+
+   - **`thresholds` usa las claves `shortage` y `saturation`**, porque JSON solo admite claves
+     de texto, y porque es el mismo formato del resumen de `select` en
+     `train_classification.py`. Los valores salen de los params `threshold_shortage` y
+     `threshold_saturation` del run. La API los convierte a `{1: ..., 2: ...}` para
+     `apply_thresholds`.
+   - **El archivo va dentro de la carpeta del modelo**, junto a `MLmodel`, para que el modelo y
+     su información viajen juntos. MLflow ignora los archivos que no son suyos.
+   - **`model_version` es texto**, como lo devuelve `MlflowClient`.
+   - `git_commit` sale del tag del run y `data_version` del param del run.
+     `/model-info` devuelve este archivo tal cual.
 
 ---
 
@@ -147,7 +173,7 @@ grupos con las mismas versiones, y lo único que lo necesita es el build de la i
 | WP | Responsable | Revisa | Entregable | Horas |
 |:---|:---|:---|:---|:---:|
 | WP-D Dependencias | Fernando | Manuel | Grupos en `pyproject.toml` (`notebooks`, `docs`, `dev`, `api`) y `default-groups`. `fastapi==0.143.3` y `uvicorn==0.54.0` en `api` y `httpx` en `dev`, con las versiones que ya están en `uv.lock`. `python_env.yaml` recortado igual que `dependencies` (lo exige `tests/test_dependencies.py`). `uv.lock` regenerado y `make test` y `make security` en verde. Avisar al equipo que corra `uv sync` | 1.5 |
-| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py`: descarga el modelo a `models/p2-riesgo/` y escribe el archivo de metadatos (nombre, versión, `source_run_id`, `git_commit`, `data_version`, `threshold_shortage`, `threshold_saturation`). Compartir la carpeta (4.7b) y confirmar las unidades de `net_flow_lag*` (sección 2, punto 5) | 3 |
+| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py`: descarga el modelo a `models/p2-riesgo/` y escribe `registry_metadata.json` con el formato de la sección 2, punto 7. Compartir la carpeta (4.7b) y confirmar las unidades de `net_flow_lag*` (sección 2, punto 5) | 3 |
 | WP-1 API | Manuel | Oscar | `api/__init__.py`, `api/model.py` (carga `MODEL_URI` y los metadatos, convierte a los tipos de la firma, aplica los umbrales con `apply_thresholds` y toma el orden de las clases de `model.get_raw_model().classes_`) y `api/main.py` (endpoints, con el modelo inyectado por una dependencia de FastAPI que las pruebas reemplazan con `app.dependency_overrides`). Reemplazar o borrar `modeling/predict.py` | 4 |
 | WP-2 Esquemas y pruebas | Emilio | Manuel | **2a:** `api/schemas.py` y `tests/test_schemas.py` (válidos, campo faltante, extra, fuera de rango, `is_weekend` incoherente, lote vacío o de 501). **2b**, cuando se mergea WP-1: `tests/test_api.py` con un modelo falso (200, 422, 503 y la forma de la respuesta) | 4 |
 | WP-3 Contenedor y Makefile | Fernando | Emilio | **3a:** `Containerfile` (slim, `libgomp1`, usuario sin root, `uv sync --frozen --no-dev --group api`, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore` y **todos los targets nuevos del Makefile**: `export-model`, `api`, `image`, `container`, `smoke` y `MLFLOW_HOST` en `mlflow-server`. **3b:** build con el modelo real, `make smoke` en verde, prueba de la opción A (4.3) y prueba con Docker | 5 |
