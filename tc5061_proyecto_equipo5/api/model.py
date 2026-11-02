@@ -72,7 +72,7 @@ def load_model(uri: str | None = None) -> LoadedModel:
         info = _file_metadata(uri)
     else:
         info = _run_metadata(model.metadata.run_id)
-        
+
     # The metadata names the thresholds; apply_thresholds expects them by class id
     thresholds = {
         1: float(info["thresholds"]["shortage"]),
