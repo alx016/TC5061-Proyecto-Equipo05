@@ -263,8 +263,11 @@ con el comando. La evidencia queda en `hallazgos.md`, en `check_policy.md` y en 
 abajo.
 
 El script corre en un entorno aislado (PEP 723, Python 3.12), porque deepchecks no es
-compatible con la versión de scikit-learn del proyecto. Los avisos de `pkg_resources` al
-ejecutarlo son esperados.
+compatible con la versión de scikit-learn del proyecto. Por eso la validación vive en
+`scripts/data_checks.py` y no dentro de `tc5061_proyecto_equipo5/`: necesita Python 3.12 y
+versiones anteriores de numpy, pandas y scikit-learn, que no se pueden instalar junto con las
+del proyecto, y dentro del paquete quedaría un módulo que no se puede importar. Los avisos de
+`pkg_resources` al ejecutarlo son esperados.
 
 ### Seguridad
 
