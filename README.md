@@ -291,13 +291,13 @@ para hacerlo queda documentado en `resultados.md`.
 
 ### Evidencia
 
-En la última revisión, `make test` terminó con 273 pruebas aprobadas, y `make security` y `make data-checks` también terminaron correctamente. Capturas de la sesión de validación, con el comando que produjo cada una:
+En la última revisión, `make test` terminó con 275 pruebas aprobadas, y `make security` y `make data-checks` también terminaron correctamente. Capturas de la sesión de validación, con el comando que produjo cada una:
 
-- `uv run pytest -q --disable-warnings` → 273 passed
+- `uv run pytest -q --disable-warnings` → 275 passed
   ![pytest](reports/figures/entrega3/01-pytest.png)
 - `make security` → bandit sin hallazgos y pip-audit sin vulnerabilidades
   ![make security](reports/figures/entrega3/03-security.png)
-- reporte HTML de `make data-checks` → `Train Test Samples Mix` cumplida
+- reporte HTML de `make data-checks` → `Train Test Samples Mix` con advertencia (6.75%: WARN arriba de 5%, FAIL arriba de 10%)
   ![DeepChecks train/test drift](reports/figures/entrega3/02-deepchecks.png)
 - `make help` → targets disponibles
   ![make help](reports/figures/entrega3/04-make-help.png)
