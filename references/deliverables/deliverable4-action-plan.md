@@ -8,7 +8,7 @@
 
 ## Registro de decisiones
 
-Cerradas por Manuel el lunes 2 y pendientes de confirmar con el equipo en la reunión de arranque.
+Cerradas por Manuel el lunes 2. No hay reunión de arranque: el equipo empieza a trabajar con estas decisiones y con el contrato de la API (sección 2). Si alguien propone un cambio, se platica en el chat del equipo y se registra aquí.
 
 | # | Decisión | Propuesta |
 |:---|:---|:---|
@@ -56,11 +56,13 @@ Revisión del repositorio al 2 de noviembre (`main` en `71b6c42`, merge del PR #
 5. **Arquitectura.** En una Mac M se construye una imagen arm64. Para que funcione "en cualquier
    entorno" hay que probarla también con `--platform linux/amd64`, o al menos documentar el
    comando.
-6. **La lógica de clases de P2.** El champion decide la clase con umbrales propios
-   (`_labels_from_masks`). La API no debe repetir esa lógica: debe llamar a
-   `pyfunc.predict` y traducir 0/1/2 con `CLASS_NAMES_ES`. Si el champion fuera
-   `PersistenceRiskClassifier`, solo usa `net_flow_lag2`, pero la API pide igual las 18
-   columnas, que son las de la firma.
+6. **Los umbrales de P2 no están dentro del modelo.** El modelo registrado devuelve
+   probabilidades (`pyfunc_predict_fn="predict_proba"`). La clase se decide con dos umbrales
+   calibrados en validación, que se guardan como parámetros del run (`threshold_shortage` y
+   `threshold_saturation`). Por eso `export-model` debe copiar esos umbrales al archivo de
+   metadatos, y la API debe importar `apply_thresholds` y `CLASS_NAMES_ES` de
+   `train_classification.py`, sin reescribir esa lógica. Si no, la API daría otra clase que la
+   que se evaluó en test.
 7. **Podman en macOS** necesita `podman machine init` y `podman machine start`. Va en el README
    como prerrequisito.
 8. **Seguridad (entrega 3).** La imagen corre con un usuario sin privilegios y sin secretos. Las
@@ -83,19 +85,55 @@ Containerfile
 
 **Contrato de la API**
 
-- `GET /health` responde `{"status": "ok"}` cuando el modelo está cargado. Si no, responde 503.
-- `GET /model-info` devuelve nombre, versión, alias, `source_run_id`, `git_commit` y
-  `data_version` (del `MLmodel` o de los tags de la versión). Es la evidencia del criterio de 20%.
-- `POST /predict`: el cuerpo es `{"instances": [StationFeatures, ...]}` con 1 a 500
-  elementos. La respuesta trae una predicción por instancia (`label`, `label_id`,
-  `probabilities` si el modelo las da) y la versión del modelo que respondió.
+Es el acuerdo entre WP-1, WP-2, WP-3 y WP-4 para trabajar en paralelo. Si alguien propone un
+cambio, se platica en el chat del equipo antes de hacerlo y se actualiza esta sección.
 
-**Validación (`StationFeatures`)**: `extra="forbid"`, para que una columna mal escrita falle.
-`capacity > 0`. Latitud y longitud dentro del área de Guadalajara. `hour_sin` y `hour_cos` en
-[-1, 1]. `day_of_week` en 0–6. `is_weekend` e `is_holiday` en {0, 1}. Un validador que
-rechace `is_weekend` inconsistente con `day_of_week`. Llegadas y salidas ≥ 0. Si algo no
-cumple, FastAPI responde 422 con el campo que falló. Los rangos salen de los datos de 2024
-(`classification_features.parquet`) y no se inventan.
+1. **Clases** en `tc5061_proyecto_equipo5/api/schemas.py`: `StationFeatures`, `PredictRequest`,
+   `Prediction`, `PredictResponse` y `ModelInfo`.
+2. **Endpoints**
+   - `GET /health` responde `{"status": "ok"}` cuando el modelo está cargado. Si no, 503.
+   - `GET /model-info` devuelve `model_name`, `model_version`, `source_run_id`, `git_commit`,
+     `data_version` y los umbrales, leídos del archivo de metadatos que escribe
+     `export-model`. Es la evidencia del criterio de 20%.
+   - `POST /predict` recibe `{"instances": [StationFeatures, ...]}` con **1 a 500**
+     elementos. Si el modelo no cargó, responde 503.
+3. **Campos de entrada (`StationFeatures`)**: las 18 `FEATURE_COLUMNS` de
+   `train_classification.py`, con los mismos nombres, más un `station_id` opcional (entero).
+   La API devuelve el `station_id` en la respuesta pero no se lo pasa al modelo: sirve para
+   saber a qué estación corresponde cada predicción de un lote. La API no calcula variables:
+   quien llama manda `hour_sin`, `hour_cos`, etc., ya calculados.
+4. **Tipos.** La firma del modelo usa `capacity` como `int32`, `day_of_week` como `int8`,
+   `is_weekend` e `is_holiday` como `bool` y el resto como `float64`. En el JSON,
+   `is_weekend` e `is_holiday` van como `true`/`false`. `model.py` convierte el DataFrame a
+   los tipos de la firma antes de llamar a `predict`.
+5. **Validación**: `extra="forbid"`, así que una columna mal escrita o de más responde 422.
+   Se rechaza solo lo imposible y se aceptan valores raros pero posibles, para no bloquear,
+   por ejemplo, una estación nueva más grande:
+
+   | Campo | Rango en 2024 | Regla |
+   |:---|:---|:---|
+   | `capacity` | 11–39 | entero > 0 |
+   | `latitude` | 20.64–20.74 | dentro de un recuadro del área metropolitana de Guadalajara con margen (por ejemplo 20.4–21.0) |
+   | `longitude` | −103.42 a −103.30 | ídem (por ejemplo −103.6 a −103.1) |
+   | `hour_sin`, `hour_cos` | −1 a 1 | −1 a 1 |
+   | `day_of_week` | 0–6 (0 = lunes) | 0–6, y `is_weekend` debe ser `day_of_week >= 5` |
+   | `arrivals_lag1..3`, `departures_lag1..3` | 0–125 / 0–86 | ≥ 0, sin máximo |
+   | `net_flow_lag1`, `net_flow_lag2`, `net_flow_lag24`, `neighbor_net_flow` | −1.8 a 2.7 | sin límite (pueden ser negativos) |
+
+   Los rangos salen de `classification_features.parquet`. **Pendiente (Oscar):** confirmar
+   las unidades de `net_flow_lag*` y `neighbor_net_flow`. Por el rango parecen normalizados
+   por capacidad, y el README lo tiene que explicar.
+6. **Salida.** El modelo registrado devuelve probabilidades. La clase se decide con los
+   umbrales del run (ver problema 6): la API usa `apply_thresholds` y `CLASS_NAMES_ES` de
+   `train_classification.py`. Por estación:
+
+   ```json
+   {"station_id": 12, "label": "Riesgo_Desabasto", "label_id": 1,
+    "probabilities": {"Balanceado": 0.31, "Riesgo_Desabasto": 0.58, "Riesgo_Saturacion": 0.11}}
+   ```
+
+   `PredictResponse` = `{"model_name", "model_version", "thresholds", "predictions": [...]}`.
+   Se valida con `response_model`.
 
 ---
 
@@ -104,7 +142,7 @@ cumple, FastAPI responde 422 con el campo que falló. Los rangos salen de los da
 | WP | Responsable | Revisa | Entregable | Horas |
 |:---|:---|:---|:---|:---:|
 | WP-D Dependencias | Fernando | Manuel | PR propio, lunes o martes, antes del Containerfile: grupos en `pyproject.toml`, `default-groups`, `python_env.yaml` recortado igual que `dependencies` (lo exige `tests/test_dependencies.py`), `uv.lock` regenerado y `make test` y `make security` en verde. Avisar al equipo que corra `uv sync` | 1.5 |
-| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py` y `make export-model`. Compartir `models/p2-riesgo/` con el equipo (4.7b) | 3 |
+| WP-0 Champion de P2 | Oscar | Manuel | Entrenar y seleccionar P2 desde `main` limpio, registrarlo con `-P alias=champion` y anotar el run ID, la versión y el commit en el documento del equipo. `scripts/export_model.py` y `make export-model`. El archivo de metadatos lleva nombre, versión, `source_run_id`, `git_commit`, `data_version` y los umbrales `threshold_shortage` y `threshold_saturation` del run. Compartir `models/p2-riesgo/` con el equipo (4.7b) y confirmar las unidades de `net_flow_lag*` (sección 2, punto 5) | 3 |
 | WP-1 API | Manuel | Oscar | `api/model.py` y `api/main.py`, dependencias `fastapi` y `uvicorn` en `pyproject.toml` y `uv.lock`, `make api` (uvicorn local). Reemplazar o borrar `modeling/predict.py` | 4 |
 | WP-2 Esquemas y pruebas | Emilio | Manuel | `api/schemas.py` con los rangos tomados de los datos, y `tests/test_api.py` (casos válidos, 422 por campo faltante, extra o fuera de rango, lote vacío o demasiado grande, 503 sin modelo) con un modelo falso | 4 |
 | WP-3 Contenedor | Fernando | Emilio | `Containerfile` (slim, `libgomp1`, usuario sin root, `HEALTHCHECK`, `EXPOSE 8000`), `.containerignore`, `make image`, `make container` y `make smoke` (`curl` a `/health` y a `/predict`). `MLFLOW_HOST` en `make mlflow-server` y prueba de la opción A (4.3). Probar con Podman y con Docker | 5 |
@@ -116,8 +154,7 @@ Git. A Emilio le toca WP-2 y WP-5 para equilibrar sus commits.
 
 **Dependencias**
 
-- WP-1 y WP-2 empiezan el lunes en paralelo. El contrato de `schemas.py` se acuerda en la
-  reunión.
+- WP-1 y WP-2 empiezan el lunes en paralelo, con el contrato de la sección 2.
 - WP-1 puede probar con cualquier run local de P2 mientras WP-0 termina.
 - WP-D va primero porque cambia `uv.lock`: WP-1 agrega FastAPI sobre el grupo `api` y WP-3 lo
   instala en la imagen.
@@ -130,7 +167,7 @@ Git. A Emilio le toca WP-2 y WP-5 para equilibrar sus commits.
 
 | Día | Trabajo | Hito |
 |:---|:---|:---|
-| Lun 2 | Reunión de 30 min: cerrar 4.1 a 4.7 y el contrato de `schemas.py`. Oscar empieza WP-0, Manuel WP-1 y Emilio WP-2 | Decisiones registradas |
+| Lun 2 | Se comparte el plan con el equipo. Fernando empieza WP-D, Oscar WP-0, Manuel WP-1 y Emilio WP-2 | Plan compartido |
 | Mar 3 | WP-0 registra el champion. Termina el primer borrador de WP-1 y WP-2. Fernando arma el Containerfile con un modelo local | Champion de P2 en el Registry y su versión anotada |
 | Mié 4 | `make export-model`. WP-1 y WP-2 se integran y `uv run uvicorn` responde | PR de WP-1 y PR de WP-2 abiertos |
 | Jue 5 | Merge de WP-1 y WP-2. WP-3 construye la imagen con el modelo exportado y `make smoke` pasa | Imagen funcionando en el host |
