@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import json
 import os
+from pathlib import Path
 
 import mlflow
 from mlflow import MlflowClient
@@ -19,22 +21,45 @@ SIGNATURE_DTYPES = {
     "is_weekend": "bool",
     "is_holiday": "bool",
 }
+METADATA_FILE = "registry_metadata.json"
 
 
 @dataclass(frozen=True)
 class LoadedModel:
     """The loaded model with what the API needs to turn its probabilities into classes."""
 
+    info: dict
     model: mlflow.pyfunc.PyFuncModel
     classes: list[int]
     thresholds: dict[int, float]
 
 
-def _run_thresholds(run_id: str) -> dict[int, float]:
-    """Read the decision thresholds that the training run logged as params."""
+def _run_metadata(run_id: str) -> dict:
+    """Build the export metadata from a training run when there is no exported folder."""
     client = MlflowClient()
-    params = client.get_run(run_id).data.params
-    return {1: float(params["threshold_shortage"]), 2: float(params["threshold_saturation"])}
+    run = client.get_run(run_id)
+    params = run.data.params
+    tags = run.data.tags
+    return {
+        "model_name": None,
+        "model_version": None,
+        "model_alias": None,
+        "exported_at": None,
+        "source_run_id": run_id,
+        "git_commit": tags.get("git_commit"),
+        "data_version": params.get("data_version"),
+        "thresholds": {
+            "shortage": float(params["threshold_shortage"]),
+            "saturation": float(params["threshold_saturation"]),
+        },
+    }
+
+
+def _file_metadata(path: str) -> dict:
+    """Read the metadata that export_model.py saved next to the exported model."""
+    file = Path(path) / METADATA_FILE
+    data = json.loads(file.read_text(encoding="utf-8"))
+    return data
 
 
 def load_model(uri: str | None = None) -> LoadedModel:
@@ -42,8 +67,18 @@ def load_model(uri: str | None = None) -> LoadedModel:
     uri = uri or os.environ.get("MODEL_URI", str(MODELS_DIR / "p2-riesgo"))
     model = mlflow.pyfunc.load_model(uri)
     classes = [int(c) for c in model.get_raw_model().classes_]
-    thresholds = _run_thresholds(model.metadata.run_id)
-    return LoadedModel(model=model, classes=classes, thresholds=thresholds)
+
+    if Path(uri).is_dir():
+        info = _file_metadata(uri)
+    else:
+        info = _run_metadata(model.metadata.run_id)
+        
+    # The metadata names the thresholds; apply_thresholds expects them by class id
+    thresholds = {
+        1: float(info["thresholds"]["shortage"]),
+        2: float(info["thresholds"]["saturation"]),
+    }
+    return LoadedModel(info=info, model=model, classes=classes, thresholds=thresholds)
 
 
 def predict(loaded: LoadedModel, records: list[dict]) -> list[dict]:
