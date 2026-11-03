@@ -11,10 +11,10 @@
 - [x] **TASK-01: Actualización de dependencias y archivo congelado** (WP-D)
 - [x] **TASK-02: Cargador de Model Registry y exportador de bundle local** (WP-0)
 - [x] **TASK-03: Esquemas Pydantic v2 y normalización de variables de dominio** (WP-2 / Ticket 04)
-  - *Evidence*: `tc5061_proyecto_equipo5/api/schemas.py`, `api/schemas.py`, 70 tests pasados en `tests/test_schemas.py`.
+  - *Evidence*: `tc5061_proyecto_equipo5/api/schemas.py`, `api/schemas.py`, 70 tests pasados en `tests/test_schemas.py` (commit `715ee15`).
 - [x] **TASK-04: API FastAPI y rutas de inferencia y observabilidad** (WP-1 / Ticket 03)
 - [x] **TASK-05: Suite de pruebas automatizadas de la API y esquemas** (WP-2 / Ticket 04)
-  - *Evidence*: 93 tests pasados en `pytest tests/test_schemas.py tests/test_api.py`, 368 tests de regresión en verde.
+  - *Evidence*: 93 tests pasados en `pytest tests/test_schemas.py tests/test_api.py`, 368 tests de regresión en verde (commit `715ee15`).
 - [ ] **TASK-06: Contenerización OCI y automatización con Makefile** (WP-3 / Ticket 05)
 - [ ] **TASK-07: Ejecución en contenedor y generación de evidencia** (WP-3 / Ticket 05)
 - [ ] **TASK-08: Documentación completa en README.md** (WP-4 / Ticket 06)
