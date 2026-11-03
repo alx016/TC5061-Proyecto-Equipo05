@@ -1,0 +1,8 @@
+# Only what the image needs gets into the build context
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!tc5061_proyecto_equipo5/
+!models/p2-riesgo/
+**/__pycache__
