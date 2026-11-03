@@ -1,11 +1,43 @@
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from loguru import logger
 
 from tc5061_proyecto_equipo5.api.model import LoadedModel, load_model, predict
 from tc5061_proyecto_equipo5.api.schemas import ModelInfo, PredictRequest, PredictResponse
+
+# A real station from the model's input_example, so "Try it out" in /docs works as is
+PREDICT_EXAMPLES = {
+    "one_station": {
+        "summary": "Una estación, martes a medianoche",
+        "value": {
+            "instances": [
+                {
+                    "station_id": 100,
+                    "capacity": 15,
+                    "latitude": 20.666378,
+                    "longitude": -103.34882,
+                    "hour_sin": 0.0,
+                    "hour_cos": 1.0,
+                    "day_of_week": 1,
+                    "is_weekend": False,
+                    "is_holiday": False,
+                    "neighbor_net_flow": 0.0222222222,
+                    "net_flow_lag1": 0.0,
+                    "net_flow_lag2": 0.0,
+                    "net_flow_lag24": 0.0,
+                    "arrivals_lag1": 0.0,
+                    "arrivals_lag2": 0.0,
+                    "arrivals_lag3": 4.0,
+                    "departures_lag1": 0.0,
+                    "departures_lag2": 0.0,
+                    "departures_lag3": 4.0,
+                }
+            ]
+        },
+    },
+}
 
 
 def get_model(request: Request) -> LoadedModel:
@@ -44,7 +76,7 @@ def model_info(loaded_model: Annotated[LoadedModel, Depends(get_model)]):
 
 @app.post("/predict", response_model=PredictResponse)
 def predict_risk(
-    body: PredictRequest,
+    body: Annotated[PredictRequest, Body(openapi_examples=PREDICT_EXAMPLES)],
     loaded_model: Annotated[LoadedModel, Depends(get_model)],
 ):
     """Classify the risk of each station for the next hour (1 to 500 stations per call)."""
