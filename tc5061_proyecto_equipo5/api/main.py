@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MiBici P2 · Riesgo de estaciones", version="0.1.0", lifespan=lifespan)
+app.state.loaded_model = None
 
 
 @app.get("/health", dependencies=[Depends(get_model)])
@@ -88,8 +89,8 @@ def predict_risk(
         results.append({"station_id": instance.station_id, **prediction})
 
     return {
-        "model_name": loaded_model.info["model_name"],
-        "model_version": loaded_model.info["model_version"],
-        "thresholds": loaded_model.info["thresholds"],
+        "model_name": loaded_model.info.get("model_name"),
+        "model_version": loaded_model.info.get("model_version"),
+        "thresholds": loaded_model.info.get("thresholds", {}),
         "predictions": results,
     }
