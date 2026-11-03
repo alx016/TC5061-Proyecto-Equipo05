@@ -67,7 +67,7 @@ validate-data: data-checks
 .PHONY: security
 security:
 	uv run bandit -q -r tc5061_proyecto_equipo5
-	uv export --quiet --no-dev --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
+	uv export --quiet --no-default-groups --group api --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
 	uv run pip-audit -r /tmp/requirements.txt
 	uv export --quiet --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
 	uv run pip-audit -r /tmp/requirements-full.txt
