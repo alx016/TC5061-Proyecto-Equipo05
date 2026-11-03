@@ -209,6 +209,9 @@ mlflow.db-journal
 # Serialized Models
 models/*.pkl
 
+# P2 export for the API image; regenerate with scripts/export_model.py
+models/p2-riesgo/
+
 # Machine-specific validation outputs; keep scripts and human-readable reports
 /reports/validation/*-suite.txt
 /reports/validation/*-adversarial.txt
