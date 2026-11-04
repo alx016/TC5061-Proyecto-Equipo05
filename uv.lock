@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -2660,67 +2660,86 @@ wheels = [
 name = "tc5061-proyecto-equipo5"
 version = "0.0.1"
 source = { editable = "." }
+default-groups = ["api", "dev", "docs", "notebooks"]
 dependencies = [
-    { name = "folium" },
-    { name = "ipython" },
-    { name = "jupyterlab" },
     { name = "lightgbm" },
     { name = "loguru" },
     { name = "matplotlib" },
-    { name = "mkdocs" },
     { name = "mlflow" },
-    { name = "notebook" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pip" },
     { name = "pyarrow" },
-    { name = "pytest" },
     { name = "python-dotenv" },
-    { name = "ruff" },
     { name = "scikit-learn" },
-    { name = "seaborn" },
     { name = "tqdm" },
     { name = "typer" },
-    { name = "virtualenv" },
 ]
 
 [package.dev-dependencies]
+api = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 dev = [
     { name = "bandit" },
     { name = "detect-secrets" },
+    { name = "httpx" },
+    { name = "pip" },
     { name = "pip-audit" },
+    { name = "pytest" },
+    { name = "pyyaml" },
+    { name = "ruff" },
+    { name = "virtualenv" },
+]
+docs = [
+    { name = "mkdocs" },
+]
+notebooks = [
+    { name = "folium" },
+    { name = "ipython" },
+    { name = "jupyterlab" },
+    { name = "notebook" },
+    { name = "seaborn" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "folium", specifier = "==0.20.0" },
-    { name = "ipython", specifier = "==9.17.1" },
-    { name = "jupyterlab", specifier = "==4.6.4" },
     { name = "lightgbm", specifier = "==4.7.0" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "matplotlib", specifier = "==3.11.2" },
-    { name = "mkdocs", specifier = "==1.6.1" },
     { name = "mlflow", specifier = "==3.17.2" },
-    { name = "notebook", specifier = "==7.6.3" },
     { name = "numpy", specifier = "==2.5.4" },
     { name = "pandas", specifier = "==3.0.6" },
-    { name = "pip", specifier = "==26.2.1" },
     { name = "pyarrow", specifier = "==25.0.1" },
-    { name = "pytest", specifier = "==9.1.1" },
     { name = "python-dotenv", specifier = "==1.2.4" },
-    { name = "ruff", specifier = "==0.17.0" },
     { name = "scikit-learn", specifier = "==1.9.1" },
-    { name = "seaborn", specifier = "==0.13.2" },
     { name = "tqdm", specifier = "==4.70.1" },
     { name = "typer", specifier = "==0.27.3" },
-    { name = "virtualenv", specifier = "==21.14.13" },
 ]
 
 [package.metadata.requires-dev]
+api = [
+    { name = "fastapi", specifier = "==0.143.3" },
+    { name = "uvicorn", specifier = "==0.54.0" },
+]
 dev = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "detect-secrets", specifier = ">=1.5.0" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "pip", specifier = "==26.2.1" },
     { name = "pip-audit", specifier = ">=2.10.1" },
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "ruff", specifier = "==0.17.0" },
+    { name = "virtualenv", specifier = "==21.14.13" },
+]
+docs = [{ name = "mkdocs", specifier = "==1.6.1" }]
+notebooks = [
+    { name = "folium", specifier = "==0.20.0" },
+    { name = "ipython", specifier = "==9.17.1" },
+    { name = "jupyterlab", specifier = "==4.6.4" },
+    { name = "notebook", specifier = "==7.6.3" },
+    { name = "seaborn", specifier = "==0.13.2" },
 ]
 
 [[package]]
