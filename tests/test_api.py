@@ -87,7 +87,9 @@ def test_health_returns_503_when_model_not_loaded(client):
     assert response.json()["detail"] == "Model not loaded; check the API logs"
 
 
-def test_health_returns_503_when_app_state_unloaded():
+def test_health_returns_503_when_app_state_unloaded(monkeypatch, tmp_path):
+    monkeypatch.setenv("MODEL_URI", str(tmp_path / "missing-model"))
+    monkeypatch.setattr("tc5061_proyecto_equipo5.api.model.MODELS_DIR", tmp_path)
     app.dependency_overrides.clear()
     app.state.loaded_model = None
     with TestClient(app, raise_server_exceptions=False) as unconfigured_client:
