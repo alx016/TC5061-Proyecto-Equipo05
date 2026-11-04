@@ -55,6 +55,22 @@ def _run_metadata(run_id: str) -> dict:
     }
 
 
+def _registry_metadata(uri: str, run_id: str) -> dict:
+    """Add the registry name, version and alias to the run metadata for a models:/ URI."""
+    info = _run_metadata(run_id)
+    client = MlflowClient()
+    name, _, alias = uri.removeprefix("models:/").partition("@")
+    if alias:  # models:/<name>@<alias>
+        version = client.get_model_version_by_alias(name, alias)
+        info["model_alias"] = alias
+    else:  # models:/<name>/<version>
+        name, _, number = name.partition("/")
+        version = client.get_model_version(name, number)
+    info["model_name"] = name
+    info["model_version"] = version.version
+    return info
+
+
 def _file_metadata(path: str) -> dict:
     """Read the metadata that export_model.py saved next to the exported model."""
     file = Path(path) / METADATA_FILE
@@ -70,6 +86,8 @@ def load_model(uri: str | None = None) -> LoadedModel:
 
     if Path(uri).is_dir():
         info = _file_metadata(uri)
+    elif uri.startswith("models:/"):
+        info = _registry_metadata(uri, model.metadata.run_id)
     else:
         info = _run_metadata(model.metadata.run_id)
 
