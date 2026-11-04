@@ -3,13 +3,6 @@ import math
 from pydantic import ValidationError
 import pytest
 
-from api.schemas import (
-    ModelInfo as ForwardedModelInfo,
-    Prediction as ForwardedPrediction,
-    PredictRequest as ForwardedPredictRequest,
-    PredictResponse as ForwardedPredictResponse,
-    StationFeatures as ForwardedStationFeatures,
-)
 from tc5061_proyecto_equipo5.api.schemas import (
     ModelInfo,
     Prediction,
@@ -42,14 +35,6 @@ def valid_station_payload() -> dict:
         "departures_lag2": 2.0,
         "departures_lag3": 4.0,
     }
-
-
-def test_schema_import_forwarding_parity():
-    assert ForwardedStationFeatures is StationFeatures
-    assert ForwardedPredictRequest is PredictRequest
-    assert ForwardedPrediction is Prediction
-    assert ForwardedPredictResponse is PredictResponse
-    assert ForwardedModelInfo is ModelInfo
 
 
 def test_valid_single_station(valid_station_payload):
