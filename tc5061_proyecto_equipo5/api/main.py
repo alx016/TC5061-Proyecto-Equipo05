@@ -14,7 +14,7 @@ PREDICT_EXAMPLES = {
         "value": {
             "instances": [
                 {
-                    "station_id": 100,
+                    "station_id": 2,
                     "capacity": 15,
                     "latitude": 20.666378,
                     "longitude": -103.34882,
