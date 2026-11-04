@@ -57,6 +57,7 @@ dev = [
     "pip==26.2.1",
     "pip-audit>=2.10.1",
     "pytest==9.1.1",
+    "pyyaml==6.0.3",
     "ruff==0.17.0",
     "virtualenv==21.14.13",
 ]
