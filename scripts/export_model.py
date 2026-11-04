@@ -8,17 +8,23 @@ Usage:
     uv run python scripts/export_model.py
     uv run python scripts/export_model.py --output-dir /tmp/p2-riesgo
 
-Set ``MLFLOW_TRACKING_URI`` when the registry is not the local tracking store.
+``MLFLOW_TRACKING_URI`` is read from the environment; when it is unset and the
+champion's files live behind the server's artifact proxy, the project ``.env`` is
+used as a fallback.  Models registered through ``make mlflow-server`` need that
+server running during the export.
 """
 
 import argparse
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
 from typing import Any
+from urllib.parse import urlparse
 
+from dotenv import dotenv_values
 import mlflow
 from mlflow.tracking import MlflowClient
 
@@ -72,6 +78,28 @@ def build_metadata(client: MlflowClient, model_name: str, alias: str) -> dict:
     }
 
 
+def _download_tracking_uri(client: MlflowClient, model_name: str, version: str) -> str | None:
+    """Return the HTTP tracking URI proxied artifacts need, or None for local files."""
+    download_uri = client.get_model_version_download_uri(model_name, version)
+    if urlparse(download_uri).scheme != "mlflow-artifacts":
+        return None
+    tracking_uri = mlflow.get_tracking_uri()
+    if urlparse(tracking_uri).scheme in {"http", "https"}:
+        return tracking_uri
+    # Fall back to the project .env only for proxied artifacts, so exports backed by
+    # local mlruns keep working without a running server.  An exported URI still wins.
+    if "MLFLOW_TRACKING_URI" not in os.environ:
+        from_env = dotenv_values(PROJ_ROOT / ".env").get("MLFLOW_TRACKING_URI")
+        if from_env and urlparse(from_env).scheme in {"http", "https"}:
+            return from_env
+    raise ValueError(
+        f"Model {model_name} v{version} is stored in the MLflow server ({download_uri}), "
+        f"but MLFLOW_TRACKING_URI is {tracking_uri!r}. Start the server with "
+        "`make mlflow-server` and set MLFLOW_TRACKING_URI=http://127.0.0.1:5001 "
+        "in the environment or in .env before exporting."
+    )
+
+
 def _validate_staged_model(staged: Path) -> None:
     """Fail before replacing a good export when the download is incomplete or corrupt."""
     missing = [name for name in REQUIRED_MODEL_FILES if not (staged / name).is_file()]
@@ -110,6 +138,7 @@ def export_model(
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     client = client or MlflowClient()
     metadata = build_metadata(client, model_name, alias)
+    tracking_uri = _download_tracking_uri(client, model_name, metadata["model_version"])
 
     # Download by concrete version (immutable), not by alias.
     with tempfile.TemporaryDirectory(dir=output_dir.parent) as staging:
@@ -117,6 +146,7 @@ def export_model(
         mlflow.artifacts.download_artifacts(
             artifact_uri=f"models:/{model_name}/{metadata['model_version']}",
             dst_path=str(staged),
+            tracking_uri=tracking_uri,
         )
         _validate_staged_model(staged)
         (staged / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2) + "\n")

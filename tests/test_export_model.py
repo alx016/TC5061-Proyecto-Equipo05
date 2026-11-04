@@ -38,11 +38,18 @@ def fake_run(*, tags: dict | None = None, params: dict | None = None) -> SimpleN
 
 
 class FakeClient:
-    def __init__(self, version: SimpleNamespace | None = None, run: SimpleNamespace | None = None):
+    def __init__(
+        self,
+        version: SimpleNamespace | None = None,
+        run: SimpleNamespace | None = None,
+        download_uri: str = "/tmp/model",
+    ):
         self.version = version or fake_version()
         self.run = run or fake_run()
+        self.download_uri = download_uri
         self.alias_calls: list[tuple[str, str]] = []
         self.run_calls: list[str] = []
+        self.download_uri_calls: list[tuple[str, str]] = []
 
     def get_model_version_by_alias(self, model_name: str, alias: str) -> SimpleNamespace:
         self.alias_calls.append((model_name, alias))
@@ -52,12 +59,23 @@ class FakeClient:
         self.run_calls.append(run_id)
         return self.run
 
+    def get_model_version_download_uri(self, model_name: str, version: str) -> str:
+        self.download_uri_calls.append((model_name, version))
+        return self.download_uri
 
-def fake_download(calls: list[str], *, complete: bool = True):
+
+def fake_download(
+    calls: list[str],
+    *,
+    complete: bool = True,
+    tracking_uris: list[str | None] | None = None,
+):
     """Write the files a real MLflow download would leave in ``dst_path``."""
 
-    def download(artifact_uri: str, dst_path: str) -> None:
+    def download(artifact_uri: str, dst_path: str, tracking_uri: str | None = None) -> None:
         calls.append(artifact_uri)
+        if tracking_uris is not None:
+            tracking_uris.append(tracking_uri)
         path = Path(dst_path)
         path.mkdir(parents=True, exist_ok=True)
         if complete:
@@ -67,10 +85,20 @@ def fake_download(calls: list[str], *, complete: bool = True):
     return download
 
 
-def patch_download(monkeypatch, calls: list[str], *, complete: bool = True) -> None:
+def patch_download(
+    monkeypatch,
+    calls: list[str],
+    *,
+    complete: bool = True,
+    tracking_uris: list[str | None] | None = None,
+) -> None:
     """Resolve MLflow's lazy module once, then replace its downloader."""
     artifacts = importlib.import_module("mlflow.artifacts")
-    monkeypatch.setattr(artifacts, "download_artifacts", fake_download(calls, complete=complete))
+    monkeypatch.setattr(
+        artifacts,
+        "download_artifacts",
+        fake_download(calls, complete=complete, tracking_uris=tracking_uris),
+    )
 
 
 def patch_load(monkeypatch, loader) -> None:
@@ -151,6 +179,72 @@ def test_export_model_downloads_the_concrete_version_and_writes_metadata(tmp_pat
     assert (output_dir / "model.pkl").is_file()
     assert json.loads((output_dir / export_model.METADATA_FILENAME).read_text()) == metadata
     assert not (output_dir.parent / ".p2-riesgo.backup").exists()
+
+
+def test_export_model_downloads_proxied_artifacts_through_the_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_model.mlflow, "get_tracking_uri", lambda: "http://127.0.0.1:5001")
+    output_dir = tmp_path / "p2-riesgo"
+    downloads: list[str] = []
+    tracking_uris: list[str | None] = []
+    patch_download(monkeypatch, downloads, tracking_uris=tracking_uris)
+    patch_load(monkeypatch, lambda uri: object())
+    client = FakeClient(download_uri="mlflow-artifacts:/1/models/m-x/artifacts")
+
+    export_model.export_model(MODEL_NAME, ALIAS, output_dir, client=client)
+
+    assert client.download_uri_calls == [(MODEL_NAME, "3")]
+    assert downloads == [f"models:/{MODEL_NAME}/3"]
+    assert tracking_uris == ["http://127.0.0.1:5001"]
+    assert (output_dir / export_model.METADATA_FILENAME).is_file()
+
+
+def test_export_model_uses_the_dotenv_server_for_proxied_artifacts(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("MLFLOW_TRACKING_URI=http://127.0.0.1:5001\n", encoding="utf-8")
+    monkeypatch.setattr(export_model, "PROJ_ROOT", tmp_path)
+    monkeypatch.setattr(export_model.mlflow, "get_tracking_uri", lambda: "sqlite:///mlflow.db")
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    output_dir = tmp_path / "p2-riesgo"
+    downloads: list[str] = []
+    tracking_uris: list[str | None] = []
+    patch_download(monkeypatch, downloads, tracking_uris=tracking_uris)
+    patch_load(monkeypatch, lambda uri: object())
+    client = FakeClient(download_uri="mlflow-artifacts:/1/models/m-x/artifacts")
+
+    export_model.export_model(MODEL_NAME, ALIAS, output_dir, client=client)
+
+    assert tracking_uris == ["http://127.0.0.1:5001"]
+    assert (output_dir / export_model.METADATA_FILENAME).is_file()
+
+
+def test_export_model_rejects_proxied_artifacts_without_a_server_uri(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_model, "PROJ_ROOT", tmp_path)  # no .env in this project
+    monkeypatch.setattr(export_model.mlflow, "get_tracking_uri", lambda: "sqlite:///mlflow.db")
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    output_dir = tmp_path / "p2-riesgo"
+    downloads: list[str] = []
+    patch_download(monkeypatch, downloads)
+    patch_load(monkeypatch, lambda uri: object())
+    client = FakeClient(download_uri="mlflow-artifacts:/1/models/m-x/artifacts")
+
+    with pytest.raises(ValueError, match="MLFLOW_TRACKING_URI"):
+        export_model.export_model(MODEL_NAME, ALIAS, output_dir, client=client)
+
+    assert downloads == []
+    assert not output_dir.exists()
+
+
+def test_an_exported_sqlite_uri_does_not_fall_back_to_the_dotenv(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("MLFLOW_TRACKING_URI=http://127.0.0.1:5001\n", encoding="utf-8")
+    monkeypatch.setattr(export_model, "PROJ_ROOT", tmp_path)
+    monkeypatch.setattr(export_model.mlflow, "get_tracking_uri", lambda: "sqlite:///mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    output_dir = tmp_path / "p2-riesgo"
+    patch_download(monkeypatch, [])
+    patch_load(monkeypatch, lambda uri: object())
+    client = FakeClient(download_uri="mlflow-artifacts:/1/models/m-x/artifacts")
+
+    with pytest.raises(ValueError, match="MLFLOW_TRACKING_URI"):
+        export_model.export_model(MODEL_NAME, ALIAS, output_dir, client=client)
 
 
 def test_export_model_replaces_an_existing_export(tmp_path, monkeypatch):
