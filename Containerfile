@@ -1,11 +1,11 @@
 FROM docker.io/library/python:3.13-slim
-#LightGBM needs Open MP (libgomp2), which the slim image does not include 
-RUN apt-get update \ 
+# LightGBM needs OpenMP (libgomp1), which the slim image does not include
+RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
     
-#uv pinned to the version that wrote uv.lock
-COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /uvx /bin/
+## uv pinned to an exact release of the 0.13 series that wrote uv.lock
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy 
