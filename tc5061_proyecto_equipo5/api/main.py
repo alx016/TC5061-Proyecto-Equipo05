@@ -42,7 +42,7 @@ PREDICT_EXAMPLES = {
 
 def get_model(request: Request) -> LoadedModel:
     """Give endpoints the model loaded at startup, or answer 503 if it failed to load."""
-    loaded_model = request.app.state.loaded_model
+    loaded_model = getattr(request.app.state, "loaded_model", None)
     if loaded_model is None:
         raise HTTPException(status_code=503, detail="Model not loaded; check the API logs")
     return loaded_model
