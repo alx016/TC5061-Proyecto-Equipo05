@@ -355,6 +355,10 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── scripts/
 │   └── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
 └── tc5061_proyecto_equipo5/   <- Código fuente
+    ├── api/
+    │   ├── main.py            <- App FastAPI: /health, /model-info y /predict
+    │   ├── model.py           <- Carga el modelo de P2 con sus metadatos y predice con sus umbrales
+    │   └── schemas.py         <- Esquemas Pydantic de la petición y la respuesta
     ├── config.py              <- Rutas, años y constantes del estudio
     ├── dataset.py             <- Descarga, limpieza y manifest de los datos
     ├── features.py            <- Panel estación-hora y recetas de features de P1, P2 y P3
@@ -367,6 +371,5 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
         ├── registry.py              <- Entry point register: Model Registry y aliases
         ├── train_regression.py      <- P1: regresión de demanda
         ├── train_classification.py  <- P2: clasificación de riesgo
-        ├── train_clustering.py      <- P3: clustering de estaciones
-        └── predict.py               <- Inferencia (plantilla, pendiente)
+        └── train_clustering.py      <- P3: clustering de estaciones
 ```
