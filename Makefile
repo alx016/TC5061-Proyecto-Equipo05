@@ -6,6 +6,10 @@ PROJECT_NAME = TC5061-Proyecto-Equipo05
 PYTHON_VERSION = 3.13
 PYTHON_INTERPRETER = uv run python
 
+IMAGE = mibici-p2-api
+API_PORT ?= 8000
+MLFLOW_HOST ?= 127.0.0.1
+
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
@@ -106,8 +110,40 @@ data: requirements
 .PHONY: mlflow-server
 mlflow-server:
 	uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
-		--artifacts-destination ./mlartifacts --host 127.0.0.1 --port 5001
+		--artifacts-destination ./mlartifacts --host $(MLFLOW_HOST) --port 5001
 
+## Export the P2 champion from the Model Registry to models/p2-riesgo/
+.PHONY: export-model
+export-model:
+	uv run python scripts/export_model.py
+
+## Run the API locally, without a container
+.PHONY: api
+api:
+	uv run uvicorn tc5061_proyecto_equipo5.api.main:app --reload --port $(API_PORT)
+
+## Build the API image (needs make export-model first)
+.PHONY: image
+image:
+	@test -f models/p2-riesgo/registry_metadata.json || { \
+		echo ">>> Falta models/p2-riesgo/. Corre 'make export-model' primero."; \
+		exit 1; \
+	}
+	podman build --format docker -t $(IMAGE) -f Containerfile .
+
+## Run the API container in the background
+.PHONY: container
+container:
+	podman run -d --rm --name $(IMAGE) -p $(API_PORT):8000 $(IMAGE)
+
+## Check that the running container answers /health and /predict
+.PHONY: smoke
+smoke:
+	curl -fsS --retry 15 --retry-delay 2 --retry-all-errors http://localhost:$(API_PORT)/health
+	@echo
+	curl -fsS -X POST http://localhost:$(API_PORT)/predict \
+		-H "Content-Type: application/json" -d @scripts/smoke_request.json
+	@echo
 
 #################################################################################
 # Self Documenting Commands                                                     #

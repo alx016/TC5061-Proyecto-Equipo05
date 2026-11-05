@@ -1,0 +1,25 @@
+{
+  "instances": [
+    {
+      "station_id": 100,
+      "capacity": 15,
+      "latitude": 20.666378,
+      "longitude": -103.34882,
+      "hour_sin": 0.0,
+      "hour_cos": 1.0,
+      "day_of_week": 1,
+      "is_weekend": false,
+      "is_holiday": false,
+      "neighbor_net_flow": 0.0222222222,
+      "net_flow_lag1": 0.0,
+      "net_flow_lag2": 0.0,
+      "net_flow_lag24": 0.0,
+      "arrivals_lag1": 0.0,
+      "arrivals_lag2": 0.0,
+      "arrivals_lag3": 4.0,
+      "departures_lag1": 0.0,
+      "departures_lag2": 0.0,
+      "departures_lag3": 4.0
+    }
+  ]
+}
