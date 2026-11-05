@@ -67,7 +67,7 @@ def _registry_metadata(uri: str, run_id: str) -> dict:
         name, _, number = name.partition("/")
         version = client.get_model_version(name, number)
     info["model_name"] = name
-    info["model_version"] = version.version
+    info["model_version"] = str(version.version)
     return info
 
 
