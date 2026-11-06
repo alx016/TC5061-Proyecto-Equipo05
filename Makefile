@@ -9,6 +9,8 @@ PYTHON_INTERPRETER = uv run python
 IMAGE = mibici-p2-api
 API_PORT ?= 8000
 MLFLOW_HOST ?= 127.0.0.1
+CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)
+BUILD_FLAGS ?= $(if $(findstring podman,$(CONTAINER_ENGINE)),--format docker,)
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -129,12 +131,12 @@ image:
 		echo ">>> Falta models/p2-riesgo/. Corre 'make export-model' primero."; \
 		exit 1; \
 	}
-	podman build --format docker -t $(IMAGE) -f Containerfile .
+	$(CONTAINER_ENGINE) build $(BUILD_FLAGS) -t $(IMAGE) -f Containerfile .
 
 ## Run the API container in the background
 .PHONY: container
 container:
-	podman run -d --rm --name $(IMAGE) -p $(API_PORT):8000 $(IMAGE)
+	$(CONTAINER_ENGINE) run -d --rm --name $(IMAGE) -p $(API_PORT):8000 $(IMAGE)
 
 ## Check that the running container answers /health and /predict
 .PHONY: smoke
