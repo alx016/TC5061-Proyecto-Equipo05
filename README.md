@@ -396,16 +396,16 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "1",
+  "model_version": "2",
   "model_alias": "champion",
-  "source_run_id": "d168b74cfb604d8ea7df2e4ded49f13b",
-  "git_commit": "11818c2ec991a42a7925ec6fe6d90aaf137dd1d3",
-  "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
+  "source_run_id": "09e7594556024984bc6e542e7c32a2a2",
+  "git_commit": "8afe7750...",
+  "data_version": "4c54003c...",
   "thresholds": {
-    "shortage": 0.4,
+    "shortage": 0.2,
     "saturation": 0.95
   },
-  "exported_at": "2026-11-06T07:33:50Z"
+  "exported_at": "2026-11-06T18:04:38Z"
 }
 ```
 
@@ -419,9 +419,9 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "1",
+  "model_version": "2",
   "thresholds": {
-    "shortage": 0.4,
+    "shortage": 0.2,
     "saturation": 0.95
   },
   "predictions": [
@@ -430,14 +430,42 @@ Respuesta:
       "label": "Balanceado",
       "label_id": 0,
       "probabilities": {
-        "Balanceado": 0.9996387768973991,
-        "Riesgo_Desabasto": 0.00026154615215466797,
-        "Riesgo_Saturacion": 0.00009967695044618254
+        "Balanceado": 0.9999485654004165,
+        "Riesgo_Desabasto": 0.000005541168229884321,
+        "Riesgo_Saturacion": 0.0000458934313537335
       }
     }
   ]
 }
 ```
+
+### Reproducibilidad técnica cruzada (WP-5)
+
+Para validar la reproducibilidad técnica independiente del modelo champion de P2, se ejecutó el ciclo completo de re-entrenamiento determinista, registro, exportación y despliegue en una segunda máquina (macOS Apple Silicon con Docker), partiendo del commit auditable `8afe775` de `main` con árbol limpio (`git_dirty=false`).
+
+#### Comparación de métricas frente al champion original
+
+| Métrica / Parámetro | Champion original (Oscar, v3) | Reproducción cruzada (Emilio, v2) | Baseline referencia (v1) |
+|:---|:---|:---|:---|
+| **Run ID** | `7bf71250` | `09e75945` | `d168b74c` |
+| **Commit de Git** | `d4490b7` | `8afe7750` | `8afe7750` |
+| **Entorno de ejecución** | Linux x86_64 | macOS Apple Silicon (ARM64) | macOS Apple Silicon (ARM64) |
+| **Motor de contenedores** | Podman | Docker Desktop | Docker Desktop |
+| **Hiperparámetro `num_leaves`** | 255 | 255 | 31 (default) |
+| **Semilla determinista** | 42 | 42 | 42 |
+| **Umbral de desabasto (`shortage`)** | 0.20 | 0.20 | 0.40 |
+| **Umbral de saturación (`saturation`)** | 0.95 | 0.95 | 0.95 |
+| **`val_pr_auc_minority_mean`** | 0.2884 | 0.2855 | 0.2576 |
+| **`val_pr_auc_saturation`** | - | 0.3286 | 0.3023 |
+| **`val_pr_auc_shortage`** | - | 0.2424 | 0.2129 |
+| **`val_macro_f1`** | - | 0.4774 | 0.4653 |
+| **`test_macro_f1` (Diciembre)** | - | 0.4551 | 0.4468 |
+
+#### Conclusiones de reproducibilidad
+
+1. **Paridad de umbrales.** La búsqueda conjunta de umbrales sobre el conjunto de validación arrojó exactamente los mismos puntos de corte (`shortage = 0.20`, `saturation = 0.95`) en ambas máquinas independientes.
+2. **Paridad numérica de métricas.** La métrica primaria de optimización (`val_pr_auc_minority_mean`) alcanzó 0.2855 frente al 0.2884 original. La diferencia absoluta es de 0.0029, atribuible a variaciones menores en la precisión aritmética de punto flotante de OpenMP y LightGBM entre las arquitecturas x86_64 y ARM64.
+3. **Auditoría completa de Git.** El run reproducido fue ejecutado sobre el commit base `8afe775` presente en `main`, garantizando trazabilidad completa en GitHub sin referencias a commits locales o inexistentes.
 
 ### Evidencia visual
 

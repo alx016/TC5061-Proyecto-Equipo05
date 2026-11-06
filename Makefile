@@ -74,9 +74,9 @@ validate-data: data-checks
 security:
 	uv run bandit -q -r tc5061_proyecto_equipo5
 	uv export --quiet --no-default-groups --group api --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
-	uv run pip-audit -r /tmp/requirements.txt
+	uv run pip-audit --disable-pip --no-deps -r /tmp/requirements.txt
 	uv export --quiet --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
-	uv run pip-audit -r /tmp/requirements-full.txt
+	uv run pip-audit --disable-pip --no-deps -r /tmp/requirements-full.txt
 	git ls-files -z | xargs -0 uv run detect-secrets scan --exclude-files '^\.secrets\.baseline$$' > reports/security/detect-secrets.json
 	git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline --exclude-files '^\.secrets\.baseline$$'
 
