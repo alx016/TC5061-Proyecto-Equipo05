@@ -490,6 +490,13 @@ Capturas de la reproducción independiente en macOS con Docker: muestran la vers
 - `curl /model-info`: consulta de linaje de entrenamiento y umbrales de decisión
   ![curl model-info](reports/figures/entrega4/03-model-info.png)
 
+**Comprobación adicional en Linux con Docker Desktop (7 de noviembre):** se construyó la imagen desde un clon limpio de esta rama, se inició el contenedor y se ejecutó el ejemplo de `/docs`. Estas capturas muestran el bundle v3 incluido en el repositorio; complementan la reproducción anterior en macOS, que utilizó su propio Registry.
+
+- `POST /predict`: respuesta HTTP 200 con la predicción y versión 3
+  ![Predicción en Linux con Docker](reports/figures/entrega4/04-linux-docker-predict.jpg)
+- `GET /model-info`: versión y linaje del modelo servido
+  ![Información del modelo en Linux con Docker](reports/figures/entrega4/05-linux-docker-model-info.jpg)
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
