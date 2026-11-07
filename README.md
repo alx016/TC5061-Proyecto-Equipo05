@@ -318,10 +318,10 @@ Se eligió inferencia en tiempo real con peticiones síncronas por las siguiente
 
 ### Decisiones de diseño
 
-- **Decisión 4.2 (Empaquetado autónomo en la imagen).** La imagen incluye los artefactos del modelo (`MLmodel`, `model.pkl`) y sus metadatos de linaje (`registry_metadata.json`) en `models/p2-riesgo/`. Esto garantiza portabilidad total y ejecución en entornos aislados de red (air-gapped) sin depender de un servidor externo de MLflow.
+- **Decisión 4.2 (Empaquetado autónomo en la imagen).** La imagen incluye los artefactos del modelo (`MLmodel`, `model.pkl`) y sus metadatos de linaje (`registry_metadata.json`) en `models/p2-riesgo/`. Una vez construida, la imagen puede ejecutar inferencia sin red ni servidor MLflow; la construcción inicial requiere acceso a las imágenes base y dependencias.
 - **Decisión 4.3 (Carga en vivo desde el Registry, alternativa).** Si `MODEL_URI` empieza con `models:/`, la API carga el modelo del Registry al arrancar en lugar de usar la copia de la imagen. Para eso, el servidor de MLflow se levanta con `make mlflow-server MLFLOW_HOST=0.0.0.0` (sin contraseña, solo durante la demo) y el contenedor recibe `MLFLOW_TRACKING_URI=http://host.containers.internal:5001` (Podman) o `http://host.docker.internal:5001` (Docker). Si el servidor no responde, el modelo no carga y la API responde 503.
 - **Seguridad rootless.** El archivo `Containerfile` utiliza `python:3.13-slim`, instala `libgomp1` para OpenMP y ejecuta la aplicación bajo el usuario de sistema `app` (`UID 1000`) sin privilegios de administrador.
-- **Gobernanza de dependencias.** El contenedor instala únicamente el grupo de dependencias de servicio con `uv sync --frozen --no-default-groups --group api`. Esto excluye librerías de entrenamiento, pruebas y linters, manteniendo la superficie de ataque reducida.
+- **Gobernanza de dependencias.** El contenedor instala las dependencias base del proyecto y el grupo de servicio con `uv sync --frozen --no-default-groups --group api`. Esto excluye los grupos de notebooks, documentación, pruebas y linters; las dependencias base aún incluyen librerías como LightGBM y scikit-learn.
 
 ### Prerrequisitos
 
@@ -337,11 +337,13 @@ El archivo `Makefile` detecta automáticamente si el comando disponible es `podm
 
 ### Ejecución paso a paso
 
-1. **Exportar el modelo del registro a la carpeta local:**
+1. **Preparar el champion entregado:** desde un clon del repositorio, ejecuta:
    ```bash
-   make export-model
+   make prepare-model
    ```
-   Este comando lee `models:/mibici-equipo05-p2-riesgo@champion` de MLflow y genera `models/p2-riesgo/registry_metadata.json`.
+   El archivo versionado `models/p2-champion-v3.zip` contiene el export del Registry `mibici-equipo05-p2-riesgo`, versión 3 (alias `champion` al exportarlo), run `7bf71250a91947ba8465d5db48d4bce5`. El comando verifica SHA-256 `73cab932d0eae7dbf2c4f78fe927610353a9184e86588d0eddf4cfcef23b305b` y crea `models/p2-riesgo/` con `MLmodel`, `model.pkl` y `registry_metadata.json`. Requiere Python 3 y no reemplaza una carpeta existente; para reemplazarla intencionalmente usa `python3 scripts/prepare_model.py --replace`.
+
+   **Alternativa con Registry:** `make export-model` exporta la versión actual del alias desde un Registry ya poblado. Instala primero el entorno con `uv sync` y configura `MLFLOW_TRACKING_URI` para ese servidor; el `mlflow.db` y los artefactos locales no forman parte del repositorio. Esta opción puede producir una versión diferente de la respuesta de ejemplo.
 
 2. **Construir la imagen de contenedor:**
    ```bash
@@ -375,9 +377,13 @@ El archivo `Makefile` detecta automáticamente si el comando disponible es `podm
    podman stop mibici-p2-api
    ```
 
+Las variables `net_flow_lag*` y `neighbor_net_flow` expresan flujo neto normalizado por capacidad; las variables `arrivals_lag*` y `departures_lag*` son conteos horarios previos. `day_of_week` va de 0 (lunes) a 6 (domingo), y las coordenadas están en grados decimales.
+
 La documentación interactiva de OpenAPI está disponible en el navegador en `http://localhost:8000/docs`, con ejemplos de estaciones reales de Guadalajara precargados.
 
 ### Ejemplos de uso con curl
+
+Respuestas observadas con el bundle v3 incluido; las probabilidades pueden variar ligeramente según el entorno.
 
 **Verificar estado del servicio:**
 ```bash
@@ -396,16 +402,16 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "2",
+  "model_version": "3",
   "model_alias": "champion",
-  "source_run_id": "09e7594556024984bc6e542e7c32a2a2",
-  "git_commit": "8afe7750...",
-  "data_version": "4c54003c...",
+  "source_run_id": "7bf71250a91947ba8465d5db48d4bce5",
+  "git_commit": "71b6c42f47040bd5ada00078982a01fe6a8e9dd4",
+  "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
   "thresholds": {
     "shortage": 0.2,
     "saturation": 0.95
   },
-  "exported_at": "2026-11-06T18:04:38Z"
+  "exported_at": "2026-11-05T01:06:39Z"
 }
 ```
 
@@ -419,7 +425,7 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "2",
+  "model_version": "3",
   "thresholds": {
     "shortage": 0.2,
     "saturation": 0.95
@@ -430,9 +436,9 @@ Respuesta:
       "label": "Balanceado",
       "label_id": 0,
       "probabilities": {
-        "Balanceado": 0.9999485654004165,
-        "Riesgo_Desabasto": 0.000005541168229884321,
-        "Riesgo_Saturacion": 0.0000458934313537335
+        "Balanceado": 0.9999242288798246,
+        "Riesgo_Desabasto": 0.000009484211217724505,
+        "Riesgo_Saturacion": 0.00006628690895762632
       }
     }
   ]
@@ -450,7 +456,7 @@ Para validar la reproducibilidad técnica independiente del modelo champion de P
 | **Run ID** | `7bf71250` | `09e75945` | `d168b74c` |
 | **Commit de Git** | `71b6c42` | `8afe7750` | `8afe7750` |
 | **Entorno de ejecución** | Linux x86_64 | macOS Apple Silicon (ARM64) | macOS Apple Silicon (ARM64) |
-| **Motor de contenedores** | Podman | Docker Desktop | Docker Desktop |
+| **Motor de contenedores** | Podman (según registro del equipo) | Docker Desktop | Docker Desktop |
 | **Hiperparámetro `num_leaves`** | 255 | 255 | 31 (default) |
 | **Semilla determinista** | 42 | 42 | 42 |
 | **Umbral de desabasto (`shortage`)** | 0.20 | 0.20 | 0.40 |
@@ -469,13 +475,13 @@ Para validar la reproducibilidad técnica independiente del modelo champion de P
 #### Conclusiones de reproducibilidad
 
 1. **Paridad de umbrales.** La búsqueda conjunta de umbrales sobre el conjunto de validación arrojó exactamente los mismos puntos de corte (`shortage = 0.20`, `saturation = 0.95`) en ambas máquinas independientes.
-2. **Criterio de reproducibilidad (tolerancia del 30%).** Las métricas en el conjunto de prueba (diciembre) y validación mostraron una desviación relativa inferior al 1.0% entre Linux x86_64 y macOS ARM64 (`val_pr_auc_minority_mean` de 0.2884 frente a 0.2855, variación de 1.01%; `test_macro_f1` de 0.4578 frente a 0.4551, variación de 0.59%). Cumple holgadamente el criterio de aceptación del 30%.
+2. **Criterio de reproducibilidad (tolerancia del 30%).** Las métricas en el conjunto de prueba (diciembre) y validación mostraron una desviación relativa cercana al 1% entre Linux x86_64 y macOS ARM64 (`val_pr_auc_minority_mean` de 0.2884 frente a 0.2855, variación de 1.01%; `test_macro_f1` de 0.4578 frente a 0.4551, variación de 0.59%). Cumple holgadamente el criterio de aceptación del 30%.
 3. **Consistencia de inferencia.** La carga útil de prueba (`scripts/smoke_request.json`) produce la misma clasificación operativa (`Balanceado`, `label_id: 0`) con certidumbre superior al 99.99% en ambos modelos champion.
 4. **Auditoría completa de Git.** El run reproducido fue ejecutado sobre el commit base `8afe775` presente en `main`, garantizando trazabilidad completa en GitHub sin referencias a commits locales o inexistentes.
 
 ### Evidencia visual
 
-Capturas de la terminal durante la sesión de empaquetado y verificación:
+Capturas de la reproducción independiente en macOS con Docker: muestran la versión 2 de ese Registry local, no el bundle v3 incluido. La numeración de versiones es propia de cada Registry.
 
 - `make image`: construcción de la imagen con Docker
   ![make image](reports/figures/entrega4/01-container-build.png)
@@ -493,8 +499,8 @@ Capturas de la terminal durante la sesión de empaquetado y verificación:
   `tipo(alcance): descripción`, por ejemplo `feat(modeling): add the P1 regression training`.
 - Todo cambio entra a `main` mediante un pull request revisado por otro integrante. Antes de
   abrirlo: `make lint` y `uv run pytest`.
-- Los datos (`data/`), los modelos y los runs de MLflow (`mlflow.db`, `mlruns/`) no se suben a
-  Git. Los datos se reconstruyen con `make data` y se verifican con el manifest.
+- Los datos (`data/`), las exportaciones de trabajo y los runs de MLflow (`mlflow.db`, `mlruns/`) no se suben a
+  Git; el archivo `models/p2-champion-v3.zip` es la copia versionada para esta entrega. Los datos se reconstruyen con `make data` y se verifican con el manifest.
 - Antes de un entrenamiento que sirva como evidencia, el commit debe estar hecho para que el
   run quede con `git_dirty=false`.
 
@@ -515,7 +521,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ## Estructura del proyecto
 
 ```
-├── Makefile                   <- Comandos: make data, make lint, make test, make security, make export-model, make image, make container, make smoke
+├── Makefile                   <- Comandos: make data, make lint, make test, make security, make prepare-model, make export-model, make image, make container, make smoke
 ├── Containerfile              <- Imagen de la API (python:3.13-slim, usuario sin root)
 ├── .containerignore           <- Lista blanca de inclusiones para construcción de imágenes
 ├── README.md
@@ -527,7 +533,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 │   ├── external/estaciones/   <- Catálogo de estaciones
 │   └── processed/             <- Panel estación-hora y artefactos de features por pregunta
 ├── docs/                      <- Sitio MkDocs: canvases, feature engineering y justificaciones
-├── models/                    <- Fuera de Git; artefactos de modelos exportados
+├── models/                    <- Bundle champion versionado y exportaciones locales ignoradas
 │   └── p2-riesgo/             <- Bundle local del champion P2 (MLmodel, model.pkl, registry_metadata.json)
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json

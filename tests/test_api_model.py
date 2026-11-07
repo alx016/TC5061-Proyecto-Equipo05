@@ -37,3 +37,29 @@ def test_registry_metadata_by_version_returns_version_as_string(fake_mlflow):
     assert info["model_name"] == "p2-riesgo"
     assert info["model_alias"] is None
     assert info["model_version"] == "5"
+
+
+def test_real_export_serves_smoke_request(monkeypatch):
+    """The checked-in champion can be loaded and used through the HTTP contract."""
+    import json
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from tc5061_proyecto_equipo5.api.main import app
+
+    root = Path(__file__).resolve().parents[1]
+    bundle = root / "models" / "p2-riesgo"
+    if not (bundle / "MLmodel").is_file():
+        pytest.skip("Run make prepare-model to test the real registry export")
+    monkeypatch.setenv("MODEL_URI", str(bundle))
+    with TestClient(app) as client:
+        info = client.get("/model-info")
+        response = client.post(
+            "/predict", json=json.loads((root / "scripts/smoke_request.json").read_text())
+        )
+    assert info.status_code == response.status_code == 200
+    assert info.json()["model_name"] == "mibici-equipo05-p2-riesgo"
+    prediction = response.json()["predictions"][0]
+    assert prediction["label"] == "Balanceado"
+    assert sum(prediction["probabilities"].values()) == pytest.approx(1.0)

@@ -8,10 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class StationFeatures(BaseModel):
     """Features of a single station at minute 50 of hour t."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     station_id: int | None = None
-    capacity: int = Field(..., gt=0)
+    capacity: int = Field(..., gt=0, le=2147483647)
     latitude: float = Field(..., ge=20.4, le=21.0)
     longitude: float = Field(..., ge=-103.6, le=-103.1)
     hour_sin: float = Field(..., ge=-1.0, le=1.0)
@@ -63,6 +63,13 @@ class Prediction(BaseModel):
     @model_validator(mode="after")
     def validate_probabilities_sum(self) -> "Prediction":
         """Enforce that predicted class probabilities sum to approximately 1.0."""
+        names = ("Balanceado", "Riesgo_Desabasto", "Riesgo_Saturacion")
+        if self.label != names[self.label_id]:
+            raise ValueError("label does not match label_id")
+        if set(self.probabilities) != set(names):
+            raise ValueError("probabilities must contain exactly the three risk classes")
+        if any(not math.isfinite(p) or not 0 <= p <= 1 for p in self.probabilities.values()):
+            raise ValueError("probabilities must be finite and between 0 and 1")
         total = sum(self.probabilities.values())
         if not math.isclose(total, 1.0, abs_tol=0.01):
             raise ValueError(f"Probabilities must sum to ~1.0, got {total}")

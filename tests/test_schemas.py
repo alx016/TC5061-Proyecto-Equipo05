@@ -247,38 +247,38 @@ def test_net_flow_positive_and_negative_allowed(valid_station_payload, flow_val)
 def test_prediction_probabilities_sum_validation():
     valid = Prediction(
         station_id=1,
-        label="desabasto",
+        label="Riesgo_Desabasto",
         label_id=1,
-        probabilities={"normal": 0.1, "desabasto": 0.8, "saturacion": 0.1},
+        probabilities={"Balanceado": 0.1, "Riesgo_Desabasto": 0.8, "Riesgo_Saturacion": 0.1},
     )
     assert valid.label_id == 1
 
     valid_tolerance = Prediction(
-        label="normal",
+        label="Balanceado",
         label_id=0,
-        probabilities={"normal": 0.995, "desabasto": 0.005, "saturacion": 0.005},
+        probabilities={"Balanceado": 0.995, "Riesgo_Desabasto": 0.005, "Riesgo_Saturacion": 0.005},
     )
-    assert valid_tolerance.label == "normal"
+    assert valid_tolerance.label == "Balanceado"
 
     with pytest.raises(ValidationError):
         Prediction(
-            label="desabasto",
+            label="Riesgo_Desabasto",
             label_id=1,
-            probabilities={"normal": 0.1, "desabasto": 0.2, "saturacion": 0.1},
+            probabilities={"Balanceado": 0.1, "Riesgo_Desabasto": 0.2, "Riesgo_Saturacion": 0.1},
         )
 
     with pytest.raises(ValidationError):
         Prediction(
-            label="normal",
+            label="Balanceado",
             label_id=3,
-            probabilities={"normal": 1.0, "desabasto": 0.0, "saturacion": 0.0},
+            probabilities={"Balanceado": 1.0, "Riesgo_Desabasto": 0.0, "Riesgo_Saturacion": 0.0},
         )
 
     with pytest.raises(ValidationError):
         Prediction(
-            label="normal",
+            label="Balanceado",
             label_id=0,
-            probabilities={"normal": 1.0, "desabasto": 0.0, "saturacion": 0.0},
+            probabilities={"Balanceado": 1.0, "Riesgo_Desabasto": 0.0, "Riesgo_Saturacion": 0.0},
             unexpected="forbid",
         )
 
@@ -286,9 +286,9 @@ def test_prediction_probabilities_sum_validation():
 def test_predict_response_validation():
     prediction = Prediction(
         station_id=10,
-        label="normal",
+        label="Balanceado",
         label_id=0,
-        probabilities={"normal": 0.8, "desabasto": 0.1, "saturacion": 0.1},
+        probabilities={"Balanceado": 0.8, "Riesgo_Desabasto": 0.1, "Riesgo_Saturacion": 0.1},
     )
     response = PredictResponse(
         model_name="p2-riesgo",
@@ -324,3 +324,42 @@ def test_model_info_validation():
     with pytest.raises(ValidationError):
         ModelInfo(unexpected_field="forbid")
 
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"label": "wrong"},
+        {"label_id": 2},
+        {"probabilities": {"Balanceado": 2, "Riesgo_Desabasto": -1, "Riesgo_Saturacion": 0}},
+        {"probabilities": {"wrong": 1}},
+        {
+            "probabilities": {
+                "Balanceado": float("nan"),
+                "Riesgo_Desabasto": 0,
+                "Riesgo_Saturacion": 0,
+            }
+        },
+    ],
+)
+def test_invalid_prediction_contract_rejected(changes):
+    payload = {
+        "label": "Balanceado",
+        "label_id": 0,
+        "probabilities": {"Balanceado": 0.8, "Riesgo_Desabasto": 0.1, "Riesgo_Saturacion": 0.1},
+    }
+    payload.update(changes)
+    with pytest.raises(ValidationError):
+        Prediction(**payload)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("capacity", 2147483648),
+        ("neighbor_net_flow", float("inf")),
+        ("net_flow_lag1", float("nan")),
+    ],
+)
+def test_non_finite_and_overflow_inputs_rejected(valid_station_payload, field, value):
+    with pytest.raises(ValidationError):
+        StationFeatures(**dict(valid_station_payload, **{field: value}))
