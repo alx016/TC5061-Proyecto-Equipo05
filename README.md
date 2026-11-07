@@ -492,6 +492,8 @@ Capturas de la reproducción independiente en macOS con Docker: muestran la vers
 
 **Comprobación adicional en Linux con Docker Desktop (7 de noviembre):** se construyó la imagen desde un clon limpio de esta rama, se inició el contenedor y se ejecutó el ejemplo de `/docs`. Estas capturas muestran el bundle v3 incluido en el repositorio; complementan la reproducción anterior en macOS, que utilizó su propio Registry.
 
+- Salida guardada de `docker inspect` y peticiones reales con `curl` a `/health` y `/predict` (mostrada en el navegador):
+  ![Comandos curl y respuesta del contenedor](reports/figures/entrega4/06-linux-docker-curl.jpg)
 - `POST /predict`: respuesta HTTP 200 con la predicción y versión 3
   ![Predicción en Linux con Docker](reports/figures/entrega4/04-linux-docker-predict.jpg)
 - `GET /model-info`: versión y linaje del modelo servido
