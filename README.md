@@ -302,6 +302,188 @@ En la última revisión, `make test` terminó con 275 pruebas aprobadas, y `make
 - `make help` → targets disponibles
   ![make help](reports/figures/entrega3/04-make-help.png)
 
+## Servicio de inferencia y contenedor OCI (Entrega 4)
+
+La Entrega 4 expone el modelo champion de riesgo operativo de estaciones (P2) a través de una API REST construida con FastAPI. El servicio se empaqueta en una imagen de contenedor OCI compatible con Podman y Docker.
+
+### Justificación de la estrategia de despliegue
+
+MiBici opera una red de transporte con fluctuaciones de demanda en tiempo real. Los operadores de campo y las camionetas de rebalanceo necesitan conocer el riesgo de desabasto y saturación con anticipación inmediata.
+
+Se eligió inferencia en tiempo real con peticiones síncronas por las siguientes razones:
+
+1. **Decisiones operativas inmediatas.** El balanceo físico de bicicletas se decide minuto a minuto. Un proceso por lotes diferido cada varias horas no permite reaccionar a tiempo a la saturación de una estación.
+2. **Soporte de micro-lotes.** El endpoint `/predict` acepta entre 1 y 500 registros por llamada. Un cliente puede calificar un corredor completo o toda la red metropolitana en una sola petición HTTP sin incurrir en la latencia de arranque de un proceso batch.
+3. **Validación estricta en el borde.** Pydantic v2 valida las variables geográficas y temporales en la entrada. Si un sensor envía un dato fuera de rango, el servicio rechaza la petición con código 422 antes de transferir los datos al modelo.
+
+### Decisiones de diseño
+
+- **Decisión 4.2 (Empaquetado autónomo en la imagen).** La imagen incluye los artefactos del modelo (`MLmodel`, `model.pkl`) y sus metadatos de linaje (`registry_metadata.json`) en `models/p2-riesgo/`. Esto garantiza portabilidad total y ejecución en entornos aislados de red (air-gapped) sin depender de un servidor externo de MLflow.
+- **Decisión 4.3 (Carga en vivo desde el Registry, alternativa).** Si `MODEL_URI` empieza con `models:/`, la API carga el modelo del Registry al arrancar en lugar de usar la copia de la imagen. Para eso, el servidor de MLflow se levanta con `make mlflow-server MLFLOW_HOST=0.0.0.0` (sin contraseña, solo durante la demo) y el contenedor recibe `MLFLOW_TRACKING_URI=http://host.containers.internal:5001` (Podman) o `http://host.docker.internal:5001` (Docker). Si el servidor no responde, el modelo no carga y la API responde 503.
+- **Seguridad rootless.** El archivo `Containerfile` utiliza `python:3.13-slim`, instala `libgomp1` para OpenMP y ejecuta la aplicación bajo el usuario de sistema `app` (`UID 1000`) sin privilegios de administrador.
+- **Gobernanza de dependencias.** El contenedor instala únicamente el grupo de dependencias de servicio con `uv sync --frozen --no-default-groups --group api`. Esto excluye librerías de entrenamiento, pruebas y linters, manteniendo la superficie de ataque reducida.
+
+### Prerrequisitos
+
+Para ejecutar el contenedor se requiere un motor OCI:
+
+- **Podman**: En macOS o Windows, inicializa la máquina virtual antes del primer uso:
+  ```bash
+  podman machine init --now
+  ```
+- **Docker**: Inicia la aplicación Docker Desktop.
+
+El archivo `Makefile` detecta automáticamente si el comando disponible es `podman` o `docker`.
+
+### Ejecución paso a paso
+
+1. **Exportar el modelo del registro a la carpeta local:**
+   ```bash
+   make export-model
+   ```
+   Este comando lee `models:/mibici-equipo05-p2-riesgo@champion` de MLflow y genera `models/p2-riesgo/registry_metadata.json`.
+
+2. **Construir la imagen de contenedor:**
+   ```bash
+   make image
+   ```
+   Comando equivalente manual:
+   ```bash
+   # Con Docker
+   docker build -t mibici-p2-api -f Containerfile .
+
+   # Con Podman
+   podman build --format docker -t mibici-p2-api -f Containerfile .
+   ```
+
+3. **Ejecutar el contenedor en segundo plano:**
+   ```bash
+   make container
+   ```
+   El servicio queda disponible en `http://localhost:8000`.
+
+4. **Ejecutar la prueba de humo:**
+   ```bash
+   make smoke
+   ```
+   El target valida la respuesta de `/health` y envía una predicción a `/predict` con `scripts/smoke_request.json`.
+
+5. **Detener el contenedor:**
+   ```bash
+   docker stop mibici-p2-api
+   # O con Podman:
+   podman stop mibici-p2-api
+   ```
+
+La documentación interactiva de OpenAPI está disponible en el navegador en `http://localhost:8000/docs`, con ejemplos de estaciones reales de Guadalajara precargados.
+
+### Ejemplos de uso con curl
+
+**Verificar estado del servicio:**
+```bash
+curl -fsS http://localhost:8000/health
+```
+Respuesta:
+```json
+{"status":"ok"}
+```
+
+**Consultar metadatos y linaje del modelo activo:**
+```bash
+curl -fsS http://localhost:8000/model-info
+```
+Respuesta:
+```json
+{
+  "model_name": "mibici-equipo05-p2-riesgo",
+  "model_version": "2",
+  "model_alias": "champion",
+  "source_run_id": "09e7594556024984bc6e542e7c32a2a2",
+  "git_commit": "8afe7750...",
+  "data_version": "4c54003c...",
+  "thresholds": {
+    "shortage": 0.2,
+    "saturation": 0.95
+  },
+  "exported_at": "2026-11-06T18:04:38Z"
+}
+```
+
+**Realizar una predicción de riesgo:**
+```bash
+curl -fsS -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @scripts/smoke_request.json
+```
+Respuesta:
+```json
+{
+  "model_name": "mibici-equipo05-p2-riesgo",
+  "model_version": "2",
+  "thresholds": {
+    "shortage": 0.2,
+    "saturation": 0.95
+  },
+  "predictions": [
+    {
+      "station_id": 100,
+      "label": "Balanceado",
+      "label_id": 0,
+      "probabilities": {
+        "Balanceado": 0.9999485654004165,
+        "Riesgo_Desabasto": 0.000005541168229884321,
+        "Riesgo_Saturacion": 0.0000458934313537335
+      }
+    }
+  ]
+}
+```
+
+### Reproducibilidad técnica cruzada (WP-5)
+
+Para validar la reproducibilidad técnica independiente del modelo champion de P2, se ejecutó el ciclo completo de re-entrenamiento determinista, registro, exportación y despliegue en una segunda máquina (macOS Apple Silicon con Docker), partiendo del commit auditable `8afe775` de `main` con árbol limpio (`git_dirty=false`).
+
+#### Comparación de métricas frente al champion original
+
+| Métrica / Parámetro | Champion original (Oscar, v3) | Reproducción cruzada (Emilio, v2) | Baseline referencia (v1) |
+|:---|:---|:---|:---|
+| **Run ID** | `7bf71250` | `09e75945` | `d168b74c` |
+| **Commit de Git** | `71b6c42` | `8afe7750` | `8afe7750` |
+| **Entorno de ejecución** | Linux x86_64 | macOS Apple Silicon (ARM64) | macOS Apple Silicon (ARM64) |
+| **Motor de contenedores** | Podman | Docker Desktop | Docker Desktop |
+| **Hiperparámetro `num_leaves`** | 255 | 255 | 31 (default) |
+| **Semilla determinista** | 42 | 42 | 42 |
+| **Umbral de desabasto (`shortage`)** | 0.20 | 0.20 | 0.40 |
+| **Umbral de saturación (`saturation`)** | 0.95 | 0.95 | 0.95 |
+| **`val_pr_auc_minority_mean`** | 0.2884 | 0.2855 | 0.2576 |
+| **`val_macro_f1`** | 0.4801 | 0.4774 | 0.4653 |
+| **`val_recall_shortage`** | 0.8605 | 0.8602 | 0.8553 |
+| **`val_precision_shortage`** | 0.0662 | 0.0652 | 0.0615 |
+| **`test_macro_f1` (Diciembre)** | 0.4578 | 0.4551 | 0.4468 |
+| **`test_pr_auc_minority_mean`** | 0.2462 | 0.2408 | 0.2232 |
+| **`test_recall_shortage`** | 0.8452 | 0.8497 | 0.8444 |
+| **`test_precision_shortage`** | 0.0476 | 0.0468 | 0.0462 |
+| **`test_alerts_per_day`** | 765.6 | 780.1 | 776.6 |
+| **Predicción `smoke_request.json`** | `Balanceado (id: 0)` | `Balanceado (id: 0)` | `Balanceado (id: 0)` |
+
+#### Conclusiones de reproducibilidad
+
+1. **Paridad de umbrales.** La búsqueda conjunta de umbrales sobre el conjunto de validación arrojó exactamente los mismos puntos de corte (`shortage = 0.20`, `saturation = 0.95`) en ambas máquinas independientes.
+2. **Criterio de reproducibilidad (tolerancia del 30%).** Las métricas en el conjunto de prueba (diciembre) y validación mostraron una desviación relativa inferior al 1.0% entre Linux x86_64 y macOS ARM64 (`val_pr_auc_minority_mean` de 0.2884 frente a 0.2855, variación de 1.01%; `test_macro_f1` de 0.4578 frente a 0.4551, variación de 0.59%). Cumple holgadamente el criterio de aceptación del 30%.
+3. **Consistencia de inferencia.** La carga útil de prueba (`scripts/smoke_request.json`) produce la misma clasificación operativa (`Balanceado`, `label_id: 0`) con certidumbre superior al 99.99% en ambos modelos champion.
+4. **Auditoría completa de Git.** El run reproducido fue ejecutado sobre el commit base `8afe775` presente en `main`, garantizando trazabilidad completa en GitHub sin referencias a commits locales o inexistentes.
+
+### Evidencia visual
+
+Capturas de la terminal durante la sesión de empaquetado y verificación:
+
+- `make image`: construcción de la imagen con Docker
+  ![make image](reports/figures/entrega4/01-container-build.png)
+- `make container` y `make smoke`: arranque del contenedor y verificación de endpoints
+  ![make container y make smoke](reports/figures/entrega4/02-container-run-and-smoke.png)
+- `curl /model-info`: consulta de linaje de entrenamiento y umbrales de decisión
+  ![curl model-info](reports/figures/entrega4/03-model-info.png)
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -322,10 +504,10 @@ Contribuciones de cada integrante según el historial de Git de `main`.
 
 | Integrante | Matrícula | Usuario | Contribuciones |
 |:---|:---|:---|:---|
-| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024–2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Instrucciones de datos en el README. |
-| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. |
-| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. |
-| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014–2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. |
+| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024-2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Entrega 4: API REST de inferencia de P2 con FastAPI (`api/main.py`, `api/model.py`), endpoints `/health`, `/model-info` y `/predict`, carga del modelo desde la carpeta exportada o desde `models:/` según `MODEL_URI`, y decisión de la estrategia de despliegue (tiempo real frente a lotes). |
+| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. Entrega 4: script de exportación desacoplada del champion de P2 desde el Model Registry (`scripts/export_model.py`, `models/p2-riesgo/`, `registry_metadata.json`). |
+| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. Entrega 4: esquemas de validación de dominio con Pydantic v2 (`api/schemas.py`), suite de pruebas HTTP de la API (`tests/test_schemas.py`, `tests/test_api.py`, `tests/test_api_model.py`), validación de reproducibilidad técnica cruzada en macOS con Docker (WP-5) y documentación de la Entrega 4 en el README. |
+| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014-2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. Entrega 4: empaquetado OCI rootless (`Containerfile`, `.containerignore`), gobernanza de dependencias de servicio en `pyproject.toml` y automatización en Makefile (`make export-model`, `make image`, `make container`, `make smoke`). |
 
 Los merges de los pull requests hechos desde la web de GitHub aparecen con el nombre de la cuenta
 de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el usuario de Git.
@@ -333,7 +515,9 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ## Estructura del proyecto
 
 ```
-├── Makefile                   <- Comandos: make data, make lint, make format, make test, make data-checks, make security y make check
+├── Makefile                   <- Comandos: make data, make lint, make test, make security, make export-model, make image, make container, make smoke
+├── Containerfile              <- Imagen de la API (python:3.13-slim, usuario sin root)
+├── .containerignore           <- Lista blanca de inclusiones para construcción de imágenes
 ├── README.md
 ├── pyproject.toml             <- Metadatos del paquete, dependencias y configuración de ruff
 ├── uv.lock                    <- Versiones exactas de las dependencias
@@ -343,17 +527,25 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 │   ├── external/estaciones/   <- Catálogo de estaciones
 │   └── processed/             <- Panel estación-hora y artefactos de features por pregunta
 ├── docs/                      <- Sitio MkDocs: canvases, feature engineering y justificaciones
+├── models/                    <- Fuera de Git; artefactos de modelos exportados
+│   └── p2-riesgo/             <- Bundle local del champion P2 (MLmodel, model.pkl, registry_metadata.json)
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
 ├── reports/                   <- Figuras y reportes generados; los HTML/JSON de deepchecks no se versionan
-├── tests/                     <- Pruebas unitarias con datos sintéticos (pytest)
+│   └── figures/
+│       ├── entrega2/          <- Evidencias de MLflow
+│       ├── entrega3/          <- Evidencias de pruebas, deepchecks y seguridad
+│       └── entrega4/          <- Evidencias de contenedor OCI y endpoints HTTP
+├── tests/                     <- Pruebas unitarias y de integración de la API (pytest)
 ├── MLproject                  <- Entry points de MLflow: ingest, features, train, search, select, register
 ├── python_env.yaml            <- Entorno de Python del MLflow Project
 ├── .env.example               <- Variables de MLflow (tracking URI y experimento)
 ├── .secrets.baseline          <- Falsos positivos auditados de detect-secrets
 ├── mlflow.db, mlartifacts/    <- Servidor de tracking local; fuera de Git
 ├── scripts/
-│   └── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
+│   ├── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
+│   ├── export_model.py        <- Exportación del champion de P2 desde el Model Registry
+│   └── smoke_request.json     <- Carga útil de ejemplo para pruebas de humo
 └── tc5061_proyecto_equipo5/   <- Código fuente
     ├── api/
     │   ├── main.py            <- App FastAPI: /health, /model-info y /predict

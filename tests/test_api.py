@@ -21,7 +21,7 @@ def mock_lineage_info() -> dict:
         "model_version": "1",
         "model_alias": "champion",
         "source_run_id": "mock-run-id-12345",
-        "git_commit": "abcdef123456",
+        "git_commit": "mock-commit-hash",
         "data_version": "v1.0.0",
         "thresholds": {"shortage": 0.35, "saturation": 0.40},
         "exported_at": "2026-11-03T00:00:00Z",

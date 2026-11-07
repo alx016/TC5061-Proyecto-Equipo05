@@ -9,6 +9,8 @@ PYTHON_INTERPRETER = uv run python
 IMAGE = mibici-p2-api
 API_PORT ?= 8000
 MLFLOW_HOST ?= 127.0.0.1
+CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)
+BUILD_FLAGS ?= $(if $(findstring podman,$(CONTAINER_ENGINE)),--format docker,)
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -72,9 +74,9 @@ validate-data: data-checks
 security:
 	uv run bandit -q -r tc5061_proyecto_equipo5
 	uv export --quiet --no-default-groups --group api --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt
-	uv run pip-audit -r /tmp/requirements.txt
+	uv run pip-audit --disable-pip --no-deps -r /tmp/requirements.txt
 	uv export --quiet --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements-full.txt
-	uv run pip-audit -r /tmp/requirements-full.txt
+	uv run pip-audit --disable-pip --no-deps -r /tmp/requirements-full.txt
 	git ls-files -z | xargs -0 uv run detect-secrets scan --exclude-files '^\.secrets\.baseline$$' > reports/security/detect-secrets.json
 	git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline --exclude-files '^\.secrets\.baseline$$'
 
@@ -129,12 +131,12 @@ image:
 		echo ">>> Falta models/p2-riesgo/. Corre 'make export-model' primero."; \
 		exit 1; \
 	}
-	podman build --format docker -t $(IMAGE) -f Containerfile .
+	$(CONTAINER_ENGINE) build $(BUILD_FLAGS) -t $(IMAGE) -f Containerfile .
 
 ## Run the API container in the background
 .PHONY: container
 container:
-	podman run -d --rm --name $(IMAGE) -p $(API_PORT):8000 $(IMAGE)
+	$(CONTAINER_ENGINE) run -d --rm --name $(IMAGE) -p $(API_PORT):8000 $(IMAGE)
 
 ## Check that the running container answers /health and /predict
 .PHONY: smoke
