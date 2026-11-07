@@ -122,7 +122,8 @@ export-model:
 ## Restore the checked-in champion bundle (does not overwrite an existing export)
 .PHONY: prepare-model
 prepare-model:
-	python3 scripts/prepare_model.py
+	@test ! -e models/p2-riesgo || { echo ">>> models/p2-riesgo/ ya existe; consérvala o elimínala manualmente antes de preparar el bundle."; exit 1; }
+	python3 -m zipfile -e models/p2-champion-v3.zip .
 
 ## Run the API locally, without a container
 .PHONY: api

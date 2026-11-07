@@ -341,9 +341,9 @@ El archivo `Makefile` detecta automáticamente si el comando disponible es `podm
    ```bash
    make prepare-model
    ```
-   El archivo versionado `models/p2-champion-v3.zip` contiene el export del Registry `mibici-equipo05-p2-riesgo`, versión 3 (alias `champion` al exportarlo), run `7bf71250a91947ba8465d5db48d4bce5`. El comando verifica SHA-256 `73cab932d0eae7dbf2c4f78fe927610353a9184e86588d0eddf4cfcef23b305b` y crea `models/p2-riesgo/` con `MLmodel`, `model.pkl` y `registry_metadata.json`. Requiere Python 3 y no reemplaza una carpeta existente; para reemplazarla intencionalmente usa `python3 scripts/prepare_model.py --replace`.
+   El archivo `models/p2-champion-v3.zip` contiene el modelo exportado del Registry (versión 3, run `7bf71250…`). El comando lo descomprime en `models/p2-riesgo/` y no reemplaza una carpeta existente. Requiere Python 3.
 
-   **Alternativa con Registry:** `make export-model` exporta la versión actual del alias desde un Registry ya poblado. Instala primero el entorno con `uv sync` y configura `MLFLOW_TRACKING_URI` para ese servidor; el `mlflow.db` y los artefactos locales no forman parte del repositorio. Esta opción puede producir una versión diferente de la respuesta de ejemplo.
+   Si ya tienes acceso a un Registry poblado, también puedes usar `make export-model`. En ese caso configura `MLFLOW_TRACKING_URI`; el Registry y sus artefactos locales no están en Git.
 
 2. **Construir la imagen de contenedor:**
    ```bash
@@ -383,7 +383,7 @@ La documentación interactiva de OpenAPI está disponible en el navegador en `ht
 
 ### Ejemplos de uso con curl
 
-Respuestas observadas con el bundle v3 incluido; las probabilidades pueden variar ligeramente según el entorno.
+Las siguientes respuestas son de la reproducción en macOS con su propio Registry (versión 2). El bundle incluido corresponde a la versión 3 del Registry original; sus respuestas se muestran en las capturas de Linux más abajo.
 
 **Verificar estado del servicio:**
 ```bash
@@ -402,16 +402,16 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "3",
+  "model_version": "2",
   "model_alias": "champion",
-  "source_run_id": "7bf71250a91947ba8465d5db48d4bce5",
-  "git_commit": "71b6c42f47040bd5ada00078982a01fe6a8e9dd4",
-  "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
+  "source_run_id": "09e7594556024984bc6e542e7c32a2a2",
+  "git_commit": "8afe7750...",
+  "data_version": "4c54003c...",
   "thresholds": {
     "shortage": 0.2,
     "saturation": 0.95
   },
-  "exported_at": "2026-11-05T01:06:39Z"
+  "exported_at": "2026-11-06T18:04:38Z"
 }
 ```
 
@@ -425,7 +425,7 @@ Respuesta:
 ```json
 {
   "model_name": "mibici-equipo05-p2-riesgo",
-  "model_version": "3",
+  "model_version": "2",
   "thresholds": {
     "shortage": 0.2,
     "saturation": 0.95
@@ -436,9 +436,9 @@ Respuesta:
       "label": "Balanceado",
       "label_id": 0,
       "probabilities": {
-        "Balanceado": 0.9999242288798246,
-        "Riesgo_Desabasto": 0.000009484211217724505,
-        "Riesgo_Saturacion": 0.00006628690895762632
+        "Balanceado": 0.9999485654004165,
+        "Riesgo_Desabasto": 0.000005541168229884321,
+        "Riesgo_Saturacion": 0.0000458934313537335
       }
     }
   ]
@@ -456,7 +456,7 @@ Para validar la reproducibilidad técnica independiente del modelo champion de P
 | **Run ID** | `7bf71250` | `09e75945` | `d168b74c` |
 | **Commit de Git** | `71b6c42` | `8afe7750` | `8afe7750` |
 | **Entorno de ejecución** | Linux x86_64 | macOS Apple Silicon (ARM64) | macOS Apple Silicon (ARM64) |
-| **Motor de contenedores** | Podman (según registro del equipo) | Docker Desktop | Docker Desktop |
+| **Motor de contenedores** | Podman | Docker Desktop | Docker Desktop |
 | **Hiperparámetro `num_leaves`** | 255 | 255 | 31 (default) |
 | **Semilla determinista** | 42 | 42 | 42 |
 | **Umbral de desabasto (`shortage`)** | 0.20 | 0.20 | 0.40 |
@@ -475,7 +475,7 @@ Para validar la reproducibilidad técnica independiente del modelo champion de P
 #### Conclusiones de reproducibilidad
 
 1. **Paridad de umbrales.** La búsqueda conjunta de umbrales sobre el conjunto de validación arrojó exactamente los mismos puntos de corte (`shortage = 0.20`, `saturation = 0.95`) en ambas máquinas independientes.
-2. **Criterio de reproducibilidad (tolerancia del 30%).** Las métricas en el conjunto de prueba (diciembre) y validación mostraron una desviación relativa cercana al 1% entre Linux x86_64 y macOS ARM64 (`val_pr_auc_minority_mean` de 0.2884 frente a 0.2855, variación de 1.01%; `test_macro_f1` de 0.4578 frente a 0.4551, variación de 0.59%). Cumple holgadamente el criterio de aceptación del 30%.
+2. **Criterio de reproducibilidad (tolerancia del 30%).** Las métricas en el conjunto de prueba (diciembre) y validación mostraron una desviación relativa de alrededor de 1% entre Linux x86_64 y macOS ARM64 (`val_pr_auc_minority_mean` de 0.2884 frente a 0.2855, variación de 1.01%; `test_macro_f1` de 0.4578 frente a 0.4551, variación de 0.59%). Cumple holgadamente el criterio de aceptación del 30%.
 3. **Consistencia de inferencia.** La carga útil de prueba (`scripts/smoke_request.json`) produce la misma clasificación operativa (`Balanceado`, `label_id: 0`) con certidumbre superior al 99.99% en ambos modelos champion.
 4. **Auditoría completa de Git.** El run reproducido fue ejecutado sobre el commit base `8afe775` presente en `main`, garantizando trazabilidad completa en GitHub sin referencias a commits locales o inexistentes.
 
