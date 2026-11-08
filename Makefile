@@ -119,6 +119,12 @@ mlflow-server:
 export-model:
 	uv run python scripts/export_model.py
 
+## Restore the checked-in champion bundle (does not overwrite an existing export)
+.PHONY: prepare-model
+prepare-model:
+	@test ! -e models/p2-riesgo || { echo ">>> models/p2-riesgo/ ya existe; consérvala o elimínala manualmente antes de preparar el bundle."; exit 1; }
+	python3 -m zipfile -e models/p2-champion-v3.zip .
+
 ## Run the API locally, without a container
 .PHONY: api
 api:
@@ -128,7 +134,7 @@ api:
 .PHONY: image
 image:
 	@test -f models/p2-riesgo/registry_metadata.json || { \
-		echo ">>> Falta models/p2-riesgo/. Corre 'make export-model' primero."; \
+		echo ">>> Falta models/p2-riesgo/. Corre 'make prepare-model' o 'make export-model' primero."; \
 		exit 1; \
 	}
 	$(CONTAINER_ENGINE) build $(BUILD_FLAGS) -t $(IMAGE) -f Containerfile .
