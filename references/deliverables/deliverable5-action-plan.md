@@ -10,10 +10,6 @@
 
 ## Registro de decisiones
 
-Cerradas por Manuel el lunes 9. Igual que en la entrega 4, no hay reunión de
-arranque: el equipo empieza con estas decisiones y con el contrato de la sección 2. Si alguien
-propone un cambio, se platica en el chat del equipo y se registra aquí.
-
 | # | Decisión | Propuesta |
 |:---|:---|:---|
 | 5.1 | ✅ Modelo que se monitorea | **P2 riesgo** (`mibici-equipo05-p2-riesgo@champion`), el mismo que sirve la API de la entrega 4. Así la capa de observabilidad vigila al modelo que está "en producción". P2 tiene otra ventaja: su etiqueta se conoce una hora después, así que además del drift se puede medir el desempeño real en el periodo actual, cosa que con P3 no se puede |
