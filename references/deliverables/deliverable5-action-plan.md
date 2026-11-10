@@ -38,7 +38,7 @@ Revisión del repositorio al 9 de noviembre (`docs/plan-entrega5`, sobre el merg
 | Registry con challenger | ✅ `registry.py` registra con `--alias challenger`, hace pre-flight y no degrada al champion | Solo usarlo con el run del challenger |
 | A/B testing | ❌ | Módulo `monitoring/ab_test.py` con métricas, intervalos y la regla de decisión |
 | Recomendación de Continuous Training | ❌ | Sección del reporte |
-| Git colaborativo (10%) | ⚠️ Historial: Manuel ~100 commits, Oscar ~84, Fernando ~48, Emilio ~25 | Reparto parejo (sección 3): cada integrante tiene ~6 h, un paquete de código con pruebas, una sección del reporte y dos revisiones |
+| Git colaborativo (10%) | - | Reparto parejo (sección 3): cada integrante tiene ~6 h, un paquete de código con pruebas, una sección del reporte y dos revisiones |
 
 ### Problemas técnicos a resolver
 
