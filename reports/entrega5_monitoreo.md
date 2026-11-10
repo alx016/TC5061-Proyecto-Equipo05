@@ -3,8 +3,7 @@
 <!--
 Esqueleto del reporte (WP-5). Cada sección tiene un dueño: edita solo la tuya, en tu propio PR,
 para que los cambios no choquen. Los comentarios como este dicen qué va en cada sección y se
-borran cuando la sección queda escrita. Plan:
-references/deliverables/deliverable5-action-plan.md
+borran cuando la sección queda escrita.
 -->
 
 - **Proyecto:** TC5061 MLOps, Equipo 05. Datos abiertos de MiBici.
@@ -135,11 +134,8 @@ Esta regla se fijó el 9 de noviembre de 2026, antes de entrenar el challenger y
 cualquier resultado (decisión 5.6 del plan). El challenger reemplaza al champion solo si
 cumple las tres condiciones sobre el conjunto de evaluación:
 
-1. **Guardarraíl operativo:** `recall_shortage ≥ 0.85`.
-2. **Mejora real:** el intervalo de confianza del 95% de la diferencia
-   (challenger − champion) en `pr_auc_minority_mean` queda por encima de 0. El intervalo se
-   obtiene por bootstrap pareado por día (1 000 réplicas, semilla 42), remuestreando días
-   completos porque las filas de un mismo día están correlacionadas.
+1. **Requisito operativo mínimo:** `recall_shortage ≥ 0.85`.
+2. **Mejora real:** el intervalo de confianza del 95% de la diferencia (challenger − champion) en `pr_auc_minority_mean` queda por encima de 0. El intervalo se obtiene por bootstrap pareado por día (1 000 réplicas, semilla 42), remuestreando días completos porque las filas de un mismo día están correlacionadas.
 3. **No inferioridad:** `macro_f1` no baja más de 0.01 y `alerts_per_day` no sube más de 20%.
 
 Si alguna falla, el champion se queda.
@@ -147,10 +143,8 @@ Si alguna falla, el champion se queda.
 ### 4.3 Resultados
 
 <!--
-Tabla por versión: pr_auc_minority_mean, macro_f1, recall_shortage, recall_saturation,
-precision_shortage, alerts_per_day; diferencia con su intervalo del 95%; McNemar.
-Desglose por mes y por estaciones nuevas vs. comunes. Datos: reports/monitoring/ab_summary.json
-y el run de MLflow con stage_of_work=ab_test.
+Tabla por versión: pr_auc_minority_mean, macro_f1, recall_shortage, recall_saturation, precision_shortage, alerts_per_day; diferencia con su intervalo del 95%; McNemar.
+Desglose por mes y por estaciones nuevas vs. comunes. Datos: reports/monitoring/ab_summary.json y el run de MLflow con stage_of_work=ab_test.
 -->
 
 *Pendiente.*
