@@ -76,6 +76,9 @@ api = [
     "fastapi==0.143.3",
     "uvicorn==0.54.0",
 ]
+monitoring = [
+    "evidently==0.7.23",
+]
 
 [tool.uv]
-default-groups = ["dev", "notebooks", "docs", "api"]
+default-groups = ["dev", "notebooks", "docs", "api", "monitoring"]
