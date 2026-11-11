@@ -19,6 +19,9 @@ from tc5061_proyecto_equipo5.monitoring.drift import (
     DEFAULT_NUMERICAL_METHOD,
     FEATURE_COLUMNS,
     NUMERICAL_FEATURES,
+    PREDICTION_COLUMN,
+    TARGET_COLUMN,
+    ColumnMapping,
     DriftSummaryMetadata,
     DriftSummaryMetrics,
     DriftSummaryReport,
@@ -26,6 +29,8 @@ from tc5061_proyecto_equipo5.monitoring.drift import (
     build_data_definition,
     build_drift_report,
     compute_drift_summary,
+    load_champion_model,
+    score_dataset_predictions,
 )
 
 __all__ = [
@@ -40,9 +45,12 @@ __all__ = [
     "DRIFT_MONTHS",
     "FEATURE_COLUMNS",
     "NUMERICAL_FEATURES",
+    "PREDICTION_COLUMN",
     "REFERENCE_YEAR",
     "REQUIRED_DRIFT_DATASET_COLUMNS",
     "REQUIRED_METADATA_COLUMNS",
+    "TARGET_COLUMN",
+    "ColumnMapping",
     "DriftDatasetPair",
     "DriftSummaryMetadata",
     "DriftSummaryMetrics",
@@ -51,7 +59,9 @@ __all__ = [
     "build_data_definition",
     "build_drift_report",
     "compute_drift_summary",
+    "load_champion_model",
     "load_drift_datasets",
+    "score_dataset_predictions",
     "stratified_monthly_sample",
     "validate_drift_dataset_schema",
 ]

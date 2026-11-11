@@ -9,14 +9,32 @@ from tc5061_proyecto_equipo5.monitoring import (
     DRIFT_MONTHS,
     FEATURE_COLUMNS,
     NUMERICAL_FEATURES,
+    PREDICTION_COLUMN,
     REQUIRED_DRIFT_DATASET_COLUMNS,
     REQUIRED_METADATA_COLUMNS,
+    TARGET_COLUMN,
     DriftSummaryReport,
     compute_drift_summary,
     load_drift_datasets,
+    score_dataset_predictions,
     stratified_monthly_sample,
     validate_drift_dataset_schema,
 )
+
+
+class MockPyFunc:
+    def __init__(self, proba_fn):
+        self.proba_fn = proba_fn
+
+    def predict(self, df):
+        return self.proba_fn(df)
+
+
+class MockLoadedModel:
+    def __init__(self, proba_fn, classes=None, thresholds=None):
+        self.model = MockPyFunc(proba_fn)
+        self.classes = classes if classes is not None else [0, 1, 2]
+        self.thresholds = thresholds if thresholds is not None else {1: 0.2, 2: 0.95}
 
 
 @pytest.fixture
@@ -74,7 +92,8 @@ def test_negative_control_identical_data(synthetic_reference_df: pd.DataFrame) -
     assert report.summary.dataset_drift is False
     assert report.summary.drifted_features_count == 0
     assert report.summary.drifted_features_share == 0.0
-    assert len(report.features) == len(FEATURE_COLUMNS)
+    assert len(report.features) == len(FEATURE_COLUMNS) + 1
+    assert PREDICTION_COLUMN in report.features
 
     for col, result in report.features.items():
         assert result.drift_detected is False, f"Feature {col} unexpectedly flagged as drifted"
@@ -280,3 +299,131 @@ def test_stratified_monthly_sample_rejects_non_positive_sample_size(
 ) -> None:
     with pytest.raises(ValueError, match="sample_size must be positive"):
         stratified_monthly_sample(synthetic_temporal_drift_df, sample_size=0, seed=42)
+
+
+def test_score_dataset_predictions_assigns_operational_classes(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    sample_df = synthetic_reference_df.iloc[:3].copy()
+
+    def _mock_proba(df: pd.DataFrame) -> np.ndarray:
+        return np.array([
+            [0.90, 0.05, 0.05],
+            [0.10, 0.80, 0.10],
+            [0.01, 0.01, 0.98],
+        ])
+
+    mock_model = MockLoadedModel(_mock_proba)
+    scored = score_dataset_predictions(sample_df, mock_model)
+
+    assert PREDICTION_COLUMN in scored.columns
+    assert scored[PREDICTION_COLUMN].dtype == "int8"
+    assert scored[PREDICTION_COLUMN].tolist() == [0, 1, 2]
+
+    broken_df = sample_df.drop(columns=["capacity"])
+    with pytest.raises(ValueError, match="Missing required feature columns"):
+        score_dataset_predictions(broken_df, mock_model)
+
+
+def test_compute_drift_summary_includes_target_and_prediction_drift(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    ref_df = synthetic_reference_df.copy()
+    ref_df[TARGET_COLUMN] = 0
+    curr_df = synthetic_reference_df.copy()
+    curr_df[TARGET_COLUMN] = 0
+
+    def _mock_proba(df: pd.DataFrame) -> np.ndarray:
+        n = len(df)
+        probs = np.zeros((n, 3))
+        probs[:, 0] = 0.95
+        probs[:, 1] = 0.03
+        probs[:, 2] = 0.02
+        return probs
+
+    mock_model = MockLoadedModel(_mock_proba)
+    report = compute_drift_summary(ref_df, curr_df, model=mock_model)
+
+    assert TARGET_COLUMN in report.features
+    assert PREDICTION_COLUMN in report.features
+    assert report.features[TARGET_COLUMN].metric_name == "jensenshannon"
+    assert report.features[PREDICTION_COLUMN].metric_name == "jensenshannon"
+    assert len(report.features) == len(FEATURE_COLUMNS) + 2
+
+
+def test_positive_prediction_drift_detection(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    ref_df = synthetic_reference_df.copy()
+    curr_df = synthetic_reference_df.copy()
+
+    def _mock_proba(df: pd.DataFrame) -> np.ndarray:
+        n = len(df)
+        probs = np.zeros((n, 3))
+        is_curr = (df["capacity"] > 50.0).to_numpy()
+        probs[~is_curr, 0] = 0.90
+        probs[~is_curr, 1] = 0.05
+        probs[~is_curr, 2] = 0.05
+        probs[is_curr, 0] = 0.05
+        probs[is_curr, 1] = 0.90
+        probs[is_curr, 2] = 0.05
+        return probs
+
+    curr_df["capacity"] = 100.0
+    mock_model = MockLoadedModel(_mock_proba)
+
+    report = compute_drift_summary(ref_df, curr_df, model=mock_model)
+
+    assert report.features[PREDICTION_COLUMN].drift_detected is True
+    assert report.features[PREDICTION_COLUMN].score > report.features[PREDICTION_COLUMN].threshold
+    assert report.features[PREDICTION_COLUMN].metric_name == "jensenshannon"
+
+
+def test_positive_concept_drift_detection(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    ref_df = synthetic_reference_df.copy()
+    ref_df[TARGET_COLUMN] = 0
+    curr_df = synthetic_reference_df.copy()
+    curr_df[TARGET_COLUMN] = 2
+
+    def _mock_proba(df: pd.DataFrame) -> np.ndarray:
+        n = len(df)
+        probs = np.zeros((n, 3))
+        probs[:, 0] = 0.95
+        probs[:, 1] = 0.03
+        probs[:, 2] = 0.02
+        return probs
+
+    mock_model = MockLoadedModel(_mock_proba)
+    report = compute_drift_summary(ref_df, curr_df, model=mock_model)
+
+    assert report.features[TARGET_COLUMN].drift_detected is True
+    assert report.features[TARGET_COLUMN].score > report.features[TARGET_COLUMN].threshold
+    assert report.features[TARGET_COLUMN].metric_name == "jensenshannon"
+
+
+def test_skip_prediction_flag(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
+
+    assert PREDICTION_COLUMN not in report.features
+    assert len(report.features) == len(FEATURE_COLUMNS)
+
+
+def test_model_fallback_on_missing_model(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    report = compute_drift_summary(
+        synthetic_reference_df,
+        current_df,
+        model_uri="invalid/path/nonexistent_model",
+        skip_prediction=False,
+    )
+
+    assert PREDICTION_COLUMN not in report.features
+    assert len(report.features) == len(FEATURE_COLUMNS)
+    assert report.summary.dataset_drift is False

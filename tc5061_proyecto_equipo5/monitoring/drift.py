@@ -1,15 +1,27 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from evidently import Dataset, Report
-from evidently.core.datasets import DataDefinition
+from evidently.core.datasets import DataDefinition, MulticlassClassification
 from evidently.core.metric_types import TestStatus
 from evidently.presets import DataDriftPreset, DataSummaryPreset
+from loguru import logger
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
+from tc5061_proyecto_equipo5.api.model import (
+    SIGNATURE_DTYPES,
+    LoadedModel,
+    load_model,
+)
 from tc5061_proyecto_equipo5.config import SEED
+from tc5061_proyecto_equipo5.modeling.train_classification import apply_thresholds
+
+TARGET_COLUMN: str = "target"
+PREDICTION_COLUMN: str = "prediction"
 
 FEATURE_COLUMNS: list[str] = [
     "capacity",
@@ -41,6 +53,14 @@ DEFAULT_DRIFT_THRESHOLD: float = 0.1
 DEFAULT_DRIFT_SHARE: float = 0.5
 
 
+@dataclass
+class ColumnMapping:
+    target: str | None = TARGET_COLUMN
+    prediction: str | None = PREDICTION_COLUMN
+    numerical_features: list[str] | None = None
+    categorical_features: list[str] | None = None
+
+
 class FeatureDriftResult(BaseModel):
     drift_detected: bool
     metric_name: str
@@ -68,20 +88,53 @@ class DriftSummaryReport(BaseModel):
     features: dict[str, FeatureDriftResult]
 
 
+def score_dataset_predictions(
+    df: pd.DataFrame,
+    loaded_model: LoadedModel | Any,
+    prediction_column: str = PREDICTION_COLUMN,
+) -> pd.DataFrame:
+    """Score dataset records with the champion model and append operational class labels."""
+    missing = [col for col in FEATURE_COLUMNS if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required feature columns for prediction: {missing}")
+
+    out_df = df.copy()
+    features_df = out_df[FEATURE_COLUMNS].astype(SIGNATURE_DTYPES)
+    proba = loaded_model.model.predict(features_df)
+    labels = apply_thresholds(proba, loaded_model.classes, loaded_model.thresholds)
+    out_df[prediction_column] = labels.astype("int8")
+    return out_df
+
+
+def load_champion_model(uri: str | None = None) -> LoadedModel:
+    """Load the champion model using the API model loader."""
+    return load_model(uri)
+
+
 def build_data_definition(
     columns: list[str] | None = None,
     df: pd.DataFrame | None = None,
+    column_mapping: ColumnMapping | None = None,
 ) -> DataDefinition:
-    """Build an Evidently DataDefinition ensuring correct feature types."""
+    """Build an Evidently DataDefinition ensuring correct feature and target/prediction types."""
+    effective_cm = column_mapping if column_mapping is not None else ColumnMapping()
     target_columns = (
         list(columns)
         if columns is not None
         else (list(df.columns) if df is not None else list(FEATURE_COLUMNS))
     )
+    extra_cats = set(CATEGORICAL_FEATURES)
+    if effective_cm.categorical_features:
+        extra_cats.update(effective_cm.categorical_features)
+    if effective_cm.target:
+        extra_cats.add(effective_cm.target)
+    if effective_cm.prediction:
+        extra_cats.add(effective_cm.prediction)
+
     num_cols: list[str] = []
     cat_cols: list[str] = []
     for col in target_columns:
-        if col in CATEGORICAL_FEATURES or (
+        if col in extra_cats or (
             df is not None
             and col in df.columns
             and (
@@ -93,9 +146,24 @@ def build_data_definition(
             cat_cols.append(col)
         else:
             num_cols.append(col)
+
+    classification = None
+    target_in = bool(effective_cm.target and effective_cm.target in target_columns)
+    pred_in = bool(effective_cm.prediction and effective_cm.prediction in target_columns)
+    if target_in or pred_in:
+        classification = [
+            MulticlassClassification(
+                target=effective_cm.target if target_in else (effective_cm.target or "target"),
+                prediction_labels=effective_cm.prediction
+                if pred_in
+                else (effective_cm.prediction or "prediction"),
+            )
+        ]
+
     return DataDefinition(
         numerical_columns=num_cols,
         categorical_columns=cat_cols,
+        classification=classification,
     )
 
 
@@ -109,12 +177,12 @@ def build_drift_report(
 ) -> Report:
     """Configure an Evidently Report with DataDriftPreset and DataSummaryPreset."""
     target_columns = list(columns) if columns is not None else list(FEATURE_COLUMNS)
+    categorical_set = set(CATEGORICAL_FEATURES) | {TARGET_COLUMN, PREDICTION_COLUMN}
     per_column_method = {
-        col: (cat_method if col in CATEGORICAL_FEATURES else num_method) for col in target_columns
+        col: (cat_method if col in categorical_set else num_method) for col in target_columns
     }
     per_column_threshold = {
-        col: (cat_threshold if col in CATEGORICAL_FEATURES else num_threshold)
-        for col in target_columns
+        col: (cat_threshold if col in categorical_set else num_threshold) for col in target_columns
     }
 
     drift_preset = DataDriftPreset(
@@ -143,26 +211,51 @@ def compute_drift_summary(
     cat_threshold: float = 0.1,
     drift_share: float = 0.5,
     output_path: Path | str | None = None,
+    column_mapping: ColumnMapping | None = None,
+    model: LoadedModel | Any | None = None,
+    model_uri: str | None = None,
+    skip_prediction: bool = False,
 ) -> DriftSummaryReport:
     """Run drift detection between reference and current datasets and return summary."""
     effective_seed = seed if seed is not None else SEED
+    effective_cm = column_mapping if column_mapping is not None else ColumnMapping()
+    target_col = effective_cm.target or TARGET_COLUMN
+    pred_col = effective_cm.prediction or PREDICTION_COLUMN
 
     if sample_size is not None:
         ref_df = (
             reference_data.sample(n=sample_size, random_state=effective_seed)
             if len(reference_data) > sample_size
-            else reference_data
+            else reference_data.copy()
         )
         curr_df = (
             current_data.sample(n=sample_size, random_state=effective_seed)
             if len(current_data) > sample_size
-            else current_data
+            else current_data.copy()
         )
         effective_sample_size = sample_size
     else:
-        ref_df = reference_data
-        curr_df = current_data
+        ref_df = reference_data.copy()
+        curr_df = current_data.copy()
         effective_sample_size = len(reference_data)
+
+    if not skip_prediction:
+        effective_model = model
+        if effective_model is None:
+            try:
+                effective_model = load_champion_model(model_uri)
+            except Exception as exc:  # noqa: BLE001 - graceful fallback across model loading errors
+                logger.warning(
+                    f"Could not load champion model from '{model_uri}': {exc}. "
+                    "Skipping prediction scoring."
+                )
+                effective_model = None
+
+        if effective_model is not None:
+            ref_df = score_dataset_predictions(ref_df, effective_model, prediction_column=pred_col)
+            curr_df = score_dataset_predictions(
+                curr_df, effective_model, prediction_column=pred_col
+            )
 
     if columns is not None:
         target_columns = list(columns)
@@ -173,9 +266,36 @@ def compute_drift_summary(
             c for c in FEATURE_COLUMNS if c in ref_df.columns and c in curr_df.columns
         ] or [c for c in ref_df.columns if c in curr_df.columns]
 
-    data_def = build_data_definition(columns=target_columns, df=ref_df)
-    ds_ref = Dataset.from_pandas(ref_df[target_columns], data_definition=data_def)
-    ds_curr = Dataset.from_pandas(curr_df[target_columns], data_definition=data_def)
+    if columns is None:
+        if (
+            target_col in ref_df.columns
+            and target_col in curr_df.columns
+            and target_col not in target_columns
+        ):
+            target_columns.append(target_col)
+        if (
+            not skip_prediction
+            and pred_col in ref_df.columns
+            and pred_col in curr_df.columns
+            and pred_col not in target_columns
+        ):
+            target_columns.append(pred_col)
+
+    data_def = build_data_definition(
+        columns=target_columns,
+        df=ref_df,
+        column_mapping=effective_cm,
+    )
+    ref_evidently = ref_df[target_columns].copy()
+    curr_evidently = curr_df[target_columns].copy()
+    for col in target_columns:
+        if ref_evidently[col].dtype == "int8":
+            ref_evidently[col] = ref_evidently[col].astype("int32")
+        if curr_evidently[col].dtype == "int8":
+            curr_evidently[col] = curr_evidently[col].astype("int32")
+
+    ds_ref = Dataset.from_pandas(ref_evidently, data_definition=data_def)
+    ds_curr = Dataset.from_pandas(curr_evidently, data_definition=data_def)
 
     report = build_drift_report(
         columns=target_columns,
