@@ -1,3 +1,16 @@
+from tc5061_proyecto_equipo5.monitoring.datasets import (
+    CURRENT_YEAR,
+    DEFAULT_SAMPLE_SIZE,
+    DEFAULT_SEED,
+    DRIFT_MONTHS,
+    REFERENCE_YEAR,
+    REQUIRED_DRIFT_DATASET_COLUMNS,
+    REQUIRED_METADATA_COLUMNS,
+    DriftDatasetPair,
+    load_drift_datasets,
+    stratified_monthly_sample,
+    validate_drift_dataset_schema,
+)
 from tc5061_proyecto_equipo5.monitoring.drift import (
     CATEGORICAL_FEATURES,
     DEFAULT_CATEGORICAL_METHOD,
@@ -17,12 +30,20 @@ from tc5061_proyecto_equipo5.monitoring.drift import (
 
 __all__ = [
     "CATEGORICAL_FEATURES",
+    "CURRENT_YEAR",
     "DEFAULT_CATEGORICAL_METHOD",
     "DEFAULT_DRIFT_SHARE",
     "DEFAULT_DRIFT_THRESHOLD",
     "DEFAULT_NUMERICAL_METHOD",
+    "DEFAULT_SAMPLE_SIZE",
+    "DEFAULT_SEED",
+    "DRIFT_MONTHS",
     "FEATURE_COLUMNS",
     "NUMERICAL_FEATURES",
+    "REFERENCE_YEAR",
+    "REQUIRED_DRIFT_DATASET_COLUMNS",
+    "REQUIRED_METADATA_COLUMNS",
+    "DriftDatasetPair",
     "DriftSummaryMetadata",
     "DriftSummaryMetrics",
     "DriftSummaryReport",
@@ -30,4 +51,7 @@ __all__ = [
     "build_data_definition",
     "build_drift_report",
     "compute_drift_summary",
+    "load_drift_datasets",
+    "stratified_monthly_sample",
+    "validate_drift_dataset_schema",
 ]
