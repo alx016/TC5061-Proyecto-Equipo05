@@ -162,7 +162,8 @@ def load_drift_datasets(
         ref_source = CLASSIFICATION_FEATURES_PATH
 
     if curr_source is None:
-        assert ref_source is not None
+        if ref_source is None:
+            ref_source = CLASSIFICATION_FEATURES_PATH
         combined_df = _coerce_dataframe(ref_source)
         validate_drift_dataset_schema(combined_df)
         ref_raw = _filter_partition(
