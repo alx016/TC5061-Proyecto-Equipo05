@@ -13,10 +13,12 @@ from tc5061_proyecto_equipo5.monitoring.datasets import (
 )
 from tc5061_proyecto_equipo5.monitoring.drift import (
     CATEGORICAL_FEATURES,
+    DATA_DRIFT_SHARE_TRIGGER,
     DEFAULT_CATEGORICAL_METHOD,
     DEFAULT_DRIFT_SHARE,
     DEFAULT_DRIFT_THRESHOLD,
     DEFAULT_NUMERICAL_METHOD,
+    DEFAULT_TOP_IMPORTANCE_FEATURES,
     FEATURE_COLUMNS,
     NUMERICAL_FEATURES,
     PREDICTION_COLUMN,
@@ -30,18 +32,22 @@ from tc5061_proyecto_equipo5.monitoring.drift import (
     build_drift_report,
     compute_drift_summary,
     load_champion_model,
+    run_drift_pipeline,
     score_dataset_predictions,
 )
+from tc5061_proyecto_equipo5.monitoring.plots import export_drift_distribution_plots
 
 __all__ = [
     "CATEGORICAL_FEATURES",
     "CURRENT_YEAR",
+    "DATA_DRIFT_SHARE_TRIGGER",
     "DEFAULT_CATEGORICAL_METHOD",
     "DEFAULT_DRIFT_SHARE",
     "DEFAULT_DRIFT_THRESHOLD",
     "DEFAULT_NUMERICAL_METHOD",
     "DEFAULT_SAMPLE_SIZE",
     "DEFAULT_SEED",
+    "DEFAULT_TOP_IMPORTANCE_FEATURES",
     "DRIFT_MONTHS",
     "FEATURE_COLUMNS",
     "NUMERICAL_FEATURES",
@@ -59,8 +65,10 @@ __all__ = [
     "build_data_definition",
     "build_drift_report",
     "compute_drift_summary",
+    "export_drift_distribution_plots",
     "load_champion_model",
     "load_drift_datasets",
+    "run_drift_pipeline",
     "score_dataset_predictions",
     "stratified_monthly_sample",
     "validate_drift_dataset_schema",

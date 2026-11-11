@@ -1,6 +1,9 @@
+import argparse
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+import sys
 from typing import Any
 
 from evidently import Dataset, Report
@@ -17,7 +20,12 @@ from tc5061_proyecto_equipo5.api.model import (
     LoadedModel,
     load_model,
 )
-from tc5061_proyecto_equipo5.config import SEED
+from tc5061_proyecto_equipo5.config import (
+    CLASSIFICATION_FEATURES_PATH,
+    FIGURES_DIR,
+    REPORTS_DIR,
+    SEED,
+)
 from tc5061_proyecto_equipo5.modeling.train_classification import apply_thresholds
 
 TARGET_COLUMN: str = "target"
@@ -52,6 +60,13 @@ DEFAULT_CATEGORICAL_METHOD: str = "jensenshannon"
 DEFAULT_DRIFT_THRESHOLD: float = 0.1
 DEFAULT_DRIFT_SHARE: float = 0.5
 
+DEFAULT_TOP_IMPORTANCE_FEATURES: tuple[str, ...] = (
+    "neighbor_net_flow",
+    "latitude",
+    "longitude",
+)
+DATA_DRIFT_SHARE_TRIGGER: float = 0.30
+
 
 @dataclass
 class ColumnMapping:
@@ -80,6 +95,8 @@ class DriftSummaryMetrics(BaseModel):
     dataset_drift: bool
     drifted_features_count: int
     drifted_features_share: float
+    trigger_data_drift: bool = False
+    trigger_label_drift: bool = False
 
 
 class DriftSummaryReport(BaseModel):
@@ -211,10 +228,13 @@ def compute_drift_summary(
     cat_threshold: float = 0.1,
     drift_share: float = 0.5,
     output_path: Path | str | None = None,
+    html_output_path: Path | str | None = None,
     column_mapping: ColumnMapping | None = None,
     model: LoadedModel | Any | None = None,
     model_uri: str | None = None,
     skip_prediction: bool = False,
+    top_importance_features: Sequence[str] = DEFAULT_TOP_IMPORTANCE_FEATURES,
+    data_drift_share_trigger: float = DATA_DRIFT_SHARE_TRIGGER,
 ) -> DriftSummaryReport:
     """Run drift detection between reference and current datasets and return summary."""
     effective_seed = seed if seed is not None else SEED
@@ -340,6 +360,26 @@ def compute_drift_summary(
     drifted_share = (drifted_count / len(features)) if features else 0.0
     dataset_drift = bool(drifted_share >= drift_share)
 
+    label_cols = {target_col, pred_col, TARGET_COLUMN, PREDICTION_COLUMN}
+    input_feature_cols = [c for c in features if c not in label_cols]
+    input_drifted_count = sum(1 for c in input_feature_cols if features[c].drift_detected)
+    input_drifted_share = (
+        (input_drifted_count / len(input_feature_cols)) if input_feature_cols else 0.0
+    )
+
+    top_importance_drifted = any(
+        features[c].drift_detected for c in top_importance_features if c in features
+    )
+    trigger_data_drift = bool(
+        input_drifted_share > data_drift_share_trigger or top_importance_drifted
+    )
+
+    trigger_label_drift = any(
+        features[c].drift_detected
+        for c in (target_col, pred_col, TARGET_COLUMN, PREDICTION_COLUMN)
+        if c in features
+    )
+
     metadata = DriftSummaryMetadata(
         timestamp=datetime.now(UTC).isoformat(),
         sample_size=effective_sample_size,
@@ -352,6 +392,8 @@ def compute_drift_summary(
         dataset_drift=dataset_drift,
         drifted_features_count=drifted_count,
         drifted_features_share=drifted_share,
+        trigger_data_drift=trigger_data_drift,
+        trigger_label_drift=trigger_label_drift,
     )
 
     summary_report = DriftSummaryReport(
@@ -365,4 +407,204 @@ def compute_drift_summary(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(summary_report.model_dump_json(indent=2), encoding="utf-8")
 
+    if html_output_path is not None:
+        html_path = Path(html_output_path)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.save_html(str(html_path))
+
     return summary_report
+
+
+def run_drift_pipeline(
+    reference_path: Path | str | None = None,
+    current_path: Path | str | None = None,
+    dataset: pd.DataFrame | Path | str | None = None,
+    sample_size: int | None = None,
+    seed: int = SEED,
+    output_dir: Path | str | None = None,
+    figures_dir: Path | str | None = None,
+    html_filename: str = "drift_2024_vs_2025.html",
+    json_filename: str = "drift_summary.json",
+    model_uri: str | None = None,
+    skip_prediction: bool = False,
+    top_k_plots: int = 3,
+    top_importance_features: Sequence[str] = DEFAULT_TOP_IMPORTANCE_FEATURES,
+    data_drift_share_trigger: float = DATA_DRIFT_SHARE_TRIGGER,
+) -> tuple[DriftSummaryReport, list[Path]]:
+    """Execute complete drift monitoring pipeline with reports and distribution figures."""
+    from tc5061_proyecto_equipo5.monitoring.datasets import (
+        DEFAULT_SAMPLE_SIZE,
+        load_drift_datasets,
+    )
+    from tc5061_proyecto_equipo5.monitoring.plots import export_drift_distribution_plots
+
+    effective_sample_size = sample_size if sample_size is not None else DEFAULT_SAMPLE_SIZE
+    effective_output_dir = (
+        Path(output_dir) if output_dir is not None else (REPORTS_DIR / "monitoring")
+    )
+    effective_figures_dir = (
+        Path(figures_dir) if figures_dir is not None else (FIGURES_DIR / "entrega5")
+    )
+    effective_output_dir.mkdir(parents=True, exist_ok=True)
+    effective_figures_dir.mkdir(parents=True, exist_ok=True)
+
+    html_output_path = effective_output_dir / html_filename
+    json_output_path = effective_output_dir / json_filename
+
+    pair = load_drift_datasets(
+        dataset=dataset,
+        reference_path=reference_path,
+        current_path=current_path,
+        sample_size=effective_sample_size,
+        seed=seed,
+    )
+
+    ref_df = pair.reference
+    curr_df = pair.current
+
+    effective_model = None
+    if not skip_prediction:
+        try:
+            effective_model = load_champion_model(model_uri)
+            ref_df = score_dataset_predictions(ref_df, effective_model)
+            curr_df = score_dataset_predictions(curr_df, effective_model)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"Could not load champion model from '{model_uri}': {exc}. "
+                "Skipping prediction scoring."
+            )
+
+    summary_report = compute_drift_summary(
+        reference_data=ref_df,
+        current_data=curr_df,
+        sample_size=None,
+        seed=seed,
+        output_path=json_output_path,
+        html_output_path=html_output_path,
+        model=effective_model,
+        skip_prediction=skip_prediction,
+        top_importance_features=top_importance_features,
+        data_drift_share_trigger=data_drift_share_trigger,
+    )
+
+    figures: list[Path] = []
+    if top_k_plots > 0:
+        figures = export_drift_distribution_plots(
+            reference_df=ref_df,
+            current_df=curr_df,
+            summary_report=summary_report,
+            output_dir=effective_figures_dir,
+            top_k=top_k_plots,
+        )
+
+    return summary_report, figures
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run CLI entrypoint for drift monitoring and artifact generation."""
+    from tc5061_proyecto_equipo5.monitoring.datasets import (
+        DEFAULT_SAMPLE_SIZE,
+        DEFAULT_SEED,
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="python -m tc5061_proyecto_equipo5.monitoring.drift",
+        description="Run Evidently data, prediction, and concept drift monitoring pipeline.",
+    )
+    parser.add_argument(
+        "--reference-path",
+        type=Path,
+        default=CLASSIFICATION_FEATURES_PATH,
+        help="Path to reference dataset (2024 train partition) or shared features parquet.",
+    )
+    parser.add_argument(
+        "--current-path",
+        type=Path,
+        default=None,
+        help="Path to current dataset (2025 current partition). If omitted, loads from reference-path.",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=DEFAULT_SAMPLE_SIZE,
+        help="Maximum stratified sample size per dataset partition.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help="Random seed for sampling reproducibility.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=REPORTS_DIR / "monitoring",
+        help="Directory where HTML and JSON drift reports will be saved.",
+    )
+    parser.add_argument(
+        "--figures-dir",
+        type=Path,
+        default=FIGURES_DIR / "entrega5",
+        help="Directory where comparison distribution plots (PNG) will be saved.",
+    )
+    parser.add_argument(
+        "--model-uri",
+        type=str,
+        default=None,
+        help="MLflow model URI for champion model. If omitted, uses default champion.",
+    )
+    parser.add_argument(
+        "--skip-prediction",
+        action="store_true",
+        default=False,
+        help="Skip model prediction scoring and prediction drift evaluation.",
+    )
+    parser.add_argument(
+        "--top-k-plots",
+        type=int,
+        default=3,
+        help="Number of top drifted features to plot in addition to target and prediction.",
+    )
+    parser.add_argument(
+        "--html-filename",
+        type=str,
+        default="drift_2024_vs_2025.html",
+        help="Filename for the interactive HTML Evidently report.",
+    )
+    parser.add_argument(
+        "--json-filename",
+        type=str,
+        default="drift_summary.json",
+        help="Filename for the structured JSON summary report.",
+    )
+
+    args = parser.parse_args(argv)
+
+    try:
+        report, figures = run_drift_pipeline(
+            reference_path=args.reference_path,
+            current_path=args.current_path,
+            sample_size=args.sample_size,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            figures_dir=args.figures_dir,
+            html_filename=args.html_filename,
+            json_filename=args.json_filename,
+            model_uri=args.model_uri,
+            skip_prediction=args.skip_prediction,
+            top_k_plots=args.top_k_plots,
+        )
+        logger.info(
+            f"Drift monitoring pipeline succeeded: dataset_drift={report.summary.dataset_drift}, "
+            f"trigger_data_drift={report.summary.trigger_data_drift}, "
+            f"trigger_label_drift={report.summary.trigger_label_drift}, "
+            f"figures={len(figures)}"
+        )
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Drift monitoring pipeline failed: {exc}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

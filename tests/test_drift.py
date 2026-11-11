@@ -6,6 +6,8 @@ import pandas as pd
 import pytest
 
 from tc5061_proyecto_equipo5.monitoring import (
+    DATA_DRIFT_SHARE_TRIGGER,
+    DEFAULT_TOP_IMPORTANCE_FEATURES,
     DRIFT_MONTHS,
     FEATURE_COLUMNS,
     NUMERICAL_FEATURES,
@@ -15,11 +17,14 @@ from tc5061_proyecto_equipo5.monitoring import (
     TARGET_COLUMN,
     DriftSummaryReport,
     compute_drift_summary,
+    export_drift_distribution_plots,
     load_drift_datasets,
+    run_drift_pipeline,
     score_dataset_predictions,
     stratified_monthly_sample,
     validate_drift_dataset_schema,
 )
+from tc5061_proyecto_equipo5.monitoring.drift import main
 
 
 class MockPyFunc:
@@ -307,11 +312,13 @@ def test_score_dataset_predictions_assigns_operational_classes(
     sample_df = synthetic_reference_df.iloc[:3].copy()
 
     def _mock_proba(df: pd.DataFrame) -> np.ndarray:
-        return np.array([
-            [0.90, 0.05, 0.05],
-            [0.10, 0.80, 0.10],
-            [0.01, 0.01, 0.98],
-        ])
+        return np.array(
+            [
+                [0.90, 0.05, 0.05],
+                [0.10, 0.80, 0.10],
+                [0.01, 0.01, 0.98],
+            ]
+        )
 
     mock_model = MockLoadedModel(_mock_proba)
     scored = score_dataset_predictions(sample_df, mock_model)
@@ -427,3 +434,228 @@ def test_model_fallback_on_missing_model(
     assert PREDICTION_COLUMN not in report.features
     assert len(report.features) == len(FEATURE_COLUMNS)
     assert report.summary.dataset_drift is False
+
+
+def test_drift_triggers_negative_control(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    report = compute_drift_summary(synthetic_reference_df, current_df)
+
+    assert report.summary.trigger_data_drift is False
+    assert report.summary.trigger_label_drift is False
+
+
+def test_trigger_data_drift_via_top_importance_feature(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    current_df["neighbor_net_flow"] = (
+        current_df["neighbor_net_flow"] + 5.0 * synthetic_reference_df["neighbor_net_flow"].std()
+    )
+    report = compute_drift_summary(synthetic_reference_df, current_df)
+
+    assert report.features["neighbor_net_flow"].drift_detected is True
+    assert report.summary.trigger_data_drift is True
+    assert report.summary.trigger_label_drift is False
+
+
+def test_trigger_data_drift_via_share_threshold(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    current_df["capacity"] = (
+        current_df["capacity"] + 5.0 * synthetic_reference_df["capacity"].std()
+    )
+
+    report_below = compute_drift_summary(
+        synthetic_reference_df,
+        current_df,
+        top_importance_features=("latitude", "longitude"),
+        data_drift_share_trigger=0.30,
+    )
+    assert report_below.features["capacity"].drift_detected is True
+    assert report_below.summary.trigger_data_drift is False
+
+    report_above = compute_drift_summary(
+        synthetic_reference_df,
+        current_df,
+        top_importance_features=("latitude", "longitude"),
+        data_drift_share_trigger=0.04,
+    )
+    assert report_above.summary.trigger_data_drift is True
+
+
+def test_trigger_label_drift_on_target_and_prediction(
+    synthetic_reference_df: pd.DataFrame,
+) -> None:
+    ref_target_drift = synthetic_reference_df.copy()
+    ref_target_drift[TARGET_COLUMN] = 0
+    curr_target_drift = synthetic_reference_df.copy()
+    curr_target_drift[TARGET_COLUMN] = 2
+
+    report_target = compute_drift_summary(
+        ref_target_drift,
+        curr_target_drift,
+        skip_prediction=True,
+    )
+    assert report_target.features[TARGET_COLUMN].drift_detected is True
+    assert report_target.summary.trigger_label_drift is True
+
+    ref_pred_drift = synthetic_reference_df.copy()
+    curr_pred_drift = synthetic_reference_df.copy()
+
+    def _mock_proba(df: pd.DataFrame) -> np.ndarray:
+        n = len(df)
+        probs = np.zeros((n, 3))
+        is_curr = (df["capacity"] > 50.0).to_numpy()
+        probs[~is_curr, 0] = 0.90
+        probs[~is_curr, 1] = 0.05
+        probs[~is_curr, 2] = 0.05
+        probs[is_curr, 0] = 0.05
+        probs[is_curr, 1] = 0.90
+        probs[is_curr, 2] = 0.05
+        return probs
+
+    curr_pred_drift["capacity"] = 100.0
+    mock_model = MockLoadedModel(_mock_proba)
+
+    report_pred = compute_drift_summary(
+        ref_pred_drift,
+        curr_pred_drift,
+        model=mock_model,
+    )
+    assert report_pred.features[PREDICTION_COLUMN].drift_detected is True
+    assert report_pred.summary.trigger_label_drift is True
+
+
+def test_compute_drift_summary_html_export(
+    synthetic_reference_df: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    current_df = synthetic_reference_df.copy()
+    html_file = tmp_path / "reports" / "drift.html"
+
+    report = compute_drift_summary(
+        synthetic_reference_df,
+        current_df,
+        html_output_path=html_file,
+    )
+
+    assert html_file.exists()
+    assert html_file.stat().st_size > 1000
+    html_content = html_file.read_text(encoding="utf-8")
+    assert "<html" in html_content.lower()
+    assert report.summary.drifted_features_count == 0
+
+
+def test_export_drift_distribution_plots(
+    synthetic_reference_df: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    ref_df = synthetic_reference_df.copy()
+    ref_df[TARGET_COLUMN] = 0
+    ref_df[PREDICTION_COLUMN] = 0
+
+    curr_df = synthetic_reference_df.copy()
+    curr_df[TARGET_COLUMN] = 1
+    curr_df[PREDICTION_COLUMN] = 2
+    curr_df["capacity"] = curr_df["capacity"] + 5.0 * ref_df["capacity"].std()
+
+    report = compute_drift_summary(
+        ref_df,
+        curr_df,
+        skip_prediction=True,
+    )
+
+    figs_dir = tmp_path / "figures"
+    paths = export_drift_distribution_plots(
+        reference_df=ref_df,
+        current_df=curr_df,
+        summary_report=report,
+        output_dir=figs_dir,
+        top_k=2,
+    )
+
+    assert len(paths) >= 3
+    for p in paths:
+        assert p.exists()
+        assert p.stat().st_size > 0
+        assert p.suffix == ".png"
+
+    assert (figs_dir / f"drift_{TARGET_COLUMN}.png").exists()
+    assert (figs_dir / f"drift_{PREDICTION_COLUMN}.png").exists()
+
+
+def test_main_cli_end_to_end(
+    synthetic_temporal_drift_df: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    parquet_path = tmp_path / "classification_features.parquet"
+    synthetic_temporal_drift_df.to_parquet(parquet_path, index=False)
+
+    out_dir = tmp_path / "monitoring"
+    figs_dir = tmp_path / "figures" / "entrega5"
+
+    exit_code = main(
+        [
+            f"--reference-path={parquet_path}",
+            f"--output-dir={out_dir}",
+            f"--figures-dir={figs_dir}",
+            "--skip-prediction",
+            "--sample-size=90",
+            "--seed=42",
+            "--top-k-plots=2",
+            "--html-filename=test_drift.html",
+            "--json-filename=test_summary.json",
+        ]
+    )
+
+    assert exit_code == 0
+
+    json_file = out_dir / "test_summary.json"
+    html_file = out_dir / "test_drift.html"
+
+    assert json_file.exists()
+    assert html_file.exists()
+    assert html_file.stat().st_size > 1000
+
+    payload = json.loads(json_file.read_text(encoding="utf-8"))
+    parsed = DriftSummaryReport.model_validate(payload)
+    assert parsed.metadata.sample_size == 90
+    assert hasattr(parsed.summary, "trigger_data_drift")
+    assert hasattr(parsed.summary, "trigger_label_drift")
+
+    png_files = list(figs_dir.glob("drift_*.png"))
+    assert len(png_files) >= 2
+    for p in png_files:
+        assert p.stat().st_size > 0
+
+
+def test_run_drift_pipeline_programmatic(
+    synthetic_temporal_drift_df: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    assert DATA_DRIFT_SHARE_TRIGGER == 0.30
+    assert "neighbor_net_flow" in DEFAULT_TOP_IMPORTANCE_FEATURES
+
+    out_dir = tmp_path / "pipeline_reports"
+    figs_dir = tmp_path / "pipeline_figures"
+
+    report, figures = run_drift_pipeline(
+        dataset=synthetic_temporal_drift_df,
+        sample_size=90,
+        seed=42,
+        output_dir=out_dir,
+        figures_dir=figs_dir,
+        skip_prediction=True,
+        top_k_plots=2,
+    )
+
+    assert isinstance(report, DriftSummaryReport)
+    assert (out_dir / "drift_summary.json").exists()
+    assert (out_dir / "drift_2024_vs_2025.html").exists()
+    assert len(figures) >= 2
+    for fig_path in figures:
+        assert fig_path.exists()
+        assert fig_path.stat().st_size > 0
