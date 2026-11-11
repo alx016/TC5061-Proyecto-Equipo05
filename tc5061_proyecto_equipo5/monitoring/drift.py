@@ -116,6 +116,10 @@ def score_dataset_predictions(
         raise ValueError(f"Missing required feature columns for prediction: {missing}")
 
     out_df = df.copy()
+    if out_df.empty:
+        out_df[prediction_column] = pd.Series(dtype="int8")
+        return out_df
+
     features_df = out_df[FEATURE_COLUMNS].astype(SIGNATURE_DTYPES)
     proba = loaded_model.model.predict(features_df)
     labels = apply_thresholds(proba, loaded_model.classes, loaded_model.thresholds)
@@ -259,7 +263,7 @@ def compute_drift_summary(
         curr_df = current_data.copy()
         effective_sample_size = len(reference_data)
 
-    if not skip_prediction:
+    if not skip_prediction and (pred_col not in ref_df.columns or pred_col not in curr_df.columns):
         effective_model = model
         if effective_model is None:
             try:
@@ -272,10 +276,18 @@ def compute_drift_summary(
                 effective_model = None
 
         if effective_model is not None:
-            ref_df = score_dataset_predictions(ref_df, effective_model, prediction_column=pred_col)
-            curr_df = score_dataset_predictions(
-                curr_df, effective_model, prediction_column=pred_col
-            )
+            try:
+                ref_df = score_dataset_predictions(
+                    ref_df, effective_model, prediction_column=pred_col
+                )
+                curr_df = score_dataset_predictions(
+                    curr_df, effective_model, prediction_column=pred_col
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"Could not score predictions with champion model: {exc}. "
+                    "Skipping prediction scoring."
+                )
 
     if columns is not None:
         target_columns = list(columns)
@@ -470,9 +482,10 @@ def run_drift_pipeline(
             curr_df = score_dataset_predictions(curr_df, effective_model)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                f"Could not load champion model from '{model_uri}': {exc}. "
+                f"Could not score predictions with champion model from '{model_uri}': {exc}. "
                 "Skipping prediction scoring."
             )
+            effective_model = None
 
     summary_report = compute_drift_summary(
         reference_data=ref_df,

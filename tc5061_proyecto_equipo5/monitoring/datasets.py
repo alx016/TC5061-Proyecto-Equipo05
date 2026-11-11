@@ -195,6 +195,17 @@ def load_drift_datasets(
             expected_year=CURRENT_YEAR,
         )
 
+    if len(ref_raw) == 0:
+        raise ValueError(
+            f"No reference records found for year {REFERENCE_YEAR} with split='train' "
+            f"and months {DRIFT_MONTHS}."
+        )
+    if len(curr_raw) == 0:
+        raise ValueError(
+            f"No current records found for year {CURRENT_YEAR} with split='current' "
+            f"and months {DRIFT_MONTHS}. Provide a dataset containing 2025 current data or pass current_path."
+        )
+
     reference_sampled = stratified_monthly_sample(ref_raw, sample_size=sample_size, seed=seed)
     current_sampled = stratified_monthly_sample(curr_raw, sample_size=sample_size, seed=seed)
     return DriftDatasetPair(reference=reference_sampled, current=current_sampled)
