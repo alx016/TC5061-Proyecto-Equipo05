@@ -179,7 +179,9 @@ def load_rows(path: Path) -> pd.DataFrame:
     return frame
 
 
-def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
+def split_masks(
+    frame: pd.DataFrame, fit_as_of=P2_FIT_AS_OF, selection_as_of=P2_SELECTION_AS_OF
+) -> dict[str, pd.Series]:
     """Return the train, validation and test masks under the temporal protocol.
 
     ``training_mask`` removes labels that were not closed before the next split starts; test is
@@ -187,16 +189,26 @@ def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
     """
     keys = frame[["station_id", "target_time", "label_available_at", "split"]]
     return {
-        "train": training_mask(keys, fit_as_of=P2_FIT_AS_OF, splits=("train",)),
-        "validation": training_mask(keys, fit_as_of=P2_SELECTION_AS_OF, splits=("validation",)),
+        "train": training_mask(keys, fit_as_of=fit_as_of, splits=("train",)),
+        "validation": training_mask(keys, fit_as_of=selection_as_of, splits=("validation",)),
         "test": keys["split"].eq("test").fillna(False).astype(bool),
     }
 
 
-def build_data(frame: pd.DataFrame, source: Path) -> dict:
+def build_data(
+    frame: pd.DataFrame, source: Path, fit_as_of=P2_FIT_AS_OF, selection_as_of=P2_SELECTION_AS_OF
+) -> dict:
     """Build X/y per split and log the row counts once."""
-    masks = split_masks(frame)
-    data = {"X": {}, "y": {}, "n": {}, "n_dates": {}, "source": source}
+    masks = split_masks(frame, fit_as_of, selection_as_of)
+    data = {
+        "X": {},
+        "y": {},
+        "n": {},
+        "n_dates": {},
+        "source": source,
+        "fit_as_of": fit_as_of,
+        "selection_as_of": selection_as_of,
+    }
     for split in SPLITS:
         mask = masks[split]
         X = frame.loc[mask, FEATURE_COLUMNS]
@@ -632,8 +644,8 @@ def train_and_log(
             "data_version": data_version(),
             "feature_set": FEATURE_SET,
             "feature_table_sha256": data["source_sha256"],
-            "fit_as_of": P2_FIT_AS_OF,
-            "selection_as_of": P2_SELECTION_AS_OF,
+            "fit_as_of": data["fit_as_of"],
+            "selection_as_of": data["selection_as_of"],
             "threshold_shortage": thresholds[1],
             "threshold_saturation": thresholds[2],
             "threshold_fallback": fallback,
