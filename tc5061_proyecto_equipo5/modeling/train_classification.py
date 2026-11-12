@@ -94,6 +94,11 @@ INTEGER_HYPERPARAMS = {
     "max_leaf_nodes",
 }
 
+# Feature table and temporal cutoffs per training window; "default" is the 2024 protocol
+P2_WINDOWS = {
+    "default": (CLASSIFICATION_FEATURES_PATH, P2_FIT_AS_OF, P2_SELECTION_AS_OF),
+}
+
 # Anti-leakage decision point: the forecast is made at minute 50 of hour t, so the departures,
 # arrivals and net_flow of the current hour are not fully known yet and are never used as
 # features.  Only lagged flows, calendar columns, station size and location are kept.
@@ -690,11 +695,14 @@ def train_and_log(
     }
 
 
-def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
+def train_one(
+    model: str, stage: str, seed: int, hyperparams: dict, window: str = "default"
+) -> str:
     """Train and log one P2 model: the unit of the MLproject ``train`` entry point."""
+    path, fit_as_of, selection_as_of = P2_WINDOWS[window]
     setup_experiment()
-    frame = load_rows(CLASSIFICATION_FEATURES_PATH)
-    data = build_data(frame, CLASSIFICATION_FEATURES_PATH)
+    frame = load_rows(path)
+    data = build_data(frame, path, fit_as_of, selection_as_of)
     estimator, model_params = build_model(model, seed, hyperparams)
     record = train_and_log(
         name=f"p2-{stage}-{model}",
