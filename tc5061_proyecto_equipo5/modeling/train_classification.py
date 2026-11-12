@@ -614,6 +614,7 @@ def train_and_log(
     model_family: str | None = None,
     nested: bool = False,
     log_model: bool = True,
+    window: str = "default",
 ) -> dict:
     """Fit one model, evaluate validation only and log the complete run."""
     X_train, y_train = data["X"]["train"], data["y"]["train"]
@@ -651,6 +652,7 @@ def train_and_log(
             "feature_table_sha256": data["source_sha256"],
             "fit_as_of": data["fit_as_of"],
             "selection_as_of": data["selection_as_of"],
+            "window": window,
             "threshold_shortage": thresholds[1],
             "threshold_saturation": thresholds[2],
             "threshold_fallback": fallback,
@@ -712,6 +714,7 @@ def train_one(
         seed=seed,
         stage=stage,
         model_family=model,
+        window=window,
     )
     return record["run_id"]
 
