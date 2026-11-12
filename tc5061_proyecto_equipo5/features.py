@@ -1220,7 +1220,7 @@ def build_classification_panel(
     """
     start = pd.Timestamp(start) if start is not None else pd.Timestamp(f"{year}-01-01")
     end = pd.Timestamp(end) if end is not None else pd.Timestamp(f"{year + 1}-01-01")
-    if keep_station_ids is None and end - start > pd.Timedelta(days=366):
+    if keep_station_ids is None and end > pd.Timestamp(year=start.year + 1, month=1, day=1):
         raise ValueError(
             "A panel spanning more than one year needs explicit keep_station_ids; "
             "full_year_station_ids only applies to a single calendar year"
@@ -1383,7 +1383,7 @@ def add_split(
         if unknown.any():
             raise ValueError("Some rows fall outside the train/validation/test months")
         # The remaining rows have no target; a missing split is honest and keeps them out of test.
-        panel.loc[panel["split"] == "unknown", "split"] = pd.NA
+        panel.loc[(panel["split"] == "unknown") | panel["target"].isna(), "split"] = pd.NA
         logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
         return panel
     if boundaries is None or labels is None:
@@ -1404,6 +1404,7 @@ def add_split(
     outside = panel["split"].isna() & panel["target"].notna()
     if outside.any():
         raise ValueError("Some labelled rows fall outside the split boundaries")
+    panel.loc[panel["target"].isna(), "split"] = pd.NA
     logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
     return panel
 
@@ -1496,12 +1497,16 @@ def station_change_report(trips_2025: pd.DataFrame, reference: pd.Index) -> dict
     }
 
 
-def _reference_station_ids(trips_dir: Path) -> pd.Index:
+def _reference_station_ids(trips_dir: Path) -> pd.Index | None:
     """Use the 2024 feature table as the station reference, falling back to its trips."""
     if CLASSIFICATION_FEATURES_PATH.exists():
         stations = pd.read_parquet(CLASSIFICATION_FEATURES_PATH, columns=["station_id"])
         return pd.Index(sorted(stations["station_id"].unique()), name="station_id")
-    return full_year_station_ids(load_trips(2024, trips_dir))
+    try:
+        return full_year_station_ids(load_trips(2024, trips_dir))
+    except FileNotFoundError:
+        logger.warning("No 2024 trips found; skipping station change report")
+        return None
 
 
 @app.command()
@@ -1516,7 +1521,8 @@ def current(
     trips = load_trips(2025, trips_dir)
     stations = load_stations(stations_dir)
     reference = _reference_station_ids(trips_dir)
-    logger.info(f"Station changes: {station_change_report(trips, reference)}")
+    if reference is not None:
+        logger.info(f"Station changes: {station_change_report(trips, reference)}")
     frame = build_feature_table(
         trips=trips,
         stations=stations,

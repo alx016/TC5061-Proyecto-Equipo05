@@ -544,9 +544,10 @@ def test_continuous_lags_cross_year_boundary():
 def test_current_table_contract_synthetic(tmp_path):
     station_ids = [1, 2, 3]
     trips = _monthly_trips(2025, station_ids)
+    catalog = _catalog(station_ids).astype({"capacity": "int32"})
     frame = build_feature_table(
         trips=trips,
-        stations=_catalog(station_ids),
+        stations=catalog,
         keep_station_ids=None,
         start="2025-01-01",
         end="2026-01-01",
@@ -556,9 +557,22 @@ def test_current_table_contract_synthetic(tmp_path):
         features_path=tmp_path / "features.parquet",
     )
     assert list(frame.columns) == CLASSIFICATION_COLUMNS
-    assert frame["target"].dtype == "Int8"
-    assert frame["split"].dtype == "string"
-    assert frame["hour"].dtype == "datetime64[us]"
+    expected_dtypes = {
+        "station_id": "int64",
+        "hour": "datetime64[us]",
+        "departures": "int32",
+        "arrivals": "int32",
+        "capacity": "int32",
+        "day_of_week": "int8",
+        "is_weekend": "bool",
+        "is_holiday": "bool",
+        "target": "Int8",
+        "split": "string",
+    }
+    expected_dtypes.update(
+        {column: "float64" for column in CLASSIFICATION_COLUMNS if column not in expected_dtypes}
+    )
+    assert {column: str(dtype) for column, dtype in frame.dtypes.items()} == expected_dtypes
     assert set(frame["split"].dropna().unique()) == {"current", "evaluation"}
     assert frame["split"].isna().sum() == len(station_ids)
     current = frame["split"].eq("current")
@@ -597,3 +611,51 @@ def test_2024_default_behavior_unchanged():
     calendar = add_calendar(frame)
     assert calendar["is_holiday"].equals(calendar["hour"].dt.normalize().isin(HOLIDAYS_2024))
     assert calendar["is_holiday"].dtype == bool
+
+
+def test_current_cli_without_2024_reference(tmp_path, monkeypatch):
+    from tc5061_proyecto_equipo5 import features
+
+    trips = _monthly_trips(2025, [1, 2, 3])
+    monkeypatch.setattr(features, "CLASSIFICATION_FEATURES_PATH", tmp_path / "missing.parquet")
+
+    def load_trips(year, trips_dir):
+        if year == 2024:
+            raise FileNotFoundError("No 2024 trips")
+        return trips
+
+    monkeypatch.setattr(features, "load_trips", load_trips)
+    monkeypatch.setattr(features, "load_stations", lambda _: _catalog([1, 2, 3]))
+    output = tmp_path / "current.parquet"
+    result = CliRunner().invoke(
+        app,
+        [
+            "current",
+            "--trips-dir",
+            str(tmp_path),
+            "--stations-dir",
+            str(tmp_path),
+            "--panel-path",
+            str(tmp_path / "panel.parquet"),
+            "--features-path",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.exception
+    assert len(pd.read_parquet(output)) == 3 * 8760
+
+
+def test_missing_target_has_no_split_and_cross_year_requires_station_universe():
+    frame = pd.DataFrame(
+        {"hour": pd.to_datetime(["2025-02-01"]), "target": pd.Series([pd.NA], dtype="Int8")}
+    )
+    assert pd.isna(add_split(frame, 2025)["split"].iloc[0])
+    assert pd.isna(
+        add_split(frame, boundaries=("2025-01-01", "2026-01-01"), labels=("current",))[
+            "split"
+        ].iloc[0]
+    )
+    with pytest.raises(ValueError, match="keep_station_ids"):
+        build_classification_panel(
+            _monthly_trips(2025, [1, 2]), _catalog([1, 2]), start="2025-12-01", end="2026-02-01"
+        )
