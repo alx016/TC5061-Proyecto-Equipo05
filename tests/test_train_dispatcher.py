@@ -3,12 +3,20 @@
 from typer.testing import CliRunner
 
 from tc5061_proyecto_equipo5.config import SEED
-from tc5061_proyecto_equipo5.modeling import train
+from tc5061_proyecto_equipo5.modeling import train, train_classification
 
 
 def fake_trainer(calls):
     def trainer(model, stage, seed, hyperparams):
         calls.append((model, stage, seed, hyperparams))
+        return "run-123"
+
+    return trainer
+
+
+def fake_windowed_trainer(calls):
+    def trainer(model, stage, seed, hyperparams, window="default"):
+        calls.append((model, stage, seed, hyperparams, window))
         return "run-123"
 
     return trainer
@@ -116,3 +124,43 @@ def test_unknown_question_stage_or_missing_trainer_is_rejected(monkeypatch):
     ):
         result = CliRunner().invoke(train.app, args)
         assert result.exit_code != 0, args
+
+
+def test_p2_passes_a_known_window_to_the_trainer(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p2", fake_windowed_trainer(calls))
+    # The trainer is fake, so the table and cutoffs of the window are never read
+    monkeypatch.setitem(train_classification.P2_WINDOWS, "challenger", ("table", "fit", "select"))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--window", "challenger"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("lightgbm", "candidate", SEED, {}, "challenger")]
+
+
+def test_unknown_window_is_rejected_for_p2(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p2", fake_windowed_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--window", "nope"]
+    )
+
+    assert result.exit_code != 0
+    assert "window for p2" in result.output
+    assert calls == []
+
+
+def test_questions_without_windows_only_accept_the_default(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p1", fake_windowed_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p1", "--model", "lightgbm", "--window", "challenger"]
+    )
+
+    assert result.exit_code != 0
+    assert "window for p1" in result.output
+    assert calls == []
