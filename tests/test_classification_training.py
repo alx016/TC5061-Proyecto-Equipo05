@@ -370,6 +370,27 @@ def test_split_masks_ignore_rows_without_a_split():
     assert masks["test"].tolist() == [True, False]
 
 
+def test_split_masks_default_to_the_2024_cutoffs_and_accept_others():
+    frame = pd.DataFrame(
+        {
+            "station_id": [1, 1, 1, 1],
+            "target_time": pd.to_datetime(["2024-09-30 21:00", "2024-09-30 23:00", "2024-11-30 21:00", "2024-11-30 23:00"]),
+            "label_available_at": pd.to_datetime(["2024-09-30 22:00", "2024-10-01 00:00", "2024-11-30 22:00", "2024-12-01 00:00"]),
+            "split": pd.Series(["train", "train", "validation", "validation"], dtype="string"),
+        }
+    )
+
+    # Sin argumentos: los cortes de 2024 de siempre
+    masks = train_classification.split_masks(frame)
+    assert masks["train"].tolist() == [True, False, False, False]
+    assert masks["validation"].tolist() == [False, False, True, False]
+
+    # Cortes más tarde: entran las filas del límite.
+    masks = train_classification.split_masks(frame, "2024-10-01 00:00", "2024-12-01 00:00")
+    assert masks["train"].tolist() == [True, True, False, False]
+    assert masks["validation"].tolist() == [False, False, True, True]
+
+
 class _FakeRun:
     def __init__(self, tracking, run_id):
         self.tracking = tracking
