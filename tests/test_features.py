@@ -613,6 +613,17 @@ def test_2024_default_behavior_unchanged():
     assert calendar["is_holiday"].dtype == bool
 
 
+def test_legacy_split_uses_requested_year():
+    """The legacy annual builder retains its train/validation/test contract for other years."""
+    frame = pd.DataFrame(
+        {
+            "hour": pd.to_datetime(["2025-06-01", "2025-10-01", "2025-12-01"]),
+            "target": pd.Series([0, 0, 0], dtype="Int8"),
+        }
+    )
+    assert add_split(frame, study_year=2025)["split"].tolist() == ["train", "validation", "test"]
+
+
 def test_current_cli_without_2024_reference(tmp_path, monkeypatch):
     from tc5061_proyecto_equipo5 import features
 

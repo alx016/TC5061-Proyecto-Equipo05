@@ -1461,6 +1461,9 @@ def build_classification_features(
 
     Order matters: the panel comes first, then the features that only look back (calendar,
     neighbours, lags) and finally the label and the temporal split.
+
+    This legacy annual builder uses train/validation/test for every year. For the
+    2025 monitoring windows use the ``current`` command instead.
     """
     trips = load_trips(year, trips_dir)
     stations = load_stations(stations_dir)
