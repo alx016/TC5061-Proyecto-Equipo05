@@ -7,14 +7,16 @@ reports/entrega5_monitoreo.md, which was fixed before seeing any result.
 
 from dataclasses import dataclass
 from pathlib import Path
-
+from scipy.stats import chi2
 from loguru import logger
+
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, f1_score, recall_score
 
 from tc5061_proyecto_equipo5.api.model import SIGNATURE_DTYPES, LoadedModel
-from tc5061_proyecto_equipo5.config import CURRENT_FEATURES_PATH
+from tc5061_proyecto_equipo5.config import CURRENT_FEATURES_PATH, P2_MIN_RECALL_SHORTAGE
 from tc5061_proyecto_equipo5.modeling.train_classification import (
     FEATURE_COLUMNS,
     alerts_per_day,
@@ -25,7 +27,8 @@ from tc5061_proyecto_equipo5.modeling.train_classification import (
 
 EVALUATION_SPLIT = "evaluation"
 BOOTSTRAP_METRICS = ("pr_auc_minority_mean", "macro_f1", "recall_shortage", "alerts_per_day")
-
+MACRO_F1_MARGIN = 0.01
+ALERTS_MAX_RATIO = 1.20
 
 @dataclass(frozen=True)
 class Scored:
@@ -128,3 +131,72 @@ def paired_bootstrap(
         low, high = np.percentile(differences[:, column], [2.5, 97.5])
         intervals[name] = {"low": float(low), "high": float(high)}
     return intervals
+
+
+def mcnemar(y_true: np.ndarray, champion: Scored, challenger: Scored) -> dict[str, float]:
+    """McNemar test on the hits of each version over the rows with a risk class.
+
+    Complementary to the bootstrap: rows of the same day are not independent, so the p-value is
+    only a reference and the decision uses the bootstrap intervals.
+    """
+    risk = np.isin(y_true, (1, 2))
+    champion_hit = champion.labels[risk] == y_true[risk]
+    challenger_hit = challenger.labels[risk] == y_true[risk]
+    only_champion = int(np.count_nonzero(champion_hit & ~challenger_hit))
+    only_challenger = int(np.count_nonzero(~champion_hit & challenger_hit))
+    discordant = only_champion + only_challenger
+    statistic = (abs(only_champion - only_challenger) - 1) ** 2 / discordant if discordant else 0.0
+    return {
+        "only_champion_correct": only_champion,
+        "only_challenger_correct": only_challenger,
+        "statistic": float(statistic),
+        "p_value": float(chi2.sf(statistic, df=1)) if discordant else 1.0,
+    }
+
+
+def breakdown(
+    rows: pd.DataFrame,
+    y_true: np.ndarray,
+    champion: Scored,
+    challenger: Scored,
+    reference_stations: set[int],
+) -> dict[str, dict[str, dict]]:
+    """Point metrics of both versions by target month and by common vs new stations."""
+    groups = {
+        "month": rows["target_time"].dt.strftime("%Y-%m"),
+        "stations": np.where(rows["station_id"].isin(reference_stations), "common", "new"),
+    }
+    result = {}
+    for name, keys in groups.items():
+        result[name] = {}
+        for key in sorted(pd.unique(keys)):
+            index = np.flatnonzero(np.asarray(keys) == key)
+            n_dates = int(rows["day"].iloc[index].nunique())
+            result[name][str(key)] = {
+                "rows": int(len(index)),
+                "champion": bootstrap_metrics(y_true[index], _subset(champion, index), n_dates),
+                "challenger": bootstrap_metrics(
+                    y_true[index], _subset(challenger, index), n_dates
+                ),
+            }
+    return result
+
+
+def decide(
+    champion_metrics: dict[str, float],
+    challenger_metrics: dict[str, float],
+    intervals: dict[str, dict[str, float]],
+) -> dict:
+    """Apply the decision rule of section 4.2: the challenger wins only if every check passes."""
+    checks = {
+        "challenger_recall_shortage": bool(
+            challenger_metrics["recall_shortage"] >= P2_MIN_RECALL_SHORTAGE
+        ),
+        "pr_auc_improvement": bool(intervals["pr_auc_minority_mean"]["low"] > 0),
+        "macro_f1_non_inferior": bool(intervals["macro_f1"]["low"] >= -MACRO_F1_MARGIN),
+        "alerts_non_inferior": bool(
+            challenger_metrics["alerts_per_day"]
+            <= ALERTS_MAX_RATIO * champion_metrics["alerts_per_day"]
+        ),
+    }
+    return {"checks": checks, "winner": "challenger" if all(checks.values()) else "champion"}
