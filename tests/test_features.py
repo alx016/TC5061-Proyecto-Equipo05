@@ -624,6 +624,25 @@ def test_legacy_split_uses_requested_year():
     assert add_split(frame, study_year=2025)["split"].tolist() == ["train", "validation", "test"]
 
 
+def test_legacy_builder_forwards_requested_year(tmp_path, monkeypatch):
+    from tc5061_proyecto_equipo5 import features
+
+    monkeypatch.setattr(features, "load_trips", lambda year, _: _monthly_trips(year, [1, 2, 3]))
+    monkeypatch.setattr(features, "load_stations", lambda _: _catalog([1, 2, 3]))
+    result = features.build_classification_features(
+        year=2025,
+        trips_dir=tmp_path,
+        stations_dir=tmp_path,
+        panel_path=tmp_path / "panel.parquet",
+        features_path=tmp_path / "features.parquet",
+    )
+    assert set(result["split"].dropna()) == {"train", "validation", "test"}
+    target_time = result["hour"] + pd.Timedelta(hours=1)
+    assert target_time[result["split"].eq("train")].dt.month.isin(range(1, 10)).all()
+    assert target_time[result["split"].eq("validation")].dt.month.isin([10, 11]).all()
+    assert target_time[result["split"].eq("test")].dt.month.eq(12).all()
+
+
 def test_current_cli_without_2024_reference(tmp_path, monkeypatch):
     from tc5061_proyecto_equipo5 import features
 
