@@ -18,8 +18,10 @@ import pandas as pd
 import typer
 
 from tc5061_proyecto_equipo5.config import (
+    CHALLENGER_FEATURES_PATH,
     CLASSIFICATION_FEATURES_PATH,
     CLASSIFICATION_PANEL_PATH,
+    CURRENT_FEATURES_PATH,
     EXTERNAL_DATA_DIR,
     FEATURES_DIR,
     INTERIM_DATA_DIR,
@@ -1104,6 +1106,30 @@ HOLIDAYS_2024 = pd.to_datetime(
         "2024-12-25",
     ]
 )
+# Observed federal holidays of later years; 2024-10-01 is unique to 2024.
+HOLIDAYS_2025 = pd.to_datetime(
+    [
+        "2025-01-01",
+        "2025-02-03",
+        "2025-03-17",
+        "2025-05-01",
+        "2025-09-16",
+        "2025-11-17",
+        "2025-12-25",
+    ]
+)
+HOLIDAYS_2026 = pd.to_datetime(
+    [
+        "2026-01-01",
+        "2026-02-02",
+        "2026-03-16",
+        "2026-05-01",
+        "2026-09-16",
+        "2026-11-16",
+        "2026-12-25",
+    ]
+)
+HOLIDAYS_BY_YEAR = {2024: HOLIDAYS_2024, 2025: HOLIDAYS_2025, 2026: HOLIDAYS_2026}
 
 
 def load_trips(
@@ -1174,7 +1200,13 @@ def full_year_station_ids(trips: pd.DataFrame) -> pd.Index:
 
 
 def build_classification_panel(
-    trips: pd.DataFrame, stations: pd.DataFrame, year: int = STUDY_YEAR
+    trips: pd.DataFrame,
+    stations: pd.DataFrame,
+    year: int = STUDY_YEAR,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    keep_station_ids: pd.Index | None = None,
 ) -> pd.DataFrame:
     """Build the dense station-hour panel with flow, capacity and coordinates.
 
@@ -1182,13 +1214,23 @@ def build_classification_panel(
     station that appears in the trips, so the union is passed and the rows of the partial stations
     are dropped afterwards.  Their trips still count as arrivals or departures of the stations that
     stay, because a bike that arrived did arrive.
+
+    ``start``/``end`` default to the whole ``year``.  A multi-year range must pass
+    ``keep_station_ids`` explicitly: the twelve-month activity rule only makes sense for one year.
     """
+    start = pd.Timestamp(start) if start is not None else pd.Timestamp(f"{year}-01-01")
+    end = pd.Timestamp(end) if end is not None else pd.Timestamp(f"{year + 1}-01-01")
+    if keep_station_ids is None and end > pd.Timestamp(year=start.year + 1, month=1, day=1):
+        raise ValueError(
+            "A panel spanning more than one year needs explicit keep_station_ids; "
+            "full_year_station_ids only applies to a single calendar year"
+        )
     event_ids = pd.Index(
         sorted(set(trips["origen_id"]) | set(trips["destino_id"])), name="station_id"
     )
-    panel = build_hourly_panel(trips, event_ids, start=f"{year}-01-01", end=f"{year + 1}-01-01")
+    panel = build_hourly_panel(trips, event_ids, start=start, end=end)
     panel = panel.rename(columns={"target_time": "hour"})
-    keep = full_year_station_ids(trips)
+    keep = full_year_station_ids(trips) if keep_station_ids is None else keep_station_ids
     panel = panel[panel["station_id"].isin(keep)]
     panel = panel.merge(
         stations[["station_id", "capacity", "latitude", "longitude"]], on="station_id", how="left"
@@ -1215,7 +1257,14 @@ def add_calendar(panel: pd.DataFrame) -> pd.DataFrame:
     panel["hour_cos"] = np.cos(2 * np.pi * hour_of_day / 24)
     panel["day_of_week"] = panel["hour"].dt.dayofweek.astype("int8")
     panel["is_weekend"] = panel["day_of_week"] >= 5
-    panel["is_holiday"] = panel["hour"].dt.normalize().isin(HOLIDAYS_2024)
+    years = panel["hour"].dt.year
+    unknown = set(years.unique()) - set(HOLIDAYS_BY_YEAR)
+    if unknown:
+        raise ValueError(f"No holiday list for years: {sorted(unknown)}")
+    holiday = pd.Series(False, index=panel.index)
+    for year, dates in HOLIDAYS_BY_YEAR.items():
+        holiday |= years.eq(year) & panel["hour"].dt.normalize().isin(dates)
+    panel["is_holiday"] = holiday
     return panel
 
 
@@ -1303,26 +1352,59 @@ def add_target(panel: pd.DataFrame) -> pd.DataFrame:
     return panel
 
 
-def add_split(panel: pd.DataFrame, study_year: int = STUDY_YEAR) -> pd.DataFrame:
-    """Assign each row to train, validation or test by the target hour.
+def add_split(
+    panel: pd.DataFrame,
+    study_year: int = STUDY_YEAR,
+    *,
+    boundaries: tuple[str, ...] | None = None,
+    labels: tuple[str, ...] | None = None,
+) -> pd.DataFrame:
+    """Assign each row to a temporal split by the target hour.
 
-    Rows whose target hour falls outside the study year (the last hour of the panel) have no
+    Without ``boundaries``/``labels`` the P2 protocol is used: train in the first nine months of
+    ``study_year``, validation in October-November and test in December.  With explicit half-open
+    boundaries the labels are assigned with ``pd.cut``, which is how the 2025 and challenger tables
+    get their ``current``/``evaluation`` and ``train``/``validation``/``test`` labels.
+
+    Rows whose target hour falls outside the labelled range (the last hour of the panel) have no
     label, so their split is missing (``pd.NA``): they are neither trained nor scored, and are
     never counted as test.
     """
+    if boundaries is None and labels is None:
+        panel = panel.copy()
+        target_time = panel["hour"] + pd.Timedelta(hours=1)
+        target_month = target_time.dt.month
+        in_study_year = target_time.dt.year.eq(study_year)
+        panel["split"] = pd.Series("unknown", index=panel.index, dtype="string")
+        panel.loc[in_study_year & target_month.isin(TRAIN_MONTHS), "split"] = "train"
+        panel.loc[in_study_year & target_month.isin(VALIDATION_MONTHS), "split"] = "validation"
+        panel.loc[in_study_year & target_month.isin(TEST_MONTHS), "split"] = "test"
+        unknown = (panel["split"] == "unknown") & panel["target"].notna()
+        if unknown.any():
+            raise ValueError("Some rows fall outside the train/validation/test months")
+        # The remaining rows have no target; a missing split is honest and keeps them out of test.
+        panel.loc[(panel["split"] == "unknown") | panel["target"].isna(), "split"] = pd.NA
+        logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
+        return panel
+    if boundaries is None or labels is None:
+        raise ValueError("Pass both split boundaries and labels, or neither")
+    edges = pd.to_datetime(list(boundaries))
+    if edges.tz is not None:
+        raise ValueError("Split boundaries must be timezone-naive")
+    if len(edges) != len(labels) + 1:
+        raise ValueError("Split boundaries must have one more edge than labels")
+    if len(set(labels)) != len(labels):
+        raise ValueError("Split labels must be unique")
+    if not edges.is_monotonic_increasing:
+        raise ValueError("Split boundaries must be increasing")
     panel = panel.copy()
     target_time = panel["hour"] + pd.Timedelta(hours=1)
-    target_month = target_time.dt.month
-    in_study_year = target_time.dt.year.eq(study_year)
-    panel["split"] = pd.Series("unknown", index=panel.index, dtype="string")
-    panel.loc[in_study_year & target_month.isin(TRAIN_MONTHS), "split"] = "train"
-    panel.loc[in_study_year & target_month.isin(VALIDATION_MONTHS), "split"] = "validation"
-    panel.loc[in_study_year & target_month.isin(TEST_MONTHS), "split"] = "test"
-    unknown = (panel["split"] == "unknown") & panel["target"].notna()
-    if unknown.any():
-        raise ValueError("Some rows fall outside the train/validation/test months")
-    # The remaining rows have no target; a missing split is honest and keeps them out of test.
-    panel.loc[panel["split"] == "unknown", "split"] = pd.NA
+    split = pd.cut(target_time, bins=edges, labels=list(labels), right=False)
+    panel["split"] = split.astype("string")
+    outside = panel["split"].isna() & panel["target"].notna()
+    if outside.any():
+        raise ValueError("Some labelled rows fall outside the split boundaries")
+    panel.loc[panel["target"].isna(), "split"] = pd.NA
     logger.info(f"Split counts: {panel['split'].value_counts(dropna=False).to_dict()}")
     return panel
 
@@ -1332,6 +1414,40 @@ def save_frame(frame: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, engine="pyarrow", compression="zstd", index=False)
     logger.info(f"Saved {len(frame):,} rows to {path}")
+
+
+def build_feature_table(
+    *,
+    trips: pd.DataFrame,
+    stations: pd.DataFrame,
+    keep_station_ids: pd.Index | None,
+    start: str,
+    end: str,
+    split_boundaries: tuple[str, ...] | None,
+    split_labels: tuple[str, ...] | None,
+    panel_path: Path,
+    features_path: Path,
+    year: int = STUDY_YEAR,
+) -> pd.DataFrame:
+    """Build one classification table from an explicit trip universe and time range.
+
+    ``year`` only feeds the month-based split used when ``split_boundaries`` is ``None``; it is
+    never inferred from ``STUDY_YEAR`` so a caller with another year keeps its own protocol.
+    """
+    panel = build_classification_panel(
+        trips, stations, year, start=start, end=end, keep_station_ids=keep_station_ids
+    )
+    save_frame(panel, panel_path)
+    features = add_calendar(panel)
+    features = add_neighbors(features)
+    features = add_lags(features)
+    features = add_target(features)
+    features = add_split(features, year, boundaries=split_boundaries, labels=split_labels)
+    features = (
+        features[CLASSIFICATION_COLUMNS].sort_values(["station_id", "hour"]).reset_index(drop=True)
+    )
+    save_frame(features, features_path)
+    return features
 
 
 def build_classification_features(
@@ -1345,21 +1461,119 @@ def build_classification_features(
 
     Order matters: the panel comes first, then the features that only look back (calendar,
     neighbours, lags) and finally the label and the temporal split.
+
+    This legacy annual builder uses train/validation/test for every year. For the
+    2025 monitoring windows use the ``current`` command instead.
     """
     trips = load_trips(year, trips_dir)
     stations = load_stations(stations_dir)
-    panel = build_classification_panel(trips, stations, year)
-    save_frame(panel, panel_path)
-    features = add_calendar(panel)
-    features = add_neighbors(features)
-    features = add_lags(features)
-    features = add_target(features)
-    features = add_split(features, year)
-    features = (
-        features[CLASSIFICATION_COLUMNS].sort_values(["station_id", "hour"]).reset_index(drop=True)
+    return build_feature_table(
+        trips=trips,
+        stations=stations,
+        keep_station_ids=None,
+        start=f"{year}-01-01",
+        end=f"{year + 1}-01-01",
+        split_boundaries=None,
+        split_labels=None,
+        panel_path=panel_path,
+        features_path=features_path,
+        year=year,
     )
-    save_frame(features, features_path)
-    return features
+
+
+def station_change_report(trips_2025: pd.DataFrame, reference: pd.Index) -> dict:
+    """Compare the full-year 2025 station universe with the 2024 reference table.
+
+    ``new_2025`` stations operated every month of 2025 but are absent from 2024,
+    ``retired_2025`` are the opposite, and ``partial_2025`` are stations that appear in the 2025
+    trips without operating every month, so they are left out of the dense panel.
+    """
+    current = full_year_station_ids(trips_2025)
+    all_2025 = pd.Index(sorted(set(trips_2025["origen_id"]) | set(trips_2025["destino_id"])))
+    return {
+        "n_2024_full": len(reference),
+        "n_2025_full": len(current),
+        "n_common": len(reference.intersection(current)),
+        "new_2025": sorted(int(value) for value in current.difference(reference)),
+        "retired_2025": sorted(int(value) for value in reference.difference(current)),
+        "partial_2025": sorted(int(value) for value in all_2025.difference(current)),
+    }
+
+
+def _reference_station_ids(trips_dir: Path) -> pd.Index | None:
+    """Use the 2024 feature table as the station reference, falling back to its trips."""
+    if CLASSIFICATION_FEATURES_PATH.exists():
+        stations = pd.read_parquet(CLASSIFICATION_FEATURES_PATH, columns=["station_id"])
+        return pd.Index(sorted(stations["station_id"].unique()), name="station_id")
+    try:
+        return full_year_station_ids(load_trips(2024, trips_dir))
+    except FileNotFoundError:
+        logger.warning("No 2024 trips found; skipping station change report")
+        return None
+
+
+@app.command()
+def current(
+    trips_dir: Path = INTERIM_DATA_DIR / "viajes",
+    stations_dir: Path = EXTERNAL_DATA_DIR / "estaciones",
+    panel_path: Path = PROCESSED_DATA_DIR / "panel_station_hour_2025.parquet",
+    features_path: Path = CURRENT_FEATURES_PATH,
+):
+    """Build the 2025 table for drift and A/B evaluation."""
+    logger.info("Building the 2025 classification features")
+    trips = load_trips(2025, trips_dir)
+    stations = load_stations(stations_dir)
+    reference = _reference_station_ids(trips_dir)
+    if reference is not None:
+        logger.info(f"Station changes: {station_change_report(trips, reference)}")
+    frame = build_feature_table(
+        trips=trips,
+        stations=stations,
+        keep_station_ids=None,  # full-year 2025
+        start="2025-01-01",
+        end="2026-01-01",
+        split_boundaries=("2025-01-01", "2025-10-01", "2026-01-01"),
+        split_labels=("current", "evaluation"),
+        panel_path=panel_path,
+        features_path=features_path,
+    )
+    typer.echo(f"2025 features complete: {len(frame):,} rows -> {features_path}")
+
+
+@app.command()
+def challenger(
+    trips_dir: Path = INTERIM_DATA_DIR / "viajes",
+    stations_dir: Path = EXTERNAL_DATA_DIR / "estaciones",
+    panel_path: Path = PROCESSED_DATA_DIR / "panel_station_hour_2024_2025.parquet",
+    features_path: Path = CHALLENGER_FEATURES_PATH,
+):
+    """Build the continuous 2024-2025 table for the challenger."""
+    logger.info("Building the continuous 2024-2025 classification features")
+    trips_2024 = load_trips(2024, trips_dir)
+    trips_2025 = load_trips(2025, trips_dir)
+    keep = full_year_station_ids(trips_2024).intersection(full_year_station_ids(trips_2025))
+    if keep.empty:
+        raise ValueError("No station is active every month of 2024 and 2025")
+    logger.info(
+        f"Challenger station universe: {len(keep)} stations (2024 full-year ∩ 2025 full-year)"
+    )
+    trips = pd.concat([trips_2024, trips_2025], ignore_index=True)
+    # build_hourly_panel rejects duplicate viaje_id; report instead of dropping trips.
+    if trips["viaje_id"].duplicated().any():
+        raise ValueError("Duplicate viaje_id across 2024/2025; report to the team, do not drop")
+    stations = load_stations(stations_dir)
+    frame = build_feature_table(
+        trips=trips,
+        stations=stations,
+        keep_station_ids=keep,
+        start="2024-01-01",
+        end="2026-01-01",
+        split_boundaries=("2024-01-01", "2025-08-01", "2025-10-01", "2026-01-01"),
+        split_labels=("train", "validation", "test"),
+        panel_path=panel_path,
+        features_path=features_path,
+    )
+    typer.echo(f"Challenger features complete: {len(frame):,} rows -> {features_path}")
 
 
 @app.command()

@@ -9,8 +9,17 @@ import pytest
 from typer.testing import CliRunner
 
 from tc5061_proyecto_equipo5.features import (
+    CLASSIFICATION_COLUMNS,
+    HOLIDAYS_2024,
+    HOLIDAYS_BY_YEAR,
+    add_calendar,
+    add_lags,
+    add_neighbors,
+    add_split,
     app,
+    build_classification_panel,
     build_demand_features,
+    build_feature_table,
     build_hourly_panel,
     build_risk_features,
     build_station_profiles,
@@ -247,7 +256,9 @@ def test_cli_end_to_end_and_deterministic_receipt(tmp_path):
     (root / "viajes_2024_12.parquet").unlink()
     missing = runner.invoke(app, ["main", "--problem", "p1", *base])
     assert missing.exit_code != 0 and "Missing monthly coverage" in missing.output
-    bad = runner.invoke(app, ["main", "--problem", "p2", *base, "--catalog-known-at", "2026-09-01"])
+    bad = runner.invoke(
+        app, ["main", "--problem", "p2", *base, "--catalog-known-at", "2026-09-01"]
+    )
     assert bad.exit_code != 0 and "catalog" in bad.output
 
 
@@ -373,3 +384,330 @@ def test_future_training_label_cannot_change_first_validation_prediction():
     assert predict_first(data, purge=True) == pytest.approx(predict_first(changed, purge=True))
     # Positive control: this test would detect the original documentation's leaky fit.
     assert predict_first(data, purge=False) != pytest.approx(predict_first(changed, purge=False))
+
+
+# ---------------------------------------------------------------------------
+# Entrega 5: 2025 current table, challenger table and per-year calendar
+# ---------------------------------------------------------------------------
+
+
+def _catalog(station_ids):
+    return pd.DataFrame(
+        {
+            "station_id": station_ids,
+            "capacity": [10] * len(station_ids),
+            "latitude": [20.0 + 0.01 * index for index in range(len(station_ids))],
+            "longitude": [-103.0 - 0.01 * index for index in range(len(station_ids))],
+        }
+    )
+
+
+def _monthly_trips(year, station_ids):
+    rows = []
+    viaje_id = 0
+    for station in station_ids:
+        for month in range(1, 13):
+            start = pd.Timestamp(year=year, month=month, day=1, hour=6)
+            viaje_id += 1
+            rows.append(
+                {
+                    "viaje_id": viaje_id,
+                    "inicio_viaje": start,
+                    "fin_viaje": start + pd.Timedelta(minutes=10),
+                    "origen_id": station,
+                    "destino_id": station_ids[0],
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_holidays_by_year():
+    hours = pd.to_datetime(
+        [
+            "2024-02-05 12:00",
+            "2025-02-03 12:00",
+            "2026-02-02 12:00",
+            "2025-10-01 12:00",
+            "2024-10-01 12:00",
+        ]
+    )
+    frame = pd.DataFrame({"station_id": 1, "hour": hours})
+    flags = add_calendar(frame)["is_holiday"].tolist()
+    assert flags == [True, True, True, False, True]
+    assert set(HOLIDAYS_BY_YEAR) == {2024, 2025, 2026}
+    # The 2024 transfer of the Federal Executive is not repeated in 2025 or 2026.
+    assert pd.Timestamp("2024-10-01") in HOLIDAYS_2024
+    assert pd.Timestamp("2025-10-01") not in HOLIDAYS_BY_YEAR[2025]
+    unknown = pd.DataFrame({"station_id": 1, "hour": pd.to_datetime(["2027-01-01"])})
+    with pytest.raises(ValueError, match="No holiday list"):
+        add_calendar(unknown)
+
+
+def test_current_split_uses_target_hour():
+    hours = pd.to_datetime(
+        [
+            "2025-09-30 21:00",
+            "2025-09-30 22:00",
+            "2025-09-30 23:00",
+            "2025-10-01 00:00",
+            "2025-12-31 23:00",
+        ]
+    )
+    frame = pd.DataFrame(
+        {"station_id": 1, "hour": hours, "target": pd.Series([0, 0, 0, 0, pd.NA], dtype="Int8")}
+    )
+    result = add_split(
+        frame,
+        boundaries=("2025-01-01", "2025-10-01", "2026-01-01"),
+        labels=("current", "evaluation"),
+    )
+    assert result["split"].dtype == "string"
+    assert result["split"].tolist()[:4] == ["current", "current", "evaluation", "evaluation"]
+    assert pd.isna(result["split"].iloc[4])
+    # The 23:00 row is evaluation because its target hour is 2025-10-01 00:00.
+    assert result.loc[2, "hour"] + pd.Timedelta(hours=1) == pd.Timestamp("2025-10-01")
+
+
+def test_challenger_split_and_training_masks():
+    hours = pd.to_datetime(
+        [
+            "2025-07-31 21:00",
+            "2025-07-31 22:00",
+            "2025-07-31 23:00",
+            "2025-08-01 00:00",
+            "2025-09-30 22:00",
+            "2025-09-30 23:00",
+            "2025-10-01 00:00",
+        ]
+    )
+    frame = pd.DataFrame(
+        {"station_id": 1, "hour": hours, "target": pd.Series(0, index=range(7), dtype="Int8")}
+    )
+    result = add_split(
+        frame,
+        boundaries=("2024-01-01", "2025-08-01", "2025-10-01", "2026-01-01"),
+        labels=("train", "validation", "test"),
+    )
+    assert result["split"].tolist() == [
+        "train",
+        "train",
+        "validation",
+        "validation",
+        "validation",
+        "test",
+        "test",
+    ]
+    keys = result[["hour", "split"]].rename(columns={"hour": "target_time"})
+    keys["target_time"] = keys["target_time"] + pd.Timedelta(hours=1)
+    keys["label_available_at"] = keys["target_time"] + pd.Timedelta(hours=1)
+
+    train = training_mask(keys, fit_as_of="2025-07-31 23:40", splits=("train",))
+    assert keys.loc[train, "split"].eq("train").all()
+    assert keys.loc[train, "label_available_at"].le(pd.Timestamp("2025-07-31 23:40")).all()
+    assert not keys.loc[train, "target_time"].ge(pd.Timestamp("2025-10-01")).any()
+    assert train.tolist() == [True, False, False, False, False, False, False]
+
+    validation = training_mask(keys, fit_as_of="2025-09-30 23:40", splits=("validation",))
+    assert keys.loc[validation, "split"].eq("validation").all()
+    # Only the August rows are selectable: the 2025-09-30 labels close after the cutoff.
+    assert validation.tolist() == [False, False, True, True, False, False, False]
+    with pytest.raises(ValueError, match="never test"):
+        training_mask(keys, fit_as_of="2025-09-30 23:40", splits=("test",))
+
+
+def test_continuous_lags_cross_year_boundary():
+    hours = pd.date_range("2024-12-31 00:00", "2025-01-01 01:00", freq="h")
+    rows = []
+    for station_id, offset in ((1, 0.0), (2, 100.0)):
+        for position, hour in enumerate(hours):
+            rows.append(
+                {
+                    "station_id": station_id,
+                    "hour": hour,
+                    "departures": 0,
+                    "arrivals": 0,
+                    "net_flow": offset + position,
+                    "latitude": 20.0 + 0.01 * station_id,
+                    "longitude": -103.0 - 0.01 * station_id,
+                }
+            )
+    frame = pd.DataFrame(rows)
+    lagged = add_lags(add_neighbors(frame))
+    new_year = lagged[lagged["hour"].eq(pd.Timestamp("2025-01-01 00:00"))].set_index("station_id")
+    assert new_year.loc[1, "net_flow_lag24"] == 0.0  # 2024-12-31 00:00, station 1
+    assert new_year.loc[2, "net_flow_lag24"] == 100.0
+    # Neighbour flow is the other station one hour earlier: 2024-12-31 23:00.
+    assert new_year.loc[1, "neighbor_net_flow"] == 100.0 + 23
+    assert new_year.loc[2, "neighbor_net_flow"] == 0.0 + 23
+
+
+def test_current_table_contract_synthetic(tmp_path):
+    station_ids = [1, 2, 3]
+    trips = _monthly_trips(2025, station_ids)
+    catalog = _catalog(station_ids).astype({"capacity": "int32"})
+    frame = build_feature_table(
+        trips=trips,
+        stations=catalog,
+        keep_station_ids=None,
+        start="2025-01-01",
+        end="2026-01-01",
+        split_boundaries=("2025-01-01", "2025-10-01", "2026-01-01"),
+        split_labels=("current", "evaluation"),
+        panel_path=tmp_path / "panel.parquet",
+        features_path=tmp_path / "features.parquet",
+    )
+    assert list(frame.columns) == CLASSIFICATION_COLUMNS
+    expected_dtypes = {
+        "station_id": "int64",
+        "hour": "datetime64[us]",
+        "departures": "int32",
+        "arrivals": "int32",
+        "capacity": "int32",
+        "day_of_week": "int8",
+        "is_weekend": "bool",
+        "is_holiday": "bool",
+        "target": "Int8",
+        "split": "string",
+    }
+    expected_dtypes.update(
+        {column: "float64" for column in CLASSIFICATION_COLUMNS if column not in expected_dtypes}
+    )
+    assert {column: str(dtype) for column, dtype in frame.dtypes.items()} == expected_dtypes
+    assert set(frame["split"].dropna().unique()) == {"current", "evaluation"}
+    assert frame["split"].isna().sum() == len(station_ids)
+    current = frame["split"].eq("current")
+    target_time = frame["hour"] + pd.Timedelta(hours=1)
+    assert not target_time[current].ge(pd.Timestamp("2025-10-01")).any()
+    assert frame.loc[current, "target"].notna().all()
+    assert (target_time[frame["split"].eq("evaluation")] >= pd.Timestamp("2025-10-01")).all()
+    assert (target_time[frame["split"].eq("evaluation")] < pd.Timestamp("2026-01-01")).all()
+    # The panel is dense and the table round-trips through Parquet.
+    assert len(frame) == len(station_ids) * 8760
+    assert_frame_equal(pd.read_parquet(tmp_path / "features.parquet"), frame)
+    with pytest.raises(ValueError, match="keep_station_ids"):
+        build_classification_panel(
+            pd.concat([trips, _monthly_trips(2024, station_ids)], ignore_index=True),
+            _catalog(station_ids),
+            start="2024-01-01",
+            end="2026-01-01",
+        )
+
+
+def test_2024_default_behavior_unchanged():
+    hours = pd.date_range("2024-01-01", "2024-12-31 23:00", freq="h")
+    frame = pd.DataFrame({"station_id": 1, "hour": hours})
+    target = pd.Series(0, index=frame.index, dtype="Int8")
+    target.iloc[-1] = pd.NA
+    frame["target"] = target
+    result = add_split(frame)
+    target_time = frame["hour"] + pd.Timedelta(hours=1)
+    expected = pd.Series(pd.NA, index=frame.index, dtype="string")
+    in_year = target_time.dt.year.eq(2024)
+    month = target_time.dt.month
+    expected[in_year & month.isin((1, 2, 3, 4, 5, 6, 7, 8, 9))] = "train"
+    expected[in_year & month.isin((10, 11))] = "validation"
+    expected[in_year & month.isin((12,))] = "test"
+    assert_frame_equal(result[["split"]], expected.to_frame("split"))
+    calendar = add_calendar(frame)
+    assert calendar["is_holiday"].equals(calendar["hour"].dt.normalize().isin(HOLIDAYS_2024))
+    assert calendar["is_holiday"].dtype == bool
+
+
+def test_legacy_split_uses_requested_year():
+    """The legacy annual builder retains its train/validation/test contract for other years."""
+    frame = pd.DataFrame(
+        {
+            "hour": pd.to_datetime(["2025-06-01", "2025-10-01", "2025-12-01"]),
+            "target": pd.Series([0, 0, 0], dtype="Int8"),
+        }
+    )
+    assert add_split(frame, study_year=2025)["split"].tolist() == ["train", "validation", "test"]
+
+
+def test_legacy_builder_forwards_requested_year(tmp_path, monkeypatch):
+    from tc5061_proyecto_equipo5 import features
+
+    monkeypatch.setattr(features, "load_trips", lambda year, _: _monthly_trips(year, [1, 2, 3]))
+    monkeypatch.setattr(features, "load_stations", lambda _: _catalog([1, 2, 3]))
+    result = features.build_classification_features(
+        year=2025,
+        trips_dir=tmp_path,
+        stations_dir=tmp_path,
+        panel_path=tmp_path / "panel.parquet",
+        features_path=tmp_path / "features.parquet",
+    )
+    assert set(result["split"].dropna()) == {"train", "validation", "test"}
+    target_time = result["hour"] + pd.Timedelta(hours=1)
+    assert target_time[result["split"].eq("train")].dt.month.isin(range(1, 10)).all()
+    assert target_time[result["split"].eq("validation")].dt.month.isin([10, 11]).all()
+    assert target_time[result["split"].eq("test")].dt.month.eq(12).all()
+
+
+def test_current_and_reference_tables_have_identical_dtypes(tmp_path):
+    frames = []
+    for year in (2024, 2025):
+        current = year == 2025
+        frames.append(
+            build_feature_table(
+                trips=_monthly_trips(year, [1, 2, 3]),
+                stations=_catalog([1, 2, 3]).astype({"capacity": "int32"}),
+                keep_station_ids=None,
+                start=f"{year}-01-01",
+                end=f"{year + 1}-01-01",
+                split_boundaries=("2025-01-01", "2025-10-01", "2026-01-01") if current else None,
+                split_labels=("current", "evaluation") if current else None,
+                panel_path=tmp_path / f"panel-{year}.parquet",
+                features_path=tmp_path / f"features-{year}.parquet",
+                year=year,
+            )
+        )
+    assert list(frames[0].columns) == list(frames[1].columns) == CLASSIFICATION_COLUMNS
+    pd.testing.assert_series_equal(frames[0].dtypes, frames[1].dtypes)
+
+
+def test_current_cli_without_2024_reference(tmp_path, monkeypatch):
+    from tc5061_proyecto_equipo5 import features
+
+    trips = _monthly_trips(2025, [1, 2, 3])
+    monkeypatch.setattr(features, "CLASSIFICATION_FEATURES_PATH", tmp_path / "missing.parquet")
+
+    def load_trips(year, trips_dir):
+        if year == 2024:
+            raise FileNotFoundError("No 2024 trips")
+        return trips
+
+    monkeypatch.setattr(features, "load_trips", load_trips)
+    monkeypatch.setattr(features, "load_stations", lambda _: _catalog([1, 2, 3]))
+    output = tmp_path / "current.parquet"
+    result = CliRunner().invoke(
+        app,
+        [
+            "current",
+            "--trips-dir",
+            str(tmp_path),
+            "--stations-dir",
+            str(tmp_path),
+            "--panel-path",
+            str(tmp_path / "panel.parquet"),
+            "--features-path",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.exception
+    assert len(pd.read_parquet(output)) == 3 * 8760
+
+
+def test_missing_target_has_no_split_and_cross_year_requires_station_universe():
+    frame = pd.DataFrame(
+        {"hour": pd.to_datetime(["2025-02-01"]), "target": pd.Series([pd.NA], dtype="Int8")}
+    )
+    assert pd.isna(add_split(frame, 2025)["split"].iloc[0])
+    assert pd.isna(
+        add_split(frame, boundaries=("2025-01-01", "2026-01-01"), labels=("current",))[
+            "split"
+        ].iloc[0]
+    )
+    with pytest.raises(ValueError, match="keep_station_ids"):
+        build_classification_panel(
+            _monthly_trips(2025, [1, 2]), _catalog([1, 2]), start="2025-12-01", end="2026-02-01"
+        )
