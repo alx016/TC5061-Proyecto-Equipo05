@@ -6,17 +6,25 @@ reports/entrega5_monitoreo.md, which was fixed before seeing any result.
 """
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
-from scipy.stats import chi2
+
 from loguru import logger
-
-
+import mlflow
 import numpy as np
 import pandas as pd
+from scipy.stats import chi2
 from sklearn.metrics import average_precision_score, f1_score, recall_score
+import typer
 
-from tc5061_proyecto_equipo5.api.model import SIGNATURE_DTYPES, LoadedModel
-from tc5061_proyecto_equipo5.config import CURRENT_FEATURES_PATH, P2_MIN_RECALL_SHORTAGE
+from tc5061_proyecto_equipo5.api.model import SIGNATURE_DTYPES, LoadedModel, load_model
+from tc5061_proyecto_equipo5.config import (
+    CLASSIFICATION_FEATURES_PATH,
+    CURRENT_FEATURES_PATH,
+    P2_MIN_RECALL_SHORTAGE,
+    REPORTS_DIR,
+)
+from tc5061_proyecto_equipo5.modeling.common import base_tags, setup_experiment
 from tc5061_proyecto_equipo5.modeling.train_classification import (
     FEATURE_COLUMNS,
     alerts_per_day,
@@ -200,3 +208,133 @@ def decide(
         ),
     }
     return {"checks": checks, "winner": "challenger" if all(checks.values()) else "champion"}
+
+AB_SUMMARY_PATH = REPORTS_DIR / "monitoring" / "ab_summary.json"
+REPORT_METRICS = (
+    "pr_auc_minority_mean",
+    "macro_f1",
+    "recall_shortage",
+    "recall_saturation",
+    "precision_shortage",
+    "alerts_per_day",
+)
+
+app = typer.Typer()
+
+
+def build_summary(
+    champion_uri: str,
+    challenger_uri: str,
+    features_path: Path,
+    split: str,
+    n_boot: int,
+    seed: int,
+) -> dict:
+    """Run the whole A/B and return everything the report needs."""
+    rows = load_evaluation(features_path, split)
+    y_true = rows["target"].astype(int).to_numpy()
+    n_dates = int(rows["day"].nunique())
+
+    loaded = {"champion": load_model(champion_uri), "challenger": load_model(challenger_uri)}
+    scored = {name: score(model, rows) for name, model in loaded.items()}
+    point = {name: version_metrics(y_true, scored[name], n_dates) for name in scored}
+    intervals = paired_bootstrap(
+        y_true, scored["champion"], scored["challenger"], rows["day"], n_boot=n_boot, seed=seed
+    )
+    reference = set(
+        pd.read_parquet(CLASSIFICATION_FEATURES_PATH, columns=["station_id"])["station_id"]
+    )
+
+    return {
+        "evaluation": {
+            "features_path": str(features_path),
+            "split": split,
+            "rows": int(len(rows)),
+            "days": n_dates,
+            "first_target_time": str(rows["target_time"].min()),
+            "last_target_time": str(rows["target_time"].max()),
+        },
+        "versions": {
+            name: {
+                "uri": uri,
+                "info": loaded[name].info,
+                "metrics": {key: point[name][key] for key in REPORT_METRICS},
+            }
+            for name, uri in (("champion", champion_uri), ("challenger", challenger_uri))
+        },
+        "difference": {
+            name: {
+                "value": point["challenger"][name] - point["champion"][name],
+                **intervals[name],
+            }
+            for name in BOOTSTRAP_METRICS
+        },
+        "bootstrap": {"replicates": n_boot, "seed": seed, "unit": "day", "interval": "95%"},
+        "mcnemar": mcnemar(y_true, scored["champion"], scored["challenger"]),
+        "breakdown": breakdown(
+            rows, y_true, scored["champion"], scored["challenger"], reference
+        ),
+        "decision": decide(point["champion"], point["challenger"], intervals),
+    }
+
+
+def log_summary(summary: dict, summary_path: Path) -> str:
+    """Log the A/B as one MLflow run with both versions' metrics and the decision."""
+    setup_experiment()
+    # base_tags only accepts training stages; the A/B keeps its tags and changes the stage
+    tags = {**base_tags("p2", "lightgbm", "candidate"), "stage_of_work": "ab_test"}
+    with mlflow.start_run(run_name="p2-ab-test", tags=tags) as run:
+        versions = summary["versions"]
+        mlflow.log_params(
+            {
+                "champion_uri": versions["champion"]["uri"],
+                "challenger_uri": versions["challenger"]["uri"],
+                "champion_version": versions["champion"]["info"].get("model_version"),
+                "challenger_version": versions["challenger"]["info"].get("model_version"),
+                "bootstrap_replicates": summary["bootstrap"]["replicates"],
+                "bootstrap_seed": summary["bootstrap"]["seed"],
+                "winner": summary["decision"]["winner"],
+            }
+        )
+        for name, version in versions.items():
+            mlflow.log_metrics({f"{name}_{key}": value for key, value in version["metrics"].items()})
+        for name, difference in summary["difference"].items():
+            mlflow.log_metrics(
+                {
+                    f"diff_{name}": difference["value"],
+                    f"diff_{name}_low": difference["low"],
+                    f"diff_{name}_high": difference["high"],
+                }
+            )
+        mlflow.log_artifact(str(summary_path), artifact_path="ab_test")
+        return run.info.run_id
+
+
+@app.command()
+def main(
+    champion: str = "models:/mibici-equipo05-p2-riesgo@champion",
+    challenger: str = "models:/mibici-equipo05-p2-riesgo@challenger",
+    features_path: Path = CURRENT_FEATURES_PATH,
+    split: str = EVALUATION_SPLIT,
+    n_boot: int = 1000,
+    seed: int = 42,
+    output: Path = AB_SUMMARY_PATH,
+    log_mlflow: bool = True,
+):
+    """Compare champion and challenger on the evaluation split and write ab_summary.json.
+
+    --champion and --challenger accept models:/ URIs or exported folders (registry_metadata.json),
+    so the A/B can be repeated on a machine without the shared Registry.
+    """
+    summary = build_summary(champion, challenger, features_path, split, n_boot, seed)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
+    logger.info(f"A/B summary written to {output}")
+    logger.info(f"Decision: {summary['decision']}")
+    if log_mlflow:
+        run_id = log_summary(summary, output)
+        logger.info(f"A/B logged to MLflow run {run_id}")
+
+
+if __name__ == "__main__":
+    app()
