@@ -38,6 +38,7 @@ BOOTSTRAP_METRICS = ("pr_auc_minority_mean", "macro_f1", "recall_shortage", "ale
 MACRO_F1_MARGIN = 0.01
 ALERTS_MAX_RATIO = 1.20
 
+
 @dataclass(frozen=True)
 class Scored:
     """Probabilities and labels of one version, with the class order of its model."""
@@ -181,7 +182,7 @@ def breakdown(
             index = np.flatnonzero(np.asarray(keys) == key)
             n_dates = int(rows["day"].iloc[index].nunique())
             result[name][str(key)] = {
-                "rows": int(len(index)),
+                "rows": len(index),
                 "champion": bootstrap_metrics(y_true[index], _subset(champion, index), n_dates),
                 "challenger": bootstrap_metrics(
                     y_true[index], _subset(challenger, index), n_dates
@@ -208,6 +209,7 @@ def decide(
         ),
     }
     return {"checks": checks, "winner": "challenger" if all(checks.values()) else "champion"}
+
 
 AB_SUMMARY_PATH = REPORTS_DIR / "monitoring" / "ab_summary.json"
 REPORT_METRICS = (
@@ -249,7 +251,7 @@ def build_summary(
         "evaluation": {
             "features_path": str(features_path),
             "split": split,
-            "rows": int(len(rows)),
+            "rows": len(rows),
             "days": n_dates,
             "first_target_time": str(rows["target_time"].min()),
             "last_target_time": str(rows["target_time"].max()),
@@ -271,9 +273,7 @@ def build_summary(
         },
         "bootstrap": {"replicates": n_boot, "seed": seed, "unit": "day", "interval": "95%"},
         "mcnemar": mcnemar(y_true, scored["champion"], scored["challenger"]),
-        "breakdown": breakdown(
-            rows, y_true, scored["champion"], scored["challenger"], reference
-        ),
+        "breakdown": breakdown(rows, y_true, scored["champion"], scored["challenger"], reference),
         "decision": decide(point["champion"], point["challenger"], intervals),
     }
 
@@ -297,7 +297,9 @@ def log_summary(summary: dict, summary_path: Path) -> str:
             }
         )
         for name, version in versions.items():
-            mlflow.log_metrics({f"{name}_{key}": value for key, value in version["metrics"].items()})
+            mlflow.log_metrics(
+                {f"{name}_{key}": value for key, value in version["metrics"].items()}
+            )
         for name, difference in summary["difference"].items():
             mlflow.log_metrics(
                 {
