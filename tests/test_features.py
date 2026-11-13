@@ -643,6 +643,28 @@ def test_legacy_builder_forwards_requested_year(tmp_path, monkeypatch):
     assert target_time[result["split"].eq("test")].dt.month.eq(12).all()
 
 
+def test_current_and_reference_tables_have_identical_dtypes(tmp_path):
+    frames = []
+    for year in (2024, 2025):
+        current = year == 2025
+        frames.append(
+            build_feature_table(
+                trips=_monthly_trips(year, [1, 2, 3]),
+                stations=_catalog([1, 2, 3]).astype({"capacity": "int32"}),
+                keep_station_ids=None,
+                start=f"{year}-01-01",
+                end=f"{year + 1}-01-01",
+                split_boundaries=("2025-01-01", "2025-10-01", "2026-01-01") if current else None,
+                split_labels=("current", "evaluation") if current else None,
+                panel_path=tmp_path / f"panel-{year}.parquet",
+                features_path=tmp_path / f"features-{year}.parquet",
+                year=year,
+            )
+        )
+    assert list(frames[0].columns) == list(frames[1].columns) == CLASSIFICATION_COLUMNS
+    pd.testing.assert_series_equal(frames[0].dtypes, frames[1].dtypes)
+
+
 def test_current_cli_without_2024_reference(tmp_path, monkeypatch):
     from tc5061_proyecto_equipo5 import features
 
