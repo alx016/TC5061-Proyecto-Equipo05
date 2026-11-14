@@ -80,7 +80,7 @@ def main(
         raise typer.BadParameter(
             f"window for {question} must be one of {sorted(allowed)}, got {window!r}"
         )
-    
+
     given = {
         "n_estimators": n_estimators,
         "learning_rate": learning_rate,
