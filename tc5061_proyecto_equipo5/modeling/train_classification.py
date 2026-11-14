@@ -50,6 +50,9 @@ from sklearn.preprocessing import StandardScaler
 import typer
 
 from tc5061_proyecto_equipo5.config import (
+    CHALLENGER_FEATURES_PATH,
+    CHALLENGER_FIT_AS_OF,
+    CHALLENGER_SELECTION_AS_OF,
     CLASSIFICATION_FEATURES_PATH,
     P2_FIT_AS_OF,
     P2_MIN_RECALL_SHORTAGE,
@@ -97,6 +100,7 @@ INTEGER_HYPERPARAMS = {
 # Feature table and temporal cutoffs per training window; "default" is the 2024 protocol
 P2_WINDOWS = {
     "default": (CLASSIFICATION_FEATURES_PATH, P2_FIT_AS_OF, P2_SELECTION_AS_OF),
+    "challenger": (CHALLENGER_FEATURES_PATH, CHALLENGER_FIT_AS_OF, CHALLENGER_SELECTION_AS_OF),
 }
 
 # Anti-leakage decision point: the forecast is made at minute 50 of hour t, so the departures,
