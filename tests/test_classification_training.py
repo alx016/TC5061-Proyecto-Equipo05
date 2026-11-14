@@ -370,6 +370,65 @@ def test_split_masks_ignore_rows_without_a_split():
     assert masks["test"].tolist() == [True, False]
 
 
+def test_split_masks_default_to_the_2024_cutoffs_and_accept_others():
+    frame = pd.DataFrame(
+        {
+            "station_id": [1, 1, 1, 1],
+            "target_time": pd.to_datetime(["2024-09-30 21:00", "2024-09-30 23:00", "2024-11-30 21:00", "2024-11-30 23:00"]),
+            "label_available_at": pd.to_datetime(["2024-09-30 22:00", "2024-10-01 00:00", "2024-11-30 22:00", "2024-12-01 00:00"]),
+            "split": pd.Series(["train", "train", "validation", "validation"], dtype="string"),
+        }
+    )
+
+    # Sin argumentos: los cortes de 2024 de siempre
+    masks = train_classification.split_masks(frame)
+    assert masks["train"].tolist() == [True, False, False, False]
+    assert masks["validation"].tolist() == [False, False, True, False]
+
+    # Cortes más tarde: entran las filas del límite.
+    masks = train_classification.split_masks(frame, "2024-10-01 00:00", "2024-12-01 00:00")
+    assert masks["train"].tolist() == [True, True, False, False]
+    assert masks["validation"].tolist() == [False, False, True, True]
+
+
+def test_challenger_window_never_trains_on_the_ab_evaluation():
+    target_time = pd.to_datetime(
+        [
+            "2024-03-15 08:00",  # train, lejos del corte
+            "2025-07-31 22:00",  # train, su etiqueta llega a las 23:00 (antes del corte de ajuste)
+            "2025-07-31 23:00",  # train, su etiqueta llega a las 00:00 del 1 ago: queda fuera
+            "2025-09-30 22:00",  # validation, su etiqueta llega antes del corte de selección
+            "2025-09-30 23:00",  # validation, su etiqueta llega el 1 oct: queda fuera
+            "2025-10-01 00:00",  # test: primera hora de AB_EVALUATION
+            "2025-12-31 23:00",  # test: última hora de AB_EVALUATION
+            "2025-10-15 12:00",  # mal etiquetada como validation dentro de AB_EVALUATION
+        ]
+    )
+    frame = pd.DataFrame(
+        {
+            "station_id": [1] * 8,
+            "target_time": target_time,
+            "label_available_at": target_time + pd.Timedelta(hours=1),
+            "split": pd.Series(
+                ["train"] * 3 + ["validation"] * 2 + ["test"] * 2 + ["validation"],
+                dtype="string",
+            ),
+        }
+    )
+
+    # Cortes del challenger (CHALLENGER_FIT_AS_OF y CHALLENGER_SELECTION_AS_OF de WP-0)
+    masks = train_classification.split_masks(frame, "2025-07-31 23:40", "2025-09-30 23:40")
+
+    # AB_EVALUATION = ("2025-10-01", "2025-12-31"), fechas inclusivas
+    in_ab = frame["target_time"].dt.normalize().between("2025-10-01", "2025-12-31")
+    assert not (masks["train"] & in_ab).any()
+    assert not (masks["validation"] & in_ab).any()
+
+    # Filas exactas, para que la prueba no pase con máscaras vacías
+    assert masks["train"].tolist() == [True, True, False, False, False, False, False, False]
+    assert masks["validation"].tolist() == [False, False, False, True, False, False, False, False]
+
+
 class _FakeRun:
     def __init__(self, tracking, run_id):
         self.tracking = tracking
