@@ -50,6 +50,9 @@ from sklearn.preprocessing import StandardScaler
 import typer
 
 from tc5061_proyecto_equipo5.config import (
+    CHALLENGER_FEATURES_PATH,
+    CHALLENGER_FIT_AS_OF,
+    CHALLENGER_SELECTION_AS_OF,
     CLASSIFICATION_FEATURES_PATH,
     P2_FIT_AS_OF,
     P2_MIN_RECALL_SHORTAGE,
@@ -92,6 +95,12 @@ INTEGER_HYPERPARAMS = {
     "max_depth",
     "min_samples_leaf",
     "max_leaf_nodes",
+}
+
+# Feature table and temporal cutoffs per training window; "default" is the 2024 protocol
+P2_WINDOWS = {
+    "default": (CLASSIFICATION_FEATURES_PATH, P2_FIT_AS_OF, P2_SELECTION_AS_OF),
+    "challenger": (CHALLENGER_FEATURES_PATH, CHALLENGER_FIT_AS_OF, CHALLENGER_SELECTION_AS_OF),
 }
 
 # Anti-leakage decision point: the forecast is made at minute 50 of hour t, so the departures,
@@ -179,7 +188,9 @@ def load_rows(path: Path) -> pd.DataFrame:
     return frame
 
 
-def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
+def split_masks(
+    frame: pd.DataFrame, fit_as_of=P2_FIT_AS_OF, selection_as_of=P2_SELECTION_AS_OF
+) -> dict[str, pd.Series]:
     """Return the train, validation and test masks under the temporal protocol.
 
     ``training_mask`` removes labels that were not closed before the next split starts; test is
@@ -187,16 +198,26 @@ def split_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
     """
     keys = frame[["station_id", "target_time", "label_available_at", "split"]]
     return {
-        "train": training_mask(keys, fit_as_of=P2_FIT_AS_OF, splits=("train",)),
-        "validation": training_mask(keys, fit_as_of=P2_SELECTION_AS_OF, splits=("validation",)),
+        "train": training_mask(keys, fit_as_of=fit_as_of, splits=("train",)),
+        "validation": training_mask(keys, fit_as_of=selection_as_of, splits=("validation",)),
         "test": keys["split"].eq("test").fillna(False).astype(bool),
     }
 
 
-def build_data(frame: pd.DataFrame, source: Path) -> dict:
+def build_data(
+    frame: pd.DataFrame, source: Path, fit_as_of=P2_FIT_AS_OF, selection_as_of=P2_SELECTION_AS_OF
+) -> dict:
     """Build X/y per split and log the row counts once."""
-    masks = split_masks(frame)
-    data = {"X": {}, "y": {}, "n": {}, "n_dates": {}, "source": source}
+    masks = split_masks(frame, fit_as_of, selection_as_of)
+    data = {
+        "X": {},
+        "y": {},
+        "n": {},
+        "n_dates": {},
+        "source": source,
+        "fit_as_of": fit_as_of,
+        "selection_as_of": selection_as_of,
+    }
     for split in SPLITS:
         mask = masks[split]
         X = frame.loc[mask, FEATURE_COLUMNS]
@@ -597,6 +618,7 @@ def train_and_log(
     model_family: str | None = None,
     nested: bool = False,
     log_model: bool = True,
+    window: str = "default",
 ) -> dict:
     """Fit one model, evaluate validation only and log the complete run."""
     X_train, y_train = data["X"]["train"], data["y"]["train"]
@@ -632,8 +654,9 @@ def train_and_log(
             "data_version": data_version(),
             "feature_set": FEATURE_SET,
             "feature_table_sha256": data["source_sha256"],
-            "fit_as_of": P2_FIT_AS_OF,
-            "selection_as_of": P2_SELECTION_AS_OF,
+            "fit_as_of": data["fit_as_of"],
+            "selection_as_of": data["selection_as_of"],
+            "window": window,
             "threshold_shortage": thresholds[1],
             "threshold_saturation": thresholds[2],
             "threshold_fallback": fallback,
@@ -678,11 +701,14 @@ def train_and_log(
     }
 
 
-def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
+def train_one(
+    model: str, stage: str, seed: int, hyperparams: dict, window: str = "default"
+) -> str:
     """Train and log one P2 model: the unit of the MLproject ``train`` entry point."""
+    path, fit_as_of, selection_as_of = P2_WINDOWS[window]
     setup_experiment()
-    frame = load_rows(CLASSIFICATION_FEATURES_PATH)
-    data = build_data(frame, CLASSIFICATION_FEATURES_PATH)
+    frame = load_rows(path)
+    data = build_data(frame, path, fit_as_of, selection_as_of)
     estimator, model_params = build_model(model, seed, hyperparams)
     record = train_and_log(
         name=f"p2-{stage}-{model}",
@@ -692,6 +718,7 @@ def train_one(model: str, stage: str, seed: int, hyperparams: dict) -> str:
         seed=seed,
         stage=stage,
         model_family=model,
+        window=window,
     )
     return record["run_id"]
 

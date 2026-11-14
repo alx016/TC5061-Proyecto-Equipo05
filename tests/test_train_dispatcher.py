@@ -2,13 +2,26 @@
 
 from typer.testing import CliRunner
 
-from tc5061_proyecto_equipo5.config import SEED
-from tc5061_proyecto_equipo5.modeling import train
+from tc5061_proyecto_equipo5.config import (
+    CHALLENGER_FEATURES_PATH,
+    CHALLENGER_FIT_AS_OF,
+    CHALLENGER_SELECTION_AS_OF,
+    SEED,
+)
+from tc5061_proyecto_equipo5.modeling import train, train_classification
 
 
 def fake_trainer(calls):
     def trainer(model, stage, seed, hyperparams):
         calls.append((model, stage, seed, hyperparams))
+        return "run-123"
+
+    return trainer
+
+
+def fake_windowed_trainer(calls):
+    def trainer(model, stage, seed, hyperparams, window="default"):
+        calls.append((model, stage, seed, hyperparams, window))
         return "run-123"
 
     return trainer
@@ -116,3 +129,75 @@ def test_unknown_question_stage_or_missing_trainer_is_rejected(monkeypatch):
     ):
         result = CliRunner().invoke(train.app, args)
         assert result.exit_code != 0, args
+
+
+def test_p2_passes_a_known_window_to_the_trainer(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p2", fake_windowed_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--window", "challenger"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("lightgbm", "candidate", SEED, {}, "challenger")]
+
+
+def test_challenger_window_reaches_the_p2_trainer_with_its_table_and_cutoffs(monkeypatch):
+    seen = {}
+
+    def fake_load_rows(path):
+        seen["path"] = path
+        return "frame"
+
+    def fake_build_data(frame, path, fit_as_of, selection_as_of):
+        seen["cutoffs"] = (fit_as_of, selection_as_of)
+        return {}
+
+    def fake_train_and_log(**kwargs):
+        seen["window"] = kwargs["window"]
+        return {"run_id": "run-123"}
+
+    # The real train_one runs; only the parts that read disk or write to MLflow are replaced
+    monkeypatch.setattr(train_classification, "setup_experiment", lambda: None)
+    monkeypatch.setattr(train_classification, "load_rows", fake_load_rows)
+    monkeypatch.setattr(train_classification, "build_data", fake_build_data)
+    monkeypatch.setattr(train_classification, "build_model", lambda *args: (None, {}))
+    monkeypatch.setattr(train_classification, "train_and_log", fake_train_and_log)
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--window", "challenger"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == {
+        "path": CHALLENGER_FEATURES_PATH,
+        "cutoffs": (CHALLENGER_FIT_AS_OF, CHALLENGER_SELECTION_AS_OF),
+        "window": "challenger",
+    }
+
+
+def test_unknown_window_is_rejected_for_p2(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p2", fake_windowed_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p2", "--model", "lightgbm", "--window", "nope"]
+    )
+
+    assert result.exit_code != 0
+    assert "window for p2" in result.output
+    assert calls == []
+
+
+def test_questions_without_windows_only_accept_the_default(monkeypatch):
+    calls = []
+    monkeypatch.setitem(train.TRAINERS, "p1", fake_windowed_trainer(calls))
+
+    result = CliRunner().invoke(
+        train.app, ["--question", "p1", "--model", "lightgbm", "--window", "challenger"]
+    )
+
+    assert result.exit_code != 0
+    assert "window for p1" in result.output
+    assert calls == []
