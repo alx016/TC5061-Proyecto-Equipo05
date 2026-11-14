@@ -44,6 +44,9 @@ INTEGER_HYPERPARAMS = {
     "p3": train_clustering.INTEGER_HYPERPARAMETERS,
 }
 
+# Training windows per question; only P2 has more than the default one (Entrega 5 challenger)
+WINDOWS = {"p2": train_classification.P2_WINDOWS}
+
 
 @app.command()
 def main(
@@ -61,6 +64,9 @@ def main(
     alpha: float = UNSET,
     c: Annotated[float, typer.Option("--c", help="Inverse regularization (C)")] = UNSET,
     n_clusters: float = UNSET,
+    window: Annotated[
+        str, typer.Option(help="Training window, e.g. default or challenger")
+    ] = "default",
 ):
     """Train and log one model of one question in its own MLflow run."""
     if question not in TASKS:
@@ -69,6 +75,11 @@ def main(
         raise typer.BadParameter(f"{question} has no train_one yet (its experiment WP adds it)")
     if stage not in STAGES:
         raise typer.BadParameter(f"stage must be one of {sorted(STAGES)}, got {stage!r}")
+    allowed = WINDOWS.get(question, {"default": None})
+    if window not in allowed:
+        raise typer.BadParameter(
+            f"window for {question} must be one of {sorted(allowed)}, got {window!r}"
+        )
 
     given = {
         "n_estimators": n_estimators,
@@ -96,7 +107,8 @@ def main(
     run_seed = SEED if seed == UNSET else int(seed)
 
     logger.info(f"Training {question} {model} ({stage}) with {hyperparams or 'its defaults'}")
-    run_id = TRAINERS[question](model, stage, run_seed, hyperparams)
+    extra = {} if window == "default" else {"window": window}
+    run_id = TRAINERS[question](model, stage, run_seed, hyperparams, **extra)
     logger.success(f"Run {run_id} logged")
 
 
