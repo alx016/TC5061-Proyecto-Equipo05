@@ -5,6 +5,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tc5061_proyecto_equipo5.config import (
+    CLASSIFICATION_FEATURES_PATH,
+    CURRENT_FEATURES_PATH,
+    P2_FIT_AS_OF,
+)
 from tc5061_proyecto_equipo5.monitoring import (
     DATA_DRIFT_SHARE_TRIGGER,
     DEFAULT_TOP_IMPORTANCE_FEATURES,
@@ -18,6 +23,9 @@ from tc5061_proyecto_equipo5.monitoring import (
     DriftSummaryReport,
     compute_drift_summary,
     export_drift_distribution_plots,
+    extract_top_importance_features,
+    filter_p2_reference,
+    load_champion_model,
     load_drift_datasets,
     run_drift_pipeline,
     score_dataset_predictions,
@@ -420,20 +428,17 @@ def test_skip_prediction_flag(
     assert len(report.features) == len(FEATURE_COLUMNS)
 
 
-def test_model_fallback_on_missing_model(
+def test_model_error_raises_exception_when_not_skipped(
     synthetic_reference_df: pd.DataFrame,
 ) -> None:
     current_df = synthetic_reference_df.copy()
-    report = compute_drift_summary(
-        synthetic_reference_df,
-        current_df,
-        model_uri="invalid/path/nonexistent_model",
-        skip_prediction=False,
-    )
-
-    assert PREDICTION_COLUMN not in report.features
-    assert len(report.features) == len(FEATURE_COLUMNS)
-    assert report.summary.dataset_drift is False
+    with pytest.raises((RuntimeError, ValueError, FileNotFoundError)):
+        compute_drift_summary(
+            synthetic_reference_df,
+            current_df,
+            model_uri="invalid/path/nonexistent_model",
+            skip_prediction=False,
+        )
 
 
 def test_drift_triggers_negative_control(
@@ -450,12 +455,12 @@ def test_trigger_data_drift_via_top_importance_feature(
     synthetic_reference_df: pd.DataFrame,
 ) -> None:
     current_df = synthetic_reference_df.copy()
-    current_df["neighbor_net_flow"] = (
-        current_df["neighbor_net_flow"] + 5.0 * synthetic_reference_df["neighbor_net_flow"].std()
+    current_df["net_flow_lag24"] = (
+        current_df["net_flow_lag24"] + 5.0 * synthetic_reference_df["net_flow_lag24"].std()
     )
     report = compute_drift_summary(synthetic_reference_df, current_df)
 
-    assert report.features["neighbor_net_flow"].drift_detected is True
+    assert report.features["net_flow_lag24"].drift_detected is True
     assert report.summary.trigger_data_drift is True
     assert report.summary.trigger_label_drift is False
 
@@ -637,7 +642,9 @@ def test_run_drift_pipeline_programmatic(
     tmp_path: Path,
 ) -> None:
     assert DATA_DRIFT_SHARE_TRIGGER == 0.30
-    assert "neighbor_net_flow" in DEFAULT_TOP_IMPORTANCE_FEATURES
+    assert "longitude" in DEFAULT_TOP_IMPORTANCE_FEATURES
+    assert "latitude" in DEFAULT_TOP_IMPORTANCE_FEATURES
+    assert "net_flow_lag24" in DEFAULT_TOP_IMPORTANCE_FEATURES
 
     out_dir = tmp_path / "pipeline_reports"
     figs_dir = tmp_path / "pipeline_figures"
@@ -659,3 +666,193 @@ def test_run_drift_pipeline_programmatic(
     for fig_path in figures:
         assert fig_path.exists()
         assert fig_path.stat().st_size > 0
+
+
+def test_load_drift_datasets_with_separate_tables(
+    synthetic_temporal_drift_df: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    ref_table = synthetic_temporal_drift_df[
+        synthetic_temporal_drift_df["hour"].dt.year == 2024
+    ].reset_index(drop=True)
+    curr_table = synthetic_temporal_drift_df[
+        synthetic_temporal_drift_df["hour"].dt.year == 2025
+    ].reset_index(drop=True)
+
+    ref_path = tmp_path / "reference_2024.parquet"
+    curr_path = tmp_path / "current_2025.parquet"
+    ref_table.to_parquet(ref_path, index=False)
+    curr_table.to_parquet(curr_path, index=False)
+
+    pair = load_drift_datasets(
+        reference_path=ref_path, current_path=curr_path, sample_size=90, seed=42
+    )
+    assert len(pair.reference) == 90
+    assert len(pair.current) == 90
+    assert set(pair.reference["split"].unique()) == {"train"}
+    assert set(pair.current["split"].unique()) == {"current"}
+    assert set(pair.reference["hour"].dt.year.unique()) == {2024}
+    assert set(pair.current["hour"].dt.year.unique()) == {2025}
+
+    assert CURRENT_FEATURES_PATH.name == "classification_features_2025.parquet"
+    out_dir = tmp_path / "cli_separate_reports"
+    figs_dir = tmp_path / "cli_separate_figures"
+    exit_code = main(
+        [
+            f"--reference-path={ref_path}",
+            f"--current-path={curr_path}",
+            f"--output-dir={out_dir}",
+            f"--figures-dir={figs_dir}",
+            "--skip-prediction",
+            "--sample-size=60",
+        ]
+    )
+    assert exit_code == 0
+    assert (out_dir / "drift_summary.json").exists()
+
+
+def test_evidently_handles_nullable_int8_target(tmp_path: Path) -> None:
+    rng = np.random.default_rng(42)
+    n = 120
+    data = {c: rng.normal(10.0, 2.0, n) for c in NUMERICAL_FEATURES}
+    data["day_of_week"] = rng.choice(range(7), n).astype("int8")
+    data["is_weekend"] = rng.choice([0, 1], n).astype("int8")
+    data["is_holiday"] = rng.choice([0, 1], n).astype("int8")
+    data["station_id"] = np.arange(1, n + 1, dtype="int32")
+    data["hour"] = pd.date_range("2024-03-01", periods=n, freq="h")
+    data["split"] = "train"
+    data["target"] = pd.Series(rng.choice([0, 1, 2], size=n), dtype="Int8")
+    ref_df = pd.DataFrame(data)[REQUIRED_DRIFT_DATASET_COLUMNS]
+
+    curr_data = dict(data)
+    curr_data["hour"] = pd.date_range("2025-03-01", periods=n, freq="h")
+    curr_data["split"] = "current"
+    curr_data["target"] = pd.Series(rng.choice([0, 1, 2], size=n), dtype="Int8")
+    curr_df = pd.DataFrame(curr_data)[REQUIRED_DRIFT_DATASET_COLUMNS]
+
+    json_path = tmp_path / "drift_summary.json"
+    html_path = tmp_path / "drift_report.html"
+
+    report = compute_drift_summary(
+        ref_df,
+        curr_df,
+        output_path=json_path,
+        html_output_path=html_path,
+        skip_prediction=True,
+    )
+    assert report is not None
+    assert json_path.exists()
+    assert html_path.exists()
+    assert html_path.stat().st_size > 1000
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    metadata = payload["metadata"]
+    assert "reference_period" in metadata
+    assert "current_period" in metadata
+    assert len(metadata["reference_period"]) == 2
+    assert len(metadata["current_period"]) == 2
+
+
+def test_reference_mask_parity_with_p2_training_protocol() -> None:
+    hours = pd.to_datetime(
+        [
+            "2024-01-01 00:00",
+            "2024-09-30 21:00",
+            "2024-09-30 22:00",
+            "2024-09-30 23:00",
+        ]
+    )
+    n = len(hours)
+    data = {c: [10.0] * n for c in NUMERICAL_FEATURES}
+    data["day_of_week"] = [0] * n
+    data["is_weekend"] = [False] * n
+    data["is_holiday"] = [False] * n
+    data["station_id"] = [1] * n
+    data["hour"] = hours
+    data["target"] = pd.Series([0, 1, 2, 0], dtype="Int8")
+    data["split"] = "train"
+    df = pd.DataFrame(data)[REQUIRED_DRIFT_DATASET_COLUMNS]
+
+    filtered = filter_p2_reference(df, fit_as_of=P2_FIT_AS_OF)
+    assert len(filtered) == 2
+    assert filtered["hour"].tolist() == [
+        pd.Timestamp("2024-01-01 00:00"),
+        pd.Timestamp("2024-09-30 21:00"),
+    ]
+
+    if CLASSIFICATION_FEATURES_PATH.exists():
+        from tc5061_proyecto_equipo5.modeling.train_classification import (
+            load_rows,
+            split_masks,
+        )
+
+        raw_df = pd.read_parquet(CLASSIFICATION_FEATURES_PATH)
+        filtered_ref = filter_p2_reference(raw_df)
+        assert len(filtered_ref) == 2_344_900
+
+        loaded = load_rows(CLASSIFICATION_FEATURES_PATH)
+        masks = split_masks(loaded)
+        expected = loaded.loc[masks["train"]]
+        assert len(filtered_ref) == len(expected) == 2_344_900
+
+
+def test_dynamic_top_importance_features_and_ranking_change() -> None:
+    top_default = extract_top_importance_features(None, top_k=3)
+    assert top_default == ("longitude", "latitude", "net_flow_lag24")
+
+    champion = load_champion_model()
+    top_champ = extract_top_importance_features(champion, top_k=3)
+    assert top_champ == ("longitude", "latitude", "net_flow_lag24")
+
+    class MockBooster:
+        def feature_name(self):
+            return ["capacity", "latitude", "longitude", "hour_sin"]
+
+        def feature_importance(self, importance_type="gain"):
+            return np.array([5000.0, 100.0, 20.0, 8000.0])
+
+    class MockSklearn:
+        def __init__(self):
+            self.booster_ = MockBooster()
+
+    class MockModelImpl:
+        def __init__(self):
+            self.sklearn_model = MockSklearn()
+
+    class MockLoadedModel:
+        def __init__(self):
+            self._model_impl = MockModelImpl()
+
+    mock_model = MockLoadedModel()
+    custom_top = extract_top_importance_features(mock_model, top_k=3)
+    assert custom_top == ("hour_sin", "capacity", "latitude")
+
+    ref_df = pd.DataFrame(
+        {
+            "capacity": [10.0, 10.0] * 50,
+            "latitude": [20.0, 20.0] * 50,
+            "longitude": [30.0, 30.0] * 50,
+            "hour_sin": [0.0, 0.0] * 50,
+            "day_of_week": [1] * 100,
+            "is_weekend": [False] * 100,
+            "is_holiday": [False] * 100,
+            "target": [0] * 100,
+            "prediction": [0] * 100,
+        }
+    )
+    for col in NUMERICAL_FEATURES:
+        if col not in ref_df:
+            ref_df[col] = [5.0] * 100
+
+    curr_df = ref_df.copy()
+    curr_df["hour_sin"] = [1.0, 1.0] * 50
+
+    report = compute_drift_summary(
+        ref_df,
+        curr_df,
+        model=mock_model,
+        skip_prediction=True,
+        data_drift_share_trigger=0.99,
+    )
+    assert report.summary.trigger_data_drift is True
+    assert "hour_sin" in report.metadata.top_importance_features

@@ -7,6 +7,8 @@ import pandas as pd
 
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
+    CURRENT_FEATURES_PATH,
+    P2_FIT_AS_OF,
     SEED,
     TRAIN_MONTHS,
 )
@@ -127,12 +129,61 @@ def _filter_partition(
 ) -> pd.DataFrame:
     work = df.copy()
     work["hour"] = pd.to_datetime(work["hour"])
+    if "target" in work.columns:
+        work = work.dropna(subset=["target"])
+    feat_cols = [c for c in FEATURE_COLUMNS if c in work.columns]
+    if feat_cols:
+        work = work.dropna(subset=feat_cols)
     mask = (
         (work["split"] == expected_split)
         & (work["hour"].dt.year == expected_year)
         & (work["hour"].dt.month.isin(months))
     )
     return work.loc[mask].reset_index(drop=True)
+
+
+def filter_p2_reference(
+    df: pd.DataFrame,
+    *,
+    fit_as_of: str = P2_FIT_AS_OF,
+    months: Sequence[int] = DRIFT_MONTHS,
+) -> pd.DataFrame:
+    """Filter reference partition with P2 eligible rows and temporal training masks.
+
+    Applies the same protocol as modeling.train_classification.load_rows and split_masks:
+    drops missing targets and features, assigns target_time and label_available_at,
+    and selects only rows observable before fit_as_of with split='train'.
+    """
+    work = df.copy()
+    work["hour"] = pd.to_datetime(work["hour"])
+    if "target" in work.columns:
+        work = work.dropna(subset=["target"])
+    feat_cols = [c for c in FEATURE_COLUMNS if c in work.columns]
+    if feat_cols:
+        work = work.dropna(subset=feat_cols)
+
+    if "target_time" not in work.columns:
+        work["target_time"] = work["hour"] + pd.Timedelta(hours=1)
+    if "label_available_at" not in work.columns:
+        work["label_available_at"] = work["target_time"] + pd.Timedelta(hours=1)
+
+    if "split" in work.columns:
+        from tc5061_proyecto_equipo5.modeling.train_classification import split_masks
+
+        masks = split_masks(work, fit_as_of=fit_as_of)
+        work = work.loc[masks["train"]]
+    else:
+        from tc5061_proyecto_equipo5.features import _timestamp
+
+        cutoff = _timestamp(fit_as_of)
+        mask = (
+            (work["hour"].dt.year == REFERENCE_YEAR)
+            & (work["hour"].dt.month.isin(months))
+            & (work["label_available_at"] <= cutoff)
+        )
+        work = work.loc[mask]
+
+    return work.reset_index(drop=True)
 
 
 def load_drift_datasets(
@@ -158,19 +209,16 @@ def load_drift_datasets(
         else (current_path if current_path is not None else current_dataset)
     )
 
-    if ref_source is None and curr_source is None:
+    if dataset is None and curr_source is None:
+        curr_source = CURRENT_FEATURES_PATH
+
+    if ref_source is None:
         ref_source = CLASSIFICATION_FEATURES_PATH
 
-    if curr_source is None:
-        if ref_source is None:
-            ref_source = CLASSIFICATION_FEATURES_PATH
-        combined_df = _coerce_dataframe(ref_source)
+    if dataset is not None and curr_source is None:
+        combined_df = _coerce_dataframe(dataset)
         validate_drift_dataset_schema(combined_df)
-        ref_raw = _filter_partition(
-            combined_df,
-            expected_split="train",
-            expected_year=REFERENCE_YEAR,
-        )
+        ref_raw = filter_p2_reference(combined_df)
         curr_raw = _filter_partition(
             combined_df,
             expected_split="current",
@@ -184,11 +232,7 @@ def load_drift_datasets(
         curr_input = _coerce_dataframe(curr_source)
         validate_drift_dataset_schema(ref_input)
         validate_drift_dataset_schema(curr_input)
-        ref_raw = _filter_partition(
-            ref_input,
-            expected_split="train",
-            expected_year=REFERENCE_YEAR,
-        )
+        ref_raw = filter_p2_reference(ref_input)
         curr_raw = _filter_partition(
             curr_input,
             expected_split="current",

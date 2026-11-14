@@ -22,6 +22,9 @@ from tc5061_proyecto_equipo5.api.model import (
 )
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
+    CURRENT_FEATURES_PATH,
+    DRIFT_CURRENT,
+    DRIFT_REFERENCE,
     FIGURES_DIR,
     REPORTS_DIR,
     SEED,
@@ -61,11 +64,62 @@ DEFAULT_DRIFT_THRESHOLD: float = 0.1
 DEFAULT_DRIFT_SHARE: float = 0.5
 
 DEFAULT_TOP_IMPORTANCE_FEATURES: tuple[str, ...] = (
-    "neighbor_net_flow",
-    "latitude",
     "longitude",
+    "latitude",
+    "net_flow_lag24",
 )
 DATA_DRIFT_SHARE_TRIGGER: float = 0.30
+
+
+def extract_top_importance_features(
+    model: Any | None = None,
+    top_k: int = 3,
+    fallback: Sequence[str] = DEFAULT_TOP_IMPORTANCE_FEATURES,
+) -> tuple[str, ...]:
+    """Extract top-K features by gain/importance from the model, or use audited fallback."""
+    if model is None:
+        return tuple(fallback[:top_k])
+
+    raw = getattr(model, "model", model)
+    impl = getattr(raw, "_model_impl", raw)
+    skl = getattr(impl, "sklearn_model", impl)
+    booster = getattr(skl, "booster_", None)
+
+    feature_names: list[str] | None = None
+    importances: np.ndarray | list[float] | None = None
+
+    if (
+        booster is not None
+        and hasattr(booster, "feature_importance")
+        and hasattr(booster, "feature_name")
+    ):
+        try:
+            importances = booster.feature_importance(importance_type="gain")
+            feature_names = booster.feature_name()
+        except (AttributeError, ValueError, TypeError):
+            importances = None
+            feature_names = None
+
+    if importances is None and hasattr(skl, "feature_importances_"):
+        try:
+            importances = skl.feature_importances_
+            feature_names = getattr(skl, "feature_name_", None) or getattr(
+                skl, "feature_names_in_", None
+            )
+        except (AttributeError, ValueError, TypeError):
+            importances = None
+
+    if (
+        importances is not None
+        and feature_names is not None
+        and len(importances) == len(feature_names)
+    ):
+        ranking = sorted(zip(feature_names, importances), key=lambda x: -x[1])
+        top_features = tuple(feat for feat, _ in ranking[:top_k])
+        if len(top_features) == top_k:
+            return top_features
+
+    return tuple(fallback[:top_k])
 
 
 @dataclass
@@ -89,6 +143,9 @@ class DriftSummaryMetadata(BaseModel):
     seed: int
     reference_rows: int | None = None
     current_rows: int | None = None
+    reference_period: tuple[str, str] | list[str] | None = None
+    current_period: tuple[str, str] | list[str] | None = None
+    top_importance_features: tuple[str, ...] | list[str] | None = None
 
 
 class DriftSummaryMetrics(BaseModel):
@@ -263,31 +320,23 @@ def compute_drift_summary(
         curr_df = current_data.copy()
         effective_sample_size = len(reference_data)
 
+    effective_model = model
     if not skip_prediction and (pred_col not in ref_df.columns or pred_col not in curr_df.columns):
-        effective_model = model
         if effective_model is None:
             try:
                 effective_model = load_champion_model(model_uri)
-            except Exception as exc:  # noqa: BLE001 - graceful fallback across model loading errors
-                logger.warning(
-                    f"Could not load champion model from '{model_uri}': {exc}. "
-                    "Skipping prediction scoring."
-                )
-                effective_model = None
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to load champion model from '{model_uri}': {exc}"
+                ) from exc
 
-        if effective_model is not None:
-            try:
-                ref_df = score_dataset_predictions(
-                    ref_df, effective_model, prediction_column=pred_col
-                )
-                curr_df = score_dataset_predictions(
-                    curr_df, effective_model, prediction_column=pred_col
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    f"Could not score predictions with champion model: {exc}. "
-                    "Skipping prediction scoring."
-                )
+        try:
+            ref_df = score_dataset_predictions(ref_df, effective_model, prediction_column=pred_col)
+            curr_df = score_dataset_predictions(
+                curr_df, effective_model, prediction_column=pred_col
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to score predictions with champion model: {exc}") from exc
 
     if columns is not None:
         target_columns = list(columns)
@@ -321,9 +370,15 @@ def compute_drift_summary(
     ref_evidently = ref_df[target_columns].copy()
     curr_evidently = curr_df[target_columns].copy()
     for col in target_columns:
-        if ref_evidently[col].dtype == "int8":
+        if str(ref_evidently[col].dtype).lower() in ("int8", "uint8") or (
+            col in (target_col, pred_col, TARGET_COLUMN, PREDICTION_COLUMN)
+            and pd.api.types.is_integer_dtype(ref_evidently[col].dtype)
+        ):
             ref_evidently[col] = ref_evidently[col].astype("int32")
-        if curr_evidently[col].dtype == "int8":
+        if str(curr_evidently[col].dtype).lower() in ("int8", "uint8") or (
+            col in (target_col, pred_col, TARGET_COLUMN, PREDICTION_COLUMN)
+            and pd.api.types.is_integer_dtype(curr_evidently[col].dtype)
+        ):
             curr_evidently[col] = curr_evidently[col].astype("int32")
 
     ds_ref = Dataset.from_pandas(ref_evidently, data_definition=data_def)
@@ -379,8 +434,13 @@ def compute_drift_summary(
         (input_drifted_count / len(input_feature_cols)) if input_feature_cols else 0.0
     )
 
+    resolved_top_importance = extract_top_importance_features(
+        model=effective_model,
+        top_k=len(top_importance_features) if top_importance_features else 3,
+        fallback=top_importance_features,
+    )
     top_importance_drifted = any(
-        features[c].drift_detected for c in top_importance_features if c in features
+        features[c].drift_detected for c in resolved_top_importance if c in features
     )
     trigger_data_drift = bool(
         input_drifted_share > data_drift_share_trigger or top_importance_drifted
@@ -392,12 +452,25 @@ def compute_drift_summary(
         if c in features
     )
 
+    ref_period: list[str] = list(DRIFT_REFERENCE)
+    if "hour" in ref_df.columns and not ref_df["hour"].empty:
+        ref_h = pd.to_datetime(ref_df["hour"])
+        ref_period = [str(ref_h.min().date()), str(ref_h.max().date())]
+
+    curr_period: list[str] = list(DRIFT_CURRENT)
+    if "hour" in curr_df.columns and not curr_df["hour"].empty:
+        curr_h = pd.to_datetime(curr_df["hour"])
+        curr_period = [str(curr_h.min().date()), str(curr_h.max().date())]
+
     metadata = DriftSummaryMetadata(
         timestamp=datetime.now(UTC).isoformat(),
         sample_size=effective_sample_size,
         seed=effective_seed,
         reference_rows=len(reference_data),
         current_rows=len(current_data),
+        reference_period=ref_period,
+        current_period=curr_period,
+        top_importance_features=list(resolved_top_importance),
     )
 
     summary = DriftSummaryMetrics(
@@ -463,10 +536,15 @@ def run_drift_pipeline(
     html_output_path = effective_output_dir / html_filename
     json_output_path = effective_output_dir / json_filename
 
+    effective_ref_path = (
+        reference_path if reference_path is not None else CLASSIFICATION_FEATURES_PATH
+    )
+    effective_curr_path = current_path if current_path is not None else CURRENT_FEATURES_PATH
+
     pair = load_drift_datasets(
         dataset=dataset,
-        reference_path=reference_path,
-        current_path=current_path,
+        reference_path=effective_ref_path if dataset is None else None,
+        current_path=effective_curr_path if dataset is None else None,
         sample_size=effective_sample_size,
         seed=seed,
     )
@@ -480,12 +558,10 @@ def run_drift_pipeline(
             effective_model = load_champion_model(model_uri)
             ref_df = score_dataset_predictions(ref_df, effective_model)
             curr_df = score_dataset_predictions(curr_df, effective_model)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                f"Could not score predictions with champion model from '{model_uri}': {exc}. "
-                "Skipping prediction scoring."
-            )
-            effective_model = None
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to score predictions with champion model from '{model_uri}': {exc}"
+            ) from exc
 
     summary_report = compute_drift_summary(
         reference_data=ref_df,
@@ -533,8 +609,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--current-path",
         type=Path,
-        default=None,
-        help="Path to current dataset (2025 current partition). If omitted, loads from reference-path.",
+        default=CURRENT_FEATURES_PATH,
+        help="Path to current dataset (2025 current partition). Defaults to CURRENT_FEATURES_PATH.",
     )
     parser.add_argument(
         "--sample-size",
