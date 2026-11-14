@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tc5061_proyecto_equipo5.config import AB_EVALUATION
 from tc5061_proyecto_equipo5.modeling import train_classification
 
 
@@ -416,11 +417,12 @@ def test_challenger_window_never_trains_on_the_ab_evaluation():
         }
     )
 
-    # Cortes del challenger (CHALLENGER_FIT_AS_OF y CHALLENGER_SELECTION_AS_OF de WP-0)
-    masks = train_classification.split_masks(frame, "2025-07-31 23:40", "2025-09-30 23:40")
+    # Cortes reales de la ventana del challenger
+    _, fit_as_of, selection_as_of = train_classification.P2_WINDOWS["challenger"]
+    masks = train_classification.split_masks(frame, fit_as_of, selection_as_of)
 
-    # AB_EVALUATION = ("2025-10-01", "2025-12-31"), fechas inclusivas
-    in_ab = frame["target_time"].dt.normalize().between("2025-10-01", "2025-12-31")
+    # AB_EVALUATION, fechas inclusivas
+    in_ab = frame["target_time"].dt.normalize().between(*AB_EVALUATION)
     assert not (masks["train"] & in_ab).any()
     assert not (masks["validation"] & in_ab).any()
 

@@ -3,7 +3,7 @@
 from typer.testing import CliRunner
 
 from tc5061_proyecto_equipo5.config import SEED
-from tc5061_proyecto_equipo5.modeling import train, train_classification
+from tc5061_proyecto_equipo5.modeling import train
 
 
 def fake_trainer(calls):
@@ -129,8 +129,6 @@ def test_unknown_question_stage_or_missing_trainer_is_rejected(monkeypatch):
 def test_p2_passes_a_known_window_to_the_trainer(monkeypatch):
     calls = []
     monkeypatch.setitem(train.TRAINERS, "p2", fake_windowed_trainer(calls))
-    # The trainer is fake, so the table and cutoffs of the window are never read
-    monkeypatch.setitem(train_classification.P2_WINDOWS, "challenger", ("table", "fit", "select"))
 
     result = CliRunner().invoke(
         train.app, ["--question", "p2", "--model", "lightgbm", "--window", "challenger"]
