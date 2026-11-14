@@ -18,6 +18,8 @@ from tc5061_proyecto_equipo5.monitoring.ab_test import (
     paired_bootstrap,
     score,
     version_metrics,
+    breakdown ,
+    load_reference_stations
 )
 
 CLASSES = [0, 1, 2]
@@ -157,3 +159,32 @@ def test_champion_stays_when_one_check_fails(check, change):
     assert result["checks"][check] is False
     assert sum(not passed for passed in result["checks"].values()) == 1
     assert result["winner"] == "champion"
+
+def test_mcnemar_is_zero_when_both_versions_win_the_same_rows():
+    y_true = np.array([1, 2, 1, 2])
+    empty = np.zeros((4, 3))
+    champion = _scored(empty, np.array([1, 2, 0, 0]))
+    challenger = _scored(empty, np.array([0, 0, 1, 2]))
+
+    result = mcnemar(y_true, champion, challenger)
+
+    assert result["only_champion_correct"] == result["only_challenger_correct"] == 2
+    assert result["statistic"] == 0.0
+    assert result["p_value"] == 1.0
+
+
+def test_breakdown_skips_stations_without_the_2024_table(tmp_path):
+    y_true, proba, days = _synthetic(n_days=3, rows_per_day=4)
+    rows = pd.DataFrame(
+        {
+            "target_time": pd.to_datetime(days) + pd.Timedelta(hours=1),
+            "station_id": 1,
+            "day": days,
+        }
+    )
+    version = _scored(proba, proba.argmax(axis=1))
+
+    assert load_reference_stations(tmp_path / "missing.parquet") is None
+    result = breakdown(rows, y_true, version, version, reference_stations=None)
+
+    assert set(result) == {"month"}

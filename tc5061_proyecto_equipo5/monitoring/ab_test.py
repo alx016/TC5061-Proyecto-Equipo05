@@ -154,7 +154,9 @@ def mcnemar(y_true: np.ndarray, champion: Scored, challenger: Scored) -> dict[st
     only_champion = int(np.count_nonzero(champion_hit & ~challenger_hit))
     only_challenger = int(np.count_nonzero(~champion_hit & challenger_hit))
     discordant = only_champion + only_challenger
-    statistic = (abs(only_champion - only_challenger) - 1) ** 2 / discordant if discordant else 0.0
+    statistic = (
+        max(0, abs(only_champion - only_challenger) - 1) ** 2 / discordant if discordant else 0.0
+    )
     return {
         "only_champion_correct": only_champion,
         "only_challenger_correct": only_challenger,
@@ -168,13 +170,16 @@ def breakdown(
     y_true: np.ndarray,
     champion: Scored,
     challenger: Scored,
-    reference_stations: set[int],
+    reference_stations: set[int] | None,
 ) -> dict[str, dict[str, dict]]:
-    """Point metrics of both versions by target month and by common vs new stations."""
-    groups = {
-        "month": rows["target_time"].dt.strftime("%Y-%m"),
-        "stations": np.where(rows["station_id"].isin(reference_stations), "common", "new"),
-    }
+    """Point metrics of both versions by target month and by common vs new stations.
+
+    Without the 2024 station list there is no way to tell new stations apart, so only the
+    monthly breakdown is returned.
+    """
+    groups = {"month": rows["target_time"].dt.strftime("%Y-%m")}
+    if reference_stations is not None:
+        groups["stations"] = np.where(rows["station_id"].isin(reference_stations), "common", "new")
     result = {}
     for name, keys in groups.items():
         result[name] = {}
@@ -224,6 +229,14 @@ REPORT_METRICS = (
 app = typer.Typer()
 
 
+def load_reference_stations(path: Path) -> set[int] | None:
+    """Return the 2024 station ids, or None when the 2024 table is not on this machine."""
+    if not path.exists():
+        logger.warning(f"{path} not found; the breakdown by common vs new stations is skipped")
+        return None
+    return set(pd.read_parquet(path, columns=["station_id"])["station_id"])
+
+
 def build_summary(
     champion_uri: str,
     challenger_uri: str,
@@ -231,6 +244,7 @@ def build_summary(
     split: str,
     n_boot: int,
     seed: int,
+    reference_features_path: Path,
 ) -> dict:
     """Run the whole A/B and return everything the report needs."""
     rows = load_evaluation(features_path, split)
@@ -243,9 +257,8 @@ def build_summary(
     intervals = paired_bootstrap(
         y_true, scored["champion"], scored["challenger"], rows["day"], n_boot=n_boot, seed=seed
     )
-    reference = set(
-        pd.read_parquet(CLASSIFICATION_FEATURES_PATH, columns=["station_id"])["station_id"]
-    )
+
+    reference = load_reference_stations(reference_features_path)
 
     return {
         "evaluation": {
@@ -281,8 +294,8 @@ def build_summary(
 def log_summary(summary: dict, summary_path: Path) -> str:
     """Log the A/B as one MLflow run with both versions' metrics and the decision."""
     setup_experiment()
-    # base_tags only accepts training stages; the A/B keeps its tags and changes the stage
-    tags = {**base_tags("p2", "lightgbm", "candidate"), "stage_of_work": "ab_test"}
+
+    tags = base_tags("p2", "lightgbm", "ab_test")
     with mlflow.start_run(run_name="p2-ab-test", tags=tags) as run:
         versions = summary["versions"]
         mlflow.log_params(
@@ -321,6 +334,7 @@ def main(
     n_boot: int = 1000,
     seed: int = 42,
     output: Path = AB_SUMMARY_PATH,
+    reference_features_path: Path = CLASSIFICATION_FEATURES_PATH,
     log_mlflow: bool = True,
 ):
     """Compare champion and challenger on the evaluation split and write ab_summary.json.
@@ -328,7 +342,9 @@ def main(
     --champion and --challenger accept models:/ URIs or exported folders (registry_metadata.json),
     so the A/B can be repeated on a machine without the shared Registry.
     """
-    summary = build_summary(champion, challenger, features_path, split, n_boot, seed)
+    summary = build_summary(
+        champion, challenger, features_path, split, n_boot, seed, reference_features_path
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
     logger.info(f"A/B summary written to {output}")
