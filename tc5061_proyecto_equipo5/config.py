@@ -69,3 +69,13 @@ P2_SEARCH_GRID = {
     "num_leaves": (31, 63, 127),
     "min_child_samples": (100,),
 }
+
+# Entrega 5: monitoring windows (target hour, inclusive)
+DRIFT_REFERENCE = ("2024-01-01", "2024-09-30")
+DRIFT_CURRENT = ("2025-01-01", "2025-09-30")
+AB_EVALUATION = ("2025-10-01", "2025-12-31")
+CHALLENGER_FIT_AS_OF = "2025-07-31 23:40"
+CHALLENGER_SELECTION_AS_OF = "2025-09-30 23:40"
+CURRENT_FEATURES_PATH = PROCESSED_DATA_DIR / "classification_features_2025.parquet"
+CHALLENGER_FEATURES_PATH = PROCESSED_DATA_DIR / "classification_features_challenger.parquet"
+MONITORING_SAMPLE_SIZE = 100_000

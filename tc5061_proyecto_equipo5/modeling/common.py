@@ -33,7 +33,7 @@ from tc5061_proyecto_equipo5.config import DATA_MANIFEST_PATH, PROJ_ROOT
 
 # One shared experiment for the whole team; the rubric asks for the team number in the name
 EXPERIMENT_NAME = "mibici-equipo05"
-STAGES = {"baseline", "search", "candidate"}
+STAGES = {"baseline", "search", "candidate", "ab_test"}
 TASKS = {"p1": "regression", "p2": "classification", "p3": "clustering"}
 TEAM = "equipo05"
 # Columns that identify riders; they must never reach a run's inputs or artifacts
