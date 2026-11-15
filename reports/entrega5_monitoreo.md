@@ -95,17 +95,58 @@ periodo actual (columna target), y la distribución de la predicción del champi
 
 ## 3. Implicaciones para el modelo
 
-<!--
-Dueño: Oscar (WP-4b). Resto del 20% de interpretación. Revisa Emilio.
-- Importancias del champion (LightGBM): ¿cuáles de las variables más importantes tienen drift?
-- Umbrales calibrados en 2024 (threshold_shortage, threshold_saturation): qué pasa si cambia la
-  prevalencia de las clases de riesgo.
-- Estaciones nuevas: el modelo nunca vio sus coordenadas ni su capacidad.
-- Desempeño real del champion en el periodo actual frente a su test de diciembre de 2024 (la
-  etiqueta de P2 se conoce una hora después, así que se puede medir).
--->
+El análisis se realizó con el bundle local del champion P2 v3, run `7bf71250a91947ba8465d5db48d4bce5`. La ausencia de drift detectado en la muestra de entradas no garantiza que el modelo conserve su desempeño: en la evaluación posterior el recall de desabasto quedó por debajo del piso operativo de 0.85.
 
-*Pendiente.*
+### Importancia de las variables y drift
+
+La importancia se mide como gain de LightGBM normalizado a 100%; indica la contribución a las particiones del modelo, no una relación causal. Se compararon las filas elegibles de ajuste de 2024 contra enero–septiembre de 2025 mediante muestras estratificadas de 100,000 filas por periodo, semilla 42.
+
+**Tabla 3.1. Importancia del champion y drift de las cinco variables principales.**
+
+Fuente: gain del bundle champion v3 y comparación de drift descrita arriba.
+
+| Variable | Gain | Distancia Wasserstein | Umbral | ¿Drift? |
+|:---|---:|---:|---:|:---:|
+| `longitude` | 18.91% | 0.0117 | 0.10 | No |
+| `latitude` | 14.49% | 0.0150 | 0.10 | No |
+| `net_flow_lag24` | 13.97% | 0.0162 | 0.10 | No |
+| `hour_cos` | 13.48% | 0.0020 | 0.10 | No |
+| `hour_sin` | 8.89% | 0.0012 | 0.10 | No |
+
+Ninguna de las 18 variables de entrada superó su umbral en esta muestra. Para `target` y `prediction`, Jensen–Shannon produjo 0.0033 y 0.0044, respectivamente, ambos por debajo de 0.10. Estos resultados dependen de los conjuntos, muestra y pruebas elegidas y no descartan cambios que las métricas no detecten.
+
+### Prevalencia, umbrales y desempeño
+
+El champion usa umbrales de 0.20 para desabasto y 0.95 para saturación. Las clases de riesgo son poco frecuentes:
+
+**Tabla 3.2. Prevalencia observada por cohorte.**
+
+Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y `split_masks`.
+
+| Cohorte | Filas con etiqueta | Desabasto | Saturación |
+|:---|---:|---:|---:|
+| Referencia: filas elegibles de ajuste, enero–septiembre 2024 | 2,344,900 | 0.674% | 0.610% |
+| Actual: split `current`, enero–septiembre 2025 | 2,391,115 | 0.596% | 0.571% |
+
+La referencia aplica las máscaras temporales del ajuste; la cohorte actual cuenta el split bruto con etiqueta conocida. El cambio de prevalencia no demuestra por sí solo un cambio en la precisión ni en el volumen de alertas. En el periodo reservado de octubre–diciembre 2025, sobre 805,920 filas, el champion local obtuvo recall de desabasto de **0.7854**, precisión de desabasto de **0.0425** y PR-AUC medio de clases minoritarias de **0.1970**. El recall quedó debajo del piso de 0.85; debe revisarse el equilibrio entre cobertura y carga operativa con etiquetas observadas.
+
+**Tabla 3.3. Desempeño del champion original en dos periodos de evaluación.**
+
+Fuente: métricas del run original en la tabla de reproducibilidad del README y evaluación local sobre el split `evaluation` de 2025 con `monitoring.ab_test`.
+
+| Métrica | Test de diciembre 2024 | Evaluación octubre–diciembre 2025 |
+|:---|---:|---:|
+| Recall de desabasto | 0.8452 | 0.7854 |
+| PR-AUC medio de clases minoritarias | 0.2462 | 0.1970 |
+| Alertas por fecha de entrada | 765.6 | 802.6 |
+
+Para 2025, el código divide el total de alertas entre **93 fechas distintas de entrada**: la primera hora objetivo de octubre utiliza una entrada del 30 de septiembre, una fecha parcial. El periodo de horas objetivo abarca 92 fechas de octubre–diciembre; la tasa de 802.6 sigue la convención del código y no representa alertas por cada una de esas 92 fechas objetivo. La comparación con diciembre de 2024 usa periodos de distinta duración y composición; no identifica por sí sola la causa de las diferencias.
+
+### Estaciones y lectura para P2
+
+Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. Las estaciones nuevas deben evaluarse por separado; estos conteos no cuantifican su efecto en el desempeño ni prueban la causa de una diferencia.
+
+El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La comparación con una versión alternativa y cualquier decisión de reentrenamiento requieren la evidencia y regla de la sección 4; las métricas anteriores corresponden únicamente al champion local.
 
 ## 4. A/B testing entre versiones
 
