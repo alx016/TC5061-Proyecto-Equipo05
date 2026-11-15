@@ -1,0 +1,184 @@
+{
+  "evaluation": {
+    "features_path": "data/processed/classification_features_2025.parquet",
+    "split": "evaluation",
+    "rows": 805920,
+    "days": 93,
+    "first_target_time": "2025-10-01 00:00:00",
+    "last_target_time": "2025-12-31 23:00:00"
+  },
+  "versions": {
+    "champion": {
+      "uri": "models:/mibici-equipo05-p2-riesgo@champion",
+      "info": {
+        "model_name": "mibici-equipo05-p2-riesgo",
+        "model_version": "3",
+        "model_alias": "champion",
+        "exported_at": null,
+        "source_run_id": "7c0d9747252845b99dfa4ace268508eb",
+        "git_commit": "6a63d75965e26900c3b9048284238c9c4e0424a4",
+        "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
+        "thresholds": {
+          "shortage": 0.2,
+          "saturation": 0.95
+        }
+      },
+      "metrics": {
+        "pr_auc_minority_mean": 0.1970406146020252,
+        "macro_f1": 0.4563043459189016,
+        "recall_shortage": 0.785378590078329,
+        "recall_saturation": 0.3193853427895981,
+        "precision_shortage": 0.042463684232816185,
+        "alerts_per_day": 802.6021505376344
+      }
+    },
+    "challenger": {
+      "uri": "models:/mibici-equipo05-p2-riesgo@challenger",
+      "info": {
+        "model_name": "mibici-equipo05-p2-riesgo",
+        "model_version": "2",
+        "model_alias": "challenger",
+        "exported_at": null,
+        "source_run_id": "8871e00b089848a588f4aacf6486b6f7",
+        "git_commit": "562177938b8e61c6a644473f07c9f053f459b049",
+        "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
+        "thresholds": {
+          "shortage": 0.25,
+          "saturation": 0.95
+        }
+      },
+      "metrics": {
+        "pr_auc_minority_mean": 0.22628509501482127,
+        "macro_f1": 0.45398565658014567,
+        "recall_shortage": 0.8357702349869451,
+        "recall_saturation": 0.35862884160756503,
+        "precision_shortage": 0.03846616035377812,
+        "alerts_per_day": 943.8924731182796
+      }
+    }
+  },
+  "difference": {
+    "pr_auc_minority_mean": {
+      "value": 0.029244480412796064,
+      "low": 0.0257122517038131,
+      "high": 0.03243795630323462
+    },
+    "macro_f1": {
+      "value": -0.0023186893387559526,
+      "low": -0.005086988013436508,
+      "high": 0.000369183330191479
+    },
+    "recall_shortage": {
+      "value": 0.05039164490861614,
+      "low": 0.04090576893830585,
+      "high": 0.06096788413446412
+    },
+    "alerts_per_day": {
+      "value": 141.29032258064512,
+      "low": 132.08467741935476,
+      "high": 149.53870967741943
+    }
+  },
+  "bootstrap": {
+    "replicates": 1000,
+    "seed": 42,
+    "unit": "day",
+    "interval": "95%"
+  },
+  "mcnemar": {
+    "only_champion_correct": 145,
+    "only_challenger_correct": 504,
+    "statistic": 197.47919876733437,
+    "p_value": 7.4121500742316e-45
+  },
+  "breakdown": {
+    "month": {
+      "2025-10": {
+        "rows": 271560,
+        "champion": {
+          "pr_auc_minority_mean": 0.2244192840601209,
+          "macro_f1": 0.46845581746100873,
+          "recall_shortage": 0.8068111455108359,
+          "alerts_per_day": 824.28125
+        },
+        "challenger": {
+          "pr_auc_minority_mean": 0.2564939643303471,
+          "macro_f1": 0.46618037703054904,
+          "recall_shortage": 0.8569659442724458,
+          "alerts_per_day": 968.40625
+        }
+      },
+      "2025-11": {
+        "rows": 262800,
+        "champion": {
+          "pr_auc_minority_mean": 0.19609304240781794,
+          "macro_f1": 0.4585750412475602,
+          "recall_shortage": 0.7570168404170008,
+          "alerts_per_day": 751.8709677419355
+        },
+        "challenger": {
+          "pr_auc_minority_mean": 0.22412551295374972,
+          "macro_f1": 0.45667390938357194,
+          "recall_shortage": 0.8083400160384924,
+          "alerts_per_day": 894.9354838709677
+        }
+      },
+      "2025-12": {
+        "rows": 271560,
+        "champion": {
+          "pr_auc_minority_mean": 0.1698510476026746,
+          "macro_f1": 0.43897368212599247,
+          "recall_shortage": 0.7861570247933884,
+          "alerts_per_day": 779.90625
+        },
+        "challenger": {
+          "pr_auc_minority_mean": 0.1951692445599097,
+          "macro_f1": 0.43614991027995487,
+          "recall_shortage": 0.8357438016528925,
+          "alerts_per_day": 907.8125
+        }
+      }
+    },
+    "stations": {
+      "common": {
+        "rows": 783840,
+        "champion": {
+          "pr_auc_minority_mean": 0.1984388778079667,
+          "macro_f1": 0.456457452146027,
+          "recall_shortage": 0.7852841057868551,
+          "alerts_per_day": 795.1720430107526
+        },
+        "challenger": {
+          "pr_auc_minority_mean": 0.22785823248392112,
+          "macro_f1": 0.45400552829213847,
+          "recall_shortage": 0.835820895522388,
+          "alerts_per_day": 934.3010752688172
+        }
+      },
+      "new": {
+        "rows": 22080,
+        "champion": {
+          "pr_auc_minority_mean": 0.016956233479763928,
+          "macro_f1": 0.33665137973935105,
+          "recall_shortage": 0.8181818181818182,
+          "alerts_per_day": 7.43010752688172
+        },
+        "challenger": {
+          "pr_auc_minority_mean": 0.015432660085058484,
+          "macro_f1": 0.3330785066989839,
+          "recall_shortage": 0.8181818181818182,
+          "alerts_per_day": 9.591397849462366
+        }
+      }
+    }
+  },
+  "decision": {
+    "checks": {
+      "challenger_recall_shortage": false,
+      "pr_auc_improvement": true,
+      "macro_f1_non_inferior": true,
+      "alerts_non_inferior": true
+    },
+    "winner": "champion"
+  }
+}

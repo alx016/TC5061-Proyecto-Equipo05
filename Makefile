@@ -159,6 +159,29 @@ smoke:
 		-H "Content-Type: application/json" -d @scripts/smoke_request.json
 	@echo
 
+## Build the 2025 P2 feature table (current and evaluation splits)
+.PHONY: features-current
+features-current:
+	uv run python -m tc5061_proyecto_equipo5.features current
+
+## Build the continuous 2024-2025 P2 table that trains the challenger
+.PHONY: features-challenger
+features-challenger:
+	uv run python -m tc5061_proyecto_equipo5.features challenger
+
+## Train the P2 challenger on the recent window with the champion's hyperparameters
+CHALLENGER_HP ?= -P hp_num_leaves=255 -P hp_min_child_samples=100 -P hp_n_estimators=200
+.PHONY: train-challenger
+train-challenger:
+	uv run mlflow run . -e train -P question=p2 -P model=lightgbm -P window=challenger \
+		$(CHALLENGER_HP) --env-manager local
+
+## A/B test between the P2 @champion and @challenger
+AB_ARGS ?=
+.PHONY: ab-test
+ab-test:
+	uv run python -m tc5061_proyecto_equipo5.monitoring.ab_test $(AB_ARGS)
+
 #################################################################################
 # Self Documenting Commands                                                     #
 #################################################################################
