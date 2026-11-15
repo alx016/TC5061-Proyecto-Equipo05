@@ -387,18 +387,73 @@ el hash del bundle antes de correr el reporte.
 
 ## 6. Recomendación de Continuous Training
 
-<!--
-Dueño: Manuel (WP-5). 10% de la rúbrica.
-Responder con la evidencia de las secciones 2 a 4:
-- ¿Conviene reentrenar ahora? (sale del A/B)
-- ¿Cada cuánto? (sale del drift y del desempeño por mes)
-- ¿Con qué disparadores? Desempeño como principal (la etiqueta llega en una hora) y drift como
-  alerta temprana. Umbrales concretos.
-- Cómo se promueve una versión: la regla de 4.2 como validación automática, promoción con
-  registry.py, make export-model y reconstrucción de la imagen de la entrega 4.
--->
+### 6.1 ¿Conviene reentrenar ahora?
 
-*Pendiente.*
+**No se promueve el challenger de esta entrega, pero sí conviene iniciar ya una nueva iteración
+de reentrenamiento.** Ambas declaraciones son respladadas por los datos de la sección 4:
+
+- El challenger no pasa la regla de 4.2: su `recall_shortage` es 0.836, debajo del piso de 0.85.
+- El champion tampoco está sano. Su `recall_shortage` bajó de 0.845 en el test de diciembre de
+  2024 a 0.785 en octubre a diciembre de 2025, y su PR-AUC de 0.246 a 0.197. Como son los mismos
+  meses del calendario, la caída no se explica por la temporada.
+- Reentrenar con datos recientes sí ayuda: el challenger mejora el PR-AUC en los tres meses de la
+  evaluación (+0.029 en total, intervalo del 95% de +0.026 a +0.032) y sube el recall de
+  desabasto en 0.05. Lo que le falta es cobertura en la clase de desabasto, no capacidad para
+  ordenar el riesgo.
+
+El problema concreto está en los umbrales. El challenger calibró su umbral de desabasto (0.25)
+para cumplir 0.85 de recall en agosto y septiembre de 2025, y en octubre a diciembre ese recall
+bajó a 0.836. La siguiente iteración debe calibrar con margen: buscar un recall de al menos 0.88
+en la ventana de calibración, para que conserve 0.85 cuando cambie la prevalencia (que bajó de
+0.674% en 2024 a 0.475% en la evaluación, tabla 3.2). Después se repite el A/B con la misma
+regla.
+
+### 6.2 ¿Con qué disparadores?
+
+El hallazgo principal de esta entrega es que **el drift de datos no detectó la degradación**:
+ninguna de las 18 variables tuvo drift, el `target` y la predicción quedaron en 0.0033 y 0.0044
+(sección 2), y aun así el recall del champion cayó debajo del piso. Un esquema basado solo en
+drift nunca habría disparado. Por eso el disparador principal es el desempeño, y el drift queda
+como alerta temprana:
+
+| Disparador | Condición | Acción |
+|:---|:---|:---|
+| **Desempeño (principal)** | `recall_shortage` de los últimos 7 días < 0.85, o `pr_auc_minority_mean` de los últimos 7 días más de 0.03 debajo del test de 2024 (< 0.216) | Reentrenar y correr el A/B |
+| **Drift de datos (alerta temprana)** | `trigger_data_drift`: más del 30% de las variables con drift, o drift en alguna de las 3 más importantes (`longitude`, `latitude`, `net_flow_lag24`) | Revisar features y adelantar el reentrenamiento |
+| **Drift de etiqueta o predicción** | `trigger_label_drift`: drift en `target` o en `prediction` | Recalibrar umbrales y revisar la carga de alertas |
+
+El disparador por desempeño es posible porque la etiqueta de P2 se conoce una hora después de la
+predicción. Una ventana de 7 días tiene unas 61,000 filas (365 estaciones × 168 horas) y, con la
+prevalencia actual, unas 300 horas de desabasto, suficientes para estimar el recall con
+estabilidad. Con los resultados de esta entrega, el disparador por desempeño **ya estaría
+activo** (recall de 0.785 y PR-AUC de 0.197).
+
+### 6.3 ¿Cada cuánto?
+
+- **Umbrales, cada semana.** Recalibrar los umbrales con la última semana etiquetada no requiere
+  reentrenar, es barato y responde a cambios de prevalencia como el que explica el caso del
+  challenger.
+- **Modelo, cada mes**, con una ventana móvil de unos 18 meses (la del challenger fue de 19). El
+  desempeño cambió de un mes a otro dentro de la evaluación (el recall del champion fue 0.807 en
+  octubre, 0.757 en noviembre y 0.786 en diciembre), así que esperar un año, como pasó con el
+  champion, deja varios meses debajo del piso.
+- **En cuanto se active un disparador** de 6.2, sin esperar a la siguiente fecha programada.
+
+### 6.4 Cómo se promueve una versión
+
+La regla de 4.2 se vuelve el paso de validación automática del pipeline. Cada versión nueva pasa
+por el mismo flujo, con comandos que ya existen en el repositorio:
+
+1. `make features-challenger` y `make train-challenger`: construir la tabla con la ventana nueva
+   y entrenar con los hiperparámetros del champion.
+2. Registrar el run como `@challenger` (`mlflow run . -e register -P run_id=<run> -P alias=challenger`).
+3. `make ab-test`: evaluar las dos versiones sobre un periodo que ninguna vio y aplicar la regla
+   de 4.2 sin cambiarla.
+4. Si el challenger pasa las tres condiciones: registrarlo como `@champion`, `make export-model`,
+   y reconstruir la imagen de la Entrega 4 (`make image`, `make container`, `make smoke`) sin
+   cambiar código.
+5. Si no pasa, el champion se queda y `ab_summary.json` documenta por qué, como en esta entrega.
+
 
 ## 7. Conclusiones y limitaciones
 
