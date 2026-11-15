@@ -23,21 +23,20 @@ Training. Tres o cuatro cifras clave como máximo.
 
 ## 1. Conjuntos de datos
 
-<!--
-Dueño: Manuel (WP-5). Decisiones 5.2, 5.3 y 5.5 del plan.
-Falta completar: filas y estaciones de cada conjunto (las reporta WP-0), cuántas estaciones son
-nuevas o se retiraron en 2025, y el tamaño de la muestra que usa Evidently.
--->
-
 | Conjunto | Periodo (hora objetivo) | Uso | Filas | Estaciones |
 |:---|:---|:---|---:|---:|
-| Referencia | 1 ene – 30 sep 2024 | Filas de `train` de P2: lo que vio el modelo al ajustarse | | |
-| Actual | 1 ene – 30 sep 2025 | Comparación de drift contra la referencia | | |
-| Evaluación del A/B | 1 oct – 31 dic 2025 | Evaluación de las dos versiones; ninguna lo vio | | |
+| Referencia | 2 ene – 30 sep 2024 | Filas de `train` de P2: lo que vio el modelo al ajustarse | 2,344,900 | 358 |
+| Actual | 2 ene – 30 sep 2025 | Comparación de drift contra la referencia | 2,382,355 | 365 |
+| Evaluación del A/B | 1 oct – 31 dic 2025 | Evaluación de las dos versiones; ninguna lo vio | 805,920 | 365 |
 
-*Pendiente:* justificar por qué se comparan los mismos meses de dos años distintos (el drift
-no se explica por la temporada), por qué la referencia es solo `train` y no todo 2024, y por
-qué la evaluación queda fuera de las ventanas del challenger.
+Los dos conjuntos de drift empiezan el 2 de enero porque los lags del 1 de enero no tienen historia del año anterior y esas filas se descartan (8,760 en 2025: 365 estaciones x 24 horas). La referencia termina a las 22:00 del 30 de septiembre por la fecha de corte de P2. Evidently compara una muestra de 100,000 filas por conjunto, estratificada por mes, con semilla 42. De las 365 estaciones de 2025, 10 son nuevas (389 a 398) y 355 también estaban en 2024; 3 estaciones de 2024 se retiraron (20, 180 y 240).
+
+**Por qué los mismos meses de dos años.**. Se compara enero a septiembre de 2024 contra los mismos meses de 2025. La demanda de MiBici cambia con la temporada (lluvias, vacaciones, fin de año), así que comparar meses distintos mezclaría ese efecto con el drift. Con los mismos meses, el dirft que aparezca se explica por cambios reales en la demanda o en la red, no por el calendario. 
+
+**Por qué la referencia es solo `train`**. 
+La referencia son las filas con las que se ajustó el champion, con las mismas fechas de corte del entrenamiento (`split_masks`): es exactamente lo que vio el modelo. Octubre a diciembre de 2024 se usaron para calibrar umbrales y para test, no para ajustar, así que no forman parte de lo que el modelo aprendió. 
+
+**Por qué la evaluación queda fuera del challenger.** Octubre a diciembre de 2025 no se usó para ajustar ni para calibrar umbrales en ninguno de los dos modelos del A/B para evitar fuga de datos. El champion solo vio datos de 2024. El challenger se ajustó hasta julio de 2025 y calibró con agosto y septiembre. Una prueba del entrenamiento verifica que ninguna fila de ese periodo entra a `train` o `validation` del challenger. Además, son los mismos meses que el champion usó en 2024 (octubre y noviembre para validación, diciembre para test), así que sus métricas originales sirven de comparación sin el efecto de la temporada.
 
 ## 2. Reporte de drift
 
