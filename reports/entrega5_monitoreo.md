@@ -470,21 +470,48 @@ y no con tráfico real de la API.
 
 ## Cómo reproducir
 
-<!--
-Dueño: Manuel (WP-5). Confirmar los nombres finales de los targets con WP-D.
--->
+Desde la raíz del repositorio, con los datos de `data/interim/viajes/` descargados
+(`make data`):
 
 ```bash
-make features-current   # tabla de features de P2 para 2025
-make drift-report       # reporte de Evidently en reports/monitoring/
-make train-challenger   # entrena y registra el challenger (host de evidencia)
-make ab-test            # A/B entre @champion y @challenger
+uv sync                      # dependencias, incluido el grupo monitoring (Evidently)
+
+# Reporte de drift (secciones 2 y 5)
+make features-current        # tabla de features de P2 para 2025 (current y evaluation)
+make prepare-model           # champion v3 en models/p2-riesgo/
+shasum -a 256 models/p2-riesgo/model.pkl   # debe empezar con 6dbe6614
+make drift-report            # HTML y JSON en reports/monitoring/, PNG en reports/figures/entrega5/
+
+# A/B testing (sección 4); requiere el servidor de MLflow (make mlflow-server) y el .env
+make features-challenger     # tabla continua 2024-2025 para el challenger
+make train-challenger        # entrena el challenger con los hiperparámetros del champion
+uv run mlflow run . -e register -P run_id=<run_id> -P alias=challenger --env-manager local
+make ab-test                 # A/B entre @champion y @challenger; escribe reports/monitoring/ab_summary.json
 ```
+
+`make train-challenger` solo entrena: el registro como `@challenger` se hace con el entry point
+`register`. Si el champion no está en el mismo Registry que el challenger, el A/B se corre con
+el bundle exportado: `make ab-test AB_ARGS="--champion models/p2-riesgo"`.
 
 ## Referencias
 
-<!--
-APA 7. Al menos Evidently (documentación) y los datos abiertos de MiBici.
--->
+Efron, B., & Tibshirani, R. J. (1993). *An introduction to the bootstrap*. Chapman & Hall/CRC.
 
-*Pendiente.*
+Evidently AI. (2026). *Evidently documentation* (versión 0.7.23) [Documentación de software].
+https://docs.evidentlyai.com/
+
+Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., & Liu, T.-Y. (2017).
+LightGBM: A highly efficient gradient boosting decision tree. En *Advances in Neural
+Information Processing Systems 30* (pp. 3146–3154). Curran Associates.
+
+Lin, J. (1991). Divergence measures based on the Shannon entropy. *IEEE Transactions on
+Information Theory, 37*(1), 145–151. https://doi.org/10.1109/18.61115
+
+McNemar, Q. (1947). Note on the sampling error of the difference between correlated proportions
+or percentages. *Psychometrika, 12*(2), 153–157. https://doi.org/10.1007/BF02295996
+
+MiBici. (2026). *Datos abiertos* [Conjunto de datos]. Recuperado el 15 de noviembre de 2026,
+de https://www.mibici.net/es/datos-abiertos/
+
+MLflow Project. (2026). *MLflow documentation* [Documentación de software].
+https://mlflow.org/docs/latest/
