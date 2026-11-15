@@ -372,12 +372,18 @@ El challenger mejora de forma constante en los tres meses, pero solo octubre sup
 
 ## 5. Reproducibilidad
 
-<!--
-Dueño: Manuel (WP-6). drift_summary.json generado en una segunda máquina desde main, comparado
-con el del host (Oscar). Commit usado y resultado de la comparación.
--->
+Para comprobar que el reporte de drift no depende de la máquina, se repitió en una segunda máquina desde `main` (commit `64b56f1`):
 
-*Pendiente.*
+1. `make features-current` reconstruyó la tabla de 2025.
+2. Se usó el bundle del champion v3 (`make prepare-model`) y se verificó su hash:
+   `model.pkl` con SHA-256 `6dbe6614…`, el mismo del run `7bf71250`.
+3. `make drift-report` generó un nuevo `drift_summary.json`, que se comparó con
+   `git diff` contra el versionado en `main`.
+
+**Resultado:** las 20 decisiones de drift (18 variables de entrada, `target` y `prediction`), los dos disparadores y las 3 variables más importantes coinciden. Las distancias difieren a lo más en 3.5 × 10⁻¹⁸, que es redondeo de punto flotante. Las figuras salieron idénticas.
+
+**Hallazgo:** un primer intento con un bundle anterior (v1) dio las mismas distancias en todas las variables de entrada, pero otro drift de predicción (0.0069 contra 0.0044) y otro orden de importancias. La parte de datos se reproduce por sí sola; la parte del modelo exige verificar
+el hash del bundle antes de correr el reporte.
 
 ## 6. Recomendación de Continuous Training
 
