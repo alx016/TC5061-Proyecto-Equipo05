@@ -113,7 +113,7 @@ Fuente: gain del bundle champion v3 y comparación de drift descrita arriba.
 | `hour_cos` | 13.48% | 0.0020 | 0.10 | No |
 | `hour_sin` | 8.89% | 0.0012 | 0.10 | No |
 
-Ninguna de las 18 variables de entrada superó su umbral en esta muestra. Para `target` y `prediction`, Jensen–Shannon produjo 0.0033 y 0.0044, respectivamente, ambos por debajo de 0.10. Estos resultados dependen de los conjuntos, muestra y pruebas elegidas y no descartan cambios que las métricas no detecten.
+Las tres variables de mayor gain son `longitude`, `latitude` y `net_flow_lag24`: las dos primeras describen la ubicación y la tercera resume el flujo previo. Ninguna de las 18 variables de entrada superó su umbral en esta muestra. Para `target` y `prediction`, Jensen–Shannon produjo 0.0033 y 0.0044, respectivamente, ambos por debajo de 0.10. Estos resultados dependen de los conjuntos, muestra y pruebas elegidas y no descartan cambios que las métricas no detecten.
 
 ### Prevalencia, umbrales y desempeño
 
@@ -127,6 +127,7 @@ Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y
 |:---|---:|---:|---:|
 | Referencia: filas elegibles de ajuste, enero–septiembre 2024 | 2,344,900 | 0.674% | 0.610% |
 | Actual: split `current`, enero–septiembre 2025 | 2,391,115 | 0.596% | 0.571% |
+| Evaluación: split `evaluation`, octubre–diciembre 2025 | 805,920 | 0.475% | 0.525% |
 
 La referencia aplica las máscaras temporales del ajuste; la cohorte actual cuenta el split bruto con etiqueta conocida. El cambio de prevalencia no demuestra por sí solo un cambio en la precisión ni en el volumen de alertas. En el periodo reservado de octubre–diciembre 2025, sobre 805,920 filas, el champion local obtuvo recall de desabasto de **0.7854**, precisión de desabasto de **0.0425** y PR-AUC medio de clases minoritarias de **0.1970**. El recall quedó debajo del piso de 0.85; debe revisarse el equilibrio entre cobertura y carga operativa con etiquetas observadas.
 
@@ -144,9 +145,9 @@ Para 2025, el código divide el total de alertas entre **93 fechas distintas de 
 
 ### Estaciones y lectura para P2
 
-Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. Las estaciones nuevas deben evaluarse por separado; estos conteos no cuantifican su efecto en el desempeño ni prueban la causa de una diferencia.
+Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. El desglose A/B de la sección 4 compara 783,840 filas de estaciones comunes con 22,080 de estaciones nuevas. Para el champion reproducido del A/B, el PR-AUC medio de las clases minoritarias fue 0.1984 en las comunes y 0.0170 en las nuevas; los recall de desabasto fueron 0.7853 y 0.8182, respectivamente. Estas métricas describen segmentos distintos y dependen también de sus etiquetas y prevalencias; no demuestran que la novedad de una estación cause la diferencia ni prueban que las predicciones del champion reproducido sean idénticas a las del bundle local.
 
-El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La sección 4 presenta la comparación con una versión alternativa y la decisión según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
+El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La sección 4 presenta la comparación con una versión alternativa y conserva al champion porque el recall de desabasto del challenger no alcanza 0.85, según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
 
 ## 4. A/B testing entre versiones
 
