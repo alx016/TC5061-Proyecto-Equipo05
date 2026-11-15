@@ -245,17 +245,59 @@ La comparación entre la etiqueta real y la salida inferida destaca dos hallazgo
 
 ## 3. Implicaciones para el modelo
 
-<!--
-Dueño: Oscar (WP-4b). Resto del 20% de interpretación. Revisa Emilio.
-- Importancias del champion (LightGBM): ¿cuáles de las variables más importantes tienen drift?
-- Umbrales calibrados en 2024 (threshold_shortage, threshold_saturation): qué pasa si cambia la
-  prevalencia de las clases de riesgo.
-- Estaciones nuevas: el modelo nunca vio sus coordenadas ni su capacidad.
-- Desempeño real del champion en el periodo actual frente a su test de diciembre de 2024 (la
-  etiqueta de P2 se conoce una hora después, así que se puede medir).
--->
+El análisis se realizó con el bundle local del champion P2 v3, run `7bf71250a91947ba8465d5db48d4bce5`. La ausencia de drift detectado en la muestra de entradas no garantiza que el modelo conserve su desempeño: en la evaluación posterior el recall de desabasto quedó por debajo del piso operativo de 0.85.
 
-*Pendiente.*
+### Importancia de las variables y drift
+
+La importancia se mide como gain de LightGBM normalizado a 100%; indica la contribución a las particiones del modelo, no una relación causal. Se compararon las filas elegibles de ajuste de 2024 contra enero–septiembre de 2025 mediante muestras estratificadas de 100,000 filas por periodo, semilla 42.
+
+**Tabla 3.1. Importancia del champion y drift de las cinco variables principales.**
+
+Fuente: gain del bundle champion v3 y comparación de drift descrita arriba.
+
+| Variable | Gain | Distancia Wasserstein | Umbral | ¿Drift? |
+|:---|---:|---:|---:|:---:|
+| `longitude` | 18.91% | 0.0117 | 0.10 | No |
+| `latitude` | 14.49% | 0.0150 | 0.10 | No |
+| `net_flow_lag24` | 13.97% | 0.0162 | 0.10 | No |
+| `hour_cos` | 13.48% | 0.0020 | 0.10 | No |
+| `hour_sin` | 8.89% | 0.0012 | 0.10 | No |
+
+Las tres variables de mayor gain son `longitude`, `latitude` y `net_flow_lag24`: las dos primeras describen la ubicación y la tercera resume el flujo previo. Ninguna de las 18 variables de entrada superó su umbral en esta muestra; por ello tampoco se activó el disparador de drift de datos que combina proporción de entradas y drift en el top 3. Esto no excluye una caída de desempeño. Para `target` y `prediction`, Jensen–Shannon produjo 0.0033 y 0.0044, respectivamente, ambos por debajo de 0.10. Estos resultados dependen de los conjuntos, muestra y pruebas elegidas y no descartan cambios que las métricas no detecten.
+
+### Prevalencia, umbrales y desempeño
+
+El champion usa umbrales de 0.20 para desabasto y 0.95 para saturación. Las clases de riesgo son poco frecuentes:
+
+**Tabla 3.2. Prevalencia observada por cohorte.**
+
+Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y `split_masks`.
+
+| Cohorte | Filas con etiqueta | Desabasto | Saturación |
+|:---|---:|---:|---:|
+| Referencia: filas elegibles de ajuste, enero–septiembre 2024 | 2,344,900 | 0.674% | 0.610% |
+| Actual: split `current`, enero–septiembre 2025 | 2,391,115 | 0.596% | 0.571% |
+| Evaluación: split `evaluation`, octubre–diciembre 2025 | 805,920 | 0.475% | 0.525% |
+
+La referencia aplica las máscaras temporales del ajuste; la cohorte actual cuenta el split bruto con etiqueta conocida. Con umbrales fijos, cambios en la prevalencia y en la distribución de probabilidades pueden modificar la precisión y la carga operativa; las prevalencias por sí solas no determinan esos resultados. En el periodo reservado de octubre–diciembre 2025, sobre 805,920 filas, el champion local obtuvo recall de desabasto de **0.7854**, precisión de desabasto de **0.0425** y PR-AUC medio de clases minoritarias de **0.1970**. El recall quedó debajo del piso de 0.85; debe revisarse el equilibrio entre cobertura y carga operativa con etiquetas observadas.
+
+**Tabla 3.3. Desempeño del champion original en dos periodos de evaluación.**
+
+Fuente: métricas del run original en la tabla de reproducibilidad del README y evaluación local sobre el split `evaluation` de 2025 con `monitoring.ab_test`.
+
+| Métrica | Test de diciembre 2024 | Evaluación octubre–diciembre 2025 |
+|:---|---:|---:|
+| Recall de desabasto | 0.8452 | 0.7854 |
+| PR-AUC medio de clases minoritarias | 0.2462 | 0.1970 |
+| Alertas por fecha de entrada | 765.6 | 802.6 |
+
+Para 2025, el código divide el total de alertas entre **93 fechas distintas de entrada**: la primera hora objetivo de octubre utiliza una entrada del 30 de septiembre, una fecha parcial. El periodo de horas objetivo abarca 92 fechas de octubre–diciembre; la tasa de 802.6 sigue la convención del código y no representa alertas por cada una de esas 92 fechas objetivo. La comparación con diciembre de 2024 usa periodos de distinta duración y composición; no identifica por sí sola la causa de las diferencias.
+
+### Estaciones y lectura para P2
+
+Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. El desglose A/B de la sección 4 compara 783,840 filas de estaciones comunes con 22,080 de estaciones nuevas. Para el champion reproducido del A/B, el PR-AUC medio de las clases minoritarias fue 0.1984 en las comunes y 0.0170 en las nuevas; los recall de desabasto fueron 0.7853 y 0.8182, respectivamente. En nuestro parquet local de evaluación, las 10 estaciones clasificadas como nuevas tienen solo 11 etiquetas de desabasto y 12 de saturación entre 22,080 filas; esa escasez limita la estabilidad de las métricas calculadas sobre nuestro segmento local. No se ha verificado el hash ni las identidades de estaciones del parquet usado en el A/B, por lo que estos conteos locales no acreditan los de aquella ejecución; si sus datos son iguales, la misma limitación se aplicaría a ese desglose. Estas métricas describen segmentos distintos y dependen también de sus etiquetas y prevalencias; no demuestran que la novedad de una estación cause la diferencia ni prueban que las predicciones del champion reproducido sean idénticas a las del bundle local.
+
+El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La sección 4 presenta la comparación con una versión alternativa y conserva al champion porque el recall de desabasto del challenger no alcanza 0.85, según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
 
 ## 4. A/B testing entre versiones
 
