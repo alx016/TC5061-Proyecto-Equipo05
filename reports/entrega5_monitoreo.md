@@ -460,13 +460,26 @@ por el mismo flujo, con comandos que ya existen en el repositorio:
 
 ## 7. Conclusiones y limitaciones
 
-<!--
-Dueño: Manuel (WP-5). Limitaciones conocidas: capacidad estática del catálogo (problema 3),
-lags del 1 de enero (problema 4), muestreo para Evidently, A/B offline con datos históricos
-y no con tráfico real de la API.
--->
+## 7. Conclusiones y limitaciones
 
-*Pendiente.*
+### 7.1 Conclusiones
+
+1. **No hay drift de datos entre enero-septiembre de 2024 y de 2025.** Ninguna de las 18 variables superó su umbral; el `target` y la predicción del champion quedaron en 0.0033 y 0.0044, más de un orden de magnitud debajo de 0.10. Las variables de calendario, que sirven de control, tampoco mostraron drift, lo que respalda que las features de 2025 se construyeron igual que las de 2024.
+2. **Aun así, el champion se degradó.** Su `recall_shortage` bajó de 0.845 en el test de diciembre de 2024 a 0.785 en octubre-diciembre de 2025, debajo del piso operativo de 0.85, y su PR-AUC de 0.246 a 0.197. La ausencia de drift en las distribuciones no garantiza que el modelo conserve su desempeño.
+3. **Reentrenar con datos recientes ayuda, pero no basta todavía.** El challenger mejora el PR-AUC en los tres meses de la evaluación y sube el recall de desabasto en 0.05, sin perder macro F1 ni exceder el límite de alertas. No se promueve porque su recall (0.836) no alcanza 0.85, según la regla fijada antes de ver los resultados.
+4. **El monitoreo de P2 debe basarse en el desempeño.** Como la etiqueta llega una hora después, el disparador principal de reentrenamiento es el desempeño observado, y el drift queda como alerta temprana (sección 6). Con los resultados de esta entrega, ese disparador ya estaría activo.
+5. **El flujo es reproducible.** El reporte de drift se repitió en una segunda máquina con las mismas 20 decisiones y diferencias de 10⁻¹⁸ en las distancias (sección 5), y el champion se reprodujo en otro Registry con métricas idénticas (sección 4).
+
+### 7.2 Limitaciones
+
+- **Capacidad estática.** El catálogo de estaciones es una sola foto (`nomenclatura_2026_09.csv`), y `net_flow` se normaliza por capacidad. Si una estación cambió de tamaño entre 2024 y 2025, ese cambio no aparece en los datos ni en el drift.
+- **Lags del 1 de enero.** Las tablas de cada año se construyen por separado, así que las filas del 1 de enero no tienen lags y se descartan de los conjuntos de drift (8,760 filas en 2025).
+- **Muestreo y sensibilidad del drift.** Evidently compara una muestra de 100,000 filas por conjunto (semilla 42), no las tablas completas. Además, las distancias se calculan sobre todas las estaciones juntas con un umbral de 0.10: un cambio en un grupo de estaciones o en una franja horaria puede quedar diluido en el agregado. Que el drift no detectara la caída de desempeño sugiere revisar el umbral o agregar un análisis por estación.
+- **Estaciones nuevas.** El challenger se entrenó solo con las 355 estaciones que operaron todo 2024 y todo 2025, así que no vio las 10 nuevas. En la evaluación esas estaciones tienen muy pocas horas de riesgo (11 de desabasto y 12 de saturación), por lo que sus métricas son inestables.
+- **A/B offline.** Las dos versiones se compararon con datos históricos de octubre a diciembre de 2025, no con tráfico real de la API. Un A/B en producción mediría además la latencia y el efecto de las alertas en la operación de redistribución.
+- **Un solo periodo de evaluación.** El A/B usa un trimestre. Repetirlo con enero a septiembre de 2026, que ya está en los datos, daría una prueba de robustez de la decisión.
+- **Champion reproducido.** El A/B final usa una reproducción del champion en el Registry de Fernando. Sus métricas coinciden con las del run original de Oscar, pero eso no demuestra que los artefactos sean idénticos byte a byte.
+
 
 ## Cómo reproducir
 
