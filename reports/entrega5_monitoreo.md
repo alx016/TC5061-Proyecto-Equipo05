@@ -13,13 +13,17 @@ borran cuando la sección queda escrita.
 
 ## Resumen
 
-<!--
-Dueño: Manuel (WP-5). Se escribe el sábado 14, al final.
-Un párrafo: qué drift se encontró, quién ganó el A/B y qué se recomienda sobre Continuous
-Training. Tres o cuatro cifras clave como máximo.
--->
+Se monitoreó el modelo P2 (riesgo de desabasto o saturación por estación) comparando lo que vio
+al entrenarse, de enero a septiembre de 2024, contra los mismos meses de 2025. Evidently no
+detectó drift: ninguna de las 18 variables, ni la etiqueta ni la predicción del champion,
+superó su umbral. Aun así, el champion se degradó: en octubre a diciembre de 2025 su recall de
+desabasto bajó a 0.785, debajo del piso operativo de 0.85. En el A/B, un challenger reentrenado
+con datos hasta julio de 2025 mejoró el PR-AUC en 0.029 (intervalo del 95% de +0.026 a +0.032),
+pero no se promueve porque su recall (0.836) tampoco alcanza el piso, según la regla fijada
+antes de ver resultados. Como la etiqueta de P2 llega una hora después, se recomienda que el
+disparador principal de reentrenamiento sea el desempeño observado y que el drift quede como
+alerta temprana, con recalibración semanal de umbrales y reentrenamiento mensual.
 
-*Pendiente.*
 
 ## 1. Conjuntos de datos
 
@@ -457,8 +461,6 @@ por el mismo flujo, con comandos que ya existen en el repositorio:
    cambiar código.
 5. Si no pasa, el champion se queda y `ab_summary.json` documenta por qué, como en esta entrega.
 
-
-## 7. Conclusiones y limitaciones
 
 ## 7. Conclusiones y limitaciones
 
