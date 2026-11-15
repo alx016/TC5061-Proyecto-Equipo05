@@ -27,4 +27,3 @@ _Avoid_: Target drift, label shift
 **Distance Metric**:
 Medida cuantitativa de divergencia de probabilidad (ej. Wasserstein normalizada o Jensen-Shannon) que mide la magnitud práctica del desplazamiento independiente del tamaño muestral.
 _Avoid_: P-value test, significance test
-
