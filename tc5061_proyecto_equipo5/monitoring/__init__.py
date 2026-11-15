@@ -1,43 +1,11 @@
-from tc5061_proyecto_equipo5.monitoring.datasets import (
-    CURRENT_YEAR,
-    DEFAULT_SAMPLE_SIZE,
-    DEFAULT_SEED,
-    DRIFT_MONTHS,
-    REFERENCE_YEAR,
-    REQUIRED_DRIFT_DATASET_COLUMNS,
-    REQUIRED_METADATA_COLUMNS,
-    DriftDatasetPair,
-    filter_p2_reference,
-    load_drift_datasets,
-    stratified_monthly_sample,
-    validate_drift_dataset_schema,
-)
-from tc5061_proyecto_equipo5.monitoring.drift import (
-    CATEGORICAL_FEATURES,
-    DATA_DRIFT_SHARE_TRIGGER,
-    DEFAULT_CATEGORICAL_METHOD,
-    DEFAULT_DRIFT_SHARE,
-    DEFAULT_DRIFT_THRESHOLD,
-    DEFAULT_NUMERICAL_METHOD,
-    DEFAULT_TOP_IMPORTANCE_FEATURES,
-    FEATURE_COLUMNS,
-    NUMERICAL_FEATURES,
-    PREDICTION_COLUMN,
-    TARGET_COLUMN,
-    ColumnMapping,
-    DriftSummaryMetadata,
-    DriftSummaryMetrics,
-    DriftSummaryReport,
-    FeatureDriftResult,
-    build_data_definition,
-    build_drift_report,
-    compute_drift_summary,
-    extract_top_importance_features,
-    load_champion_model,
-    run_drift_pipeline,
-    score_dataset_predictions,
-)
-from tc5061_proyecto_equipo5.monitoring.plots import export_drift_distribution_plots
+"""Monitoring tools, loaded on demand so A/B testing does not require Evidently."""
+
+from importlib import import_module
+
+_DATASET_NAMES = {"CURRENT_YEAR", "DEFAULT_SAMPLE_SIZE", "DEFAULT_SEED", "DRIFT_MONTHS",
+                  "REFERENCE_YEAR", "REQUIRED_DRIFT_DATASET_COLUMNS", "REQUIRED_METADATA_COLUMNS",
+                  "DriftDatasetPair", "filter_p2_reference", "load_drift_datasets",
+                  "stratified_monthly_sample", "validate_drift_dataset_schema"}
 
 __all__ = [
     "CATEGORICAL_FEATURES",
@@ -77,3 +45,10 @@ __all__ = [
     "stratified_monthly_sample",
     "validate_drift_dataset_schema",
 ]
+
+
+def __getattr__(name: str):
+    if name not in __all__:
+        raise AttributeError(name)
+    module = "datasets" if name in _DATASET_NAMES else "plots" if name == "export_drift_distribution_plots" else "drift"
+    return getattr(import_module(f"{__name__}.{module}"), name)

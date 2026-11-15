@@ -81,7 +81,7 @@ def export_drift_distribution_plots(
                         if name in ref_series.values or name in curr_series.values
                     ]
                     observed_other = sorted(
-                        set(ref_series.unique()) | set(curr_series.unique()) - set(categories)
+                        (set(ref_series.unique()) | set(curr_series.unique())) - set(categories)
                     )
                     categories.extend(observed_other)
                 else:

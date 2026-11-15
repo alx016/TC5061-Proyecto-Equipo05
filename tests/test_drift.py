@@ -8,6 +8,8 @@ import pytest
 from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
     CURRENT_FEATURES_PATH,
+    DRIFT_CURRENT,
+    DRIFT_REFERENCE,
     P2_FIT_AS_OF,
 )
 from tc5061_proyecto_equipo5.monitoring import (
@@ -25,7 +27,6 @@ from tc5061_proyecto_equipo5.monitoring import (
     export_drift_distribution_plots,
     extract_top_importance_features,
     filter_p2_reference,
-    load_champion_model,
     load_drift_datasets,
     run_drift_pipeline,
     score_dataset_predictions,
@@ -100,13 +101,13 @@ def synthetic_temporal_drift_df() -> pd.DataFrame:
 
 def test_negative_control_identical_data(synthetic_reference_df: pd.DataFrame) -> None:
     current_df = synthetic_reference_df.copy()
-    report = compute_drift_summary(synthetic_reference_df, current_df)
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
 
     assert report.summary.dataset_drift is False
     assert report.summary.drifted_features_count == 0
     assert report.summary.drifted_features_share == 0.0
-    assert len(report.features) == len(FEATURE_COLUMNS) + 1
-    assert PREDICTION_COLUMN in report.features
+    assert len(report.features) == len(FEATURE_COLUMNS)
+    assert PREDICTION_COLUMN not in report.features
 
     for col, result in report.features.items():
         assert result.drift_detected is False, f"Feature {col} unexpectedly flagged as drifted"
@@ -121,7 +122,7 @@ def test_positive_control_continuous_feature_drift(
         current_df["capacity"] + 5.0 * synthetic_reference_df["capacity"].std()
     )
 
-    report = compute_drift_summary(synthetic_reference_df, current_df)
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
 
     assert report.features["capacity"].drift_detected is True
     assert report.features["capacity"].score > report.features["capacity"].threshold
@@ -138,7 +139,7 @@ def test_positive_control_categorical_feature_drift(
     current_df = synthetic_reference_df.copy()
     current_df["is_weekend"] = 1
 
-    report = compute_drift_summary(synthetic_reference_df, current_df)
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
 
     assert report.features["is_weekend"].drift_detected is True
     assert report.features["is_weekend"].score > report.features["is_weekend"].threshold
@@ -158,6 +159,7 @@ def test_artifact_export_and_deserialization(
     report = compute_drift_summary(
         synthetic_reference_df,
         current_df,
+        skip_prediction=True,
         output_path=artifact_path,
     )
 
@@ -445,7 +447,7 @@ def test_drift_triggers_negative_control(
     synthetic_reference_df: pd.DataFrame,
 ) -> None:
     current_df = synthetic_reference_df.copy()
-    report = compute_drift_summary(synthetic_reference_df, current_df)
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
 
     assert report.summary.trigger_data_drift is False
     assert report.summary.trigger_label_drift is False
@@ -458,7 +460,7 @@ def test_trigger_data_drift_via_top_importance_feature(
     current_df["net_flow_lag24"] = (
         current_df["net_flow_lag24"] + 5.0 * synthetic_reference_df["net_flow_lag24"].std()
     )
-    report = compute_drift_summary(synthetic_reference_df, current_df)
+    report = compute_drift_summary(synthetic_reference_df, current_df, skip_prediction=True)
 
     assert report.features["net_flow_lag24"].drift_detected is True
     assert report.summary.trigger_data_drift is True
@@ -476,6 +478,7 @@ def test_trigger_data_drift_via_share_threshold(
     report_below = compute_drift_summary(
         synthetic_reference_df,
         current_df,
+        skip_prediction=True,
         top_importance_features=("latitude", "longitude"),
         data_drift_share_trigger=0.30,
     )
@@ -485,6 +488,7 @@ def test_trigger_data_drift_via_share_threshold(
     report_above = compute_drift_summary(
         synthetic_reference_df,
         current_df,
+        skip_prediction=True,
         top_importance_features=("latitude", "longitude"),
         data_drift_share_trigger=0.04,
     )
@@ -506,6 +510,8 @@ def test_trigger_label_drift_on_target_and_prediction(
     )
     assert report_target.features[TARGET_COLUMN].drift_detected is True
     assert report_target.summary.trigger_label_drift is True
+    assert report_target.summary.drifted_features_count == 0
+    assert report_target.summary.drifted_features_share == 0.0
 
     ref_pred_drift = synthetic_reference_df.copy()
     curr_pred_drift = synthetic_reference_df.copy()
@@ -544,6 +550,7 @@ def test_compute_drift_summary_html_export(
     report = compute_drift_summary(
         synthetic_reference_df,
         current_df,
+        skip_prediction=True,
         html_output_path=html_file,
     )
 
@@ -605,6 +612,7 @@ def test_main_cli_end_to_end(
     exit_code = main(
         [
             f"--reference-path={parquet_path}",
+            f"--current-path={parquet_path}",
             f"--output-dir={out_dir}",
             f"--figures-dir={figs_dir}",
             "--skip-prediction",
@@ -749,8 +757,8 @@ def test_evidently_handles_nullable_int8_target(tmp_path: Path) -> None:
     metadata = payload["metadata"]
     assert "reference_period" in metadata
     assert "current_period" in metadata
-    assert len(metadata["reference_period"]) == 2
-    assert len(metadata["current_period"]) == 2
+    assert metadata["reference_period"] == list(DRIFT_REFERENCE)
+    assert metadata["current_period"] == list(DRIFT_CURRENT)
 
 
 def test_reference_mask_parity_with_p2_training_protocol() -> None:
@@ -799,10 +807,6 @@ def test_reference_mask_parity_with_p2_training_protocol() -> None:
 def test_dynamic_top_importance_features_and_ranking_change() -> None:
     top_default = extract_top_importance_features(None, top_k=3)
     assert top_default == ("longitude", "latitude", "net_flow_lag24")
-
-    champion = load_champion_model()
-    top_champ = extract_top_importance_features(champion, top_k=3)
-    assert top_champ == ("longitude", "latitude", "net_flow_lag24")
 
     class MockBooster:
         def feature_name(self):

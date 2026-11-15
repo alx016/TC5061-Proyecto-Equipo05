@@ -580,3 +580,19 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
         ├── train_classification.py  <- P2: clasificación de riesgo
         └── train_clustering.py      <- P3: clustering de estaciones
 ```
+
+### Comparación reproducible de reportes de drift
+
+Para comparar dos `drift_summary.json` de ejecuciones con los mismos datos, modelo,
+configuración y semilla, comparar sus contenidos después de omitir `metadata.timestamp`:
+
+```python
+import json
+from pathlib import Path
+a, b = (json.loads(Path(p).read_text()) for p in ("host.json", "replica.json"))
+a["metadata"].pop("timestamp", None)
+b["metadata"].pop("timestamp", None)
+assert a == b
+```
+
+Los periodos reportados son las ventanas configuradas, no los extremos de la muestra.

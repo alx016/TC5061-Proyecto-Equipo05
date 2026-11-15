@@ -103,9 +103,9 @@ def extract_top_importance_features(
     if importances is None and hasattr(skl, "feature_importances_"):
         try:
             importances = skl.feature_importances_
-            feature_names = getattr(skl, "feature_name_", None) or getattr(
-                skl, "feature_names_in_", None
-            )
+            feature_names = getattr(skl, "feature_name_", None)
+            if feature_names is None:
+                feature_names = getattr(skl, "feature_names_in_", None)
         except (AttributeError, ValueError, TypeError):
             importances = None
 
@@ -411,7 +411,9 @@ def compute_drift_summary(
             if not col or col not in target_columns:
                 continue
             val = metric.get("value")
-            score = 0.0 if val is None or np.isnan(val) else float(val)
+            if val is None or not np.isfinite(val):
+                raise ValueError(f"Evidently returned an invalid drift score for {col}: {val}")
+            score = float(val)
             threshold = float(config.get("threshold", num_threshold))
             metric_name = str(config.get("method", ""))
             drift_detected = tests_by_col.get(col, score > threshold)
@@ -423,16 +425,18 @@ def compute_drift_summary(
             )
 
     features = {col: features[col] for col in target_columns if col in features}
-    drifted_count = sum(1 for feat in features.values() if feat.drift_detected)
-    drifted_share = (drifted_count / len(features)) if features else 0.0
-    dataset_drift = bool(drifted_share >= drift_share)
-
+    missing_metrics = set(target_columns) - features.keys()
+    if missing_metrics:
+        raise ValueError(f"Evidently omitted drift metrics for: {sorted(missing_metrics)}")
     label_cols = {target_col, pred_col, TARGET_COLUMN, PREDICTION_COLUMN}
     input_feature_cols = [c for c in features if c not in label_cols]
     input_drifted_count = sum(1 for c in input_feature_cols if features[c].drift_detected)
     input_drifted_share = (
         (input_drifted_count / len(input_feature_cols)) if input_feature_cols else 0.0
     )
+    drifted_count = input_drifted_count
+    drifted_share = input_drifted_share
+    dataset_drift = bool(input_feature_cols and drifted_share >= drift_share)
 
     resolved_top_importance = extract_top_importance_features(
         model=effective_model,
@@ -452,15 +456,9 @@ def compute_drift_summary(
         if c in features
     )
 
-    ref_period: list[str] = list(DRIFT_REFERENCE)
-    if "hour" in ref_df.columns and not ref_df["hour"].empty:
-        ref_h = pd.to_datetime(ref_df["hour"])
-        ref_period = [str(ref_h.min().date()), str(ref_h.max().date())]
-
-    curr_period: list[str] = list(DRIFT_CURRENT)
-    if "hour" in curr_df.columns and not curr_df["hour"].empty:
-        curr_h = pd.to_datetime(curr_df["hour"])
-        curr_period = [str(curr_h.min().date()), str(curr_h.max().date())]
+    # Configured target-hour windows, independent of sample extrema.
+    ref_period = list(DRIFT_REFERENCE)
+    curr_period = list(DRIFT_CURRENT)
 
     metadata = DriftSummaryMetadata(
         timestamp=datetime.now(UTC).isoformat(),
