@@ -1,0 +1,151 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-15T17:00:31.584327+00:00",
+    "sample_size": 100000,
+    "seed": 42,
+    "reference_rows": 100000,
+    "current_rows": 100000,
+    "reference_period": [
+      "2024-01-01",
+      "2024-09-30"
+    ],
+    "current_period": [
+      "2025-01-01",
+      "2025-09-30"
+    ],
+    "top_importance_features": [
+      "longitude",
+      "latitude",
+      "net_flow_lag24"
+    ]
+  },
+  "summary": {
+    "dataset_drift": false,
+    "drifted_features_count": 0,
+    "drifted_features_share": 0.0,
+    "trigger_data_drift": false,
+    "trigger_label_drift": false
+  },
+  "features": {
+    "capacity": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.019126270187035686,
+      "threshold": 0.1
+    },
+    "latitude": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.015023223323782697,
+      "threshold": 0.1
+    },
+    "longitude": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.011720774817263623,
+      "threshold": 0.1
+    },
+    "hour_sin": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.001198599345399236,
+      "threshold": 0.1
+    },
+    "hour_cos": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.002026074471978513,
+      "threshold": 0.1
+    },
+    "day_of_week": {
+      "drift_detected": false,
+      "metric_name": "jensenshannon",
+      "score": 0.00845922853827268,
+      "threshold": 0.1
+    },
+    "is_weekend": {
+      "drift_detected": false,
+      "metric_name": "jensenshannon",
+      "score": 0.002312179375598174,
+      "threshold": 0.1
+    },
+    "is_holiday": {
+      "drift_detected": false,
+      "metric_name": "jensenshannon",
+      "score": 0.0004092318498140073,
+      "threshold": 0.1
+    },
+    "neighbor_net_flow": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.024244343642841035,
+      "threshold": 0.1
+    },
+    "net_flow_lag1": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.02293384475188513,
+      "threshold": 0.1
+    },
+    "net_flow_lag2": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.020585907432250923,
+      "threshold": 0.1
+    },
+    "net_flow_lag24": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.016177802451345653,
+      "threshold": 0.1
+    },
+    "arrivals_lag1": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.02676875948438873,
+      "threshold": 0.1
+    },
+    "arrivals_lag2": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.026251745013961603,
+      "threshold": 0.1
+    },
+    "arrivals_lag3": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.024610274333697165,
+      "threshold": 0.1
+    },
+    "departures_lag1": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.028555796481598054,
+      "threshold": 0.1
+    },
+    "departures_lag2": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.02557649082602,
+      "threshold": 0.1
+    },
+    "departures_lag3": {
+      "drift_detected": false,
+      "metric_name": "wasserstein",
+      "score": 0.02938062124772121,
+      "threshold": 0.1
+    },
+    "target": {
+      "drift_detected": false,
+      "metric_name": "jensenshannon",
+      "score": 0.003320085207569849,
+      "threshold": 0.1
+    },
+    "prediction": {
+      "drift_detected": false,
+      "metric_name": "jensenshannon",
+      "score": 0.004389320588086942,
+      "threshold": 0.1
+    }
+  }
+}
