@@ -67,6 +67,12 @@ data-checks:
 validate-data: data-checks
 
 
+## Run Evidently data, prediction and concept drift monitoring pipeline
+.PHONY: drift-report
+drift-report:
+	uv run python -m tc5061_proyecto_equipo5.monitoring.drift
+
+
 
 
 ## Run security checks: bandit, pip-audit (runtime + full) and detect-secrets
