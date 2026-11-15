@@ -171,9 +171,10 @@ train-challenger:
 		$(CHALLENGER_HP) --env-manager local
 
 ## A/B test between the P2 @champion and @challenger
+AB_ARGS ?=
 .PHONY: ab-test
 ab-test:
-	uv run python -m tc5061_proyecto_equipo5.monitoring.ab_test
+	uv run python -m tc5061_proyecto_equipo5.monitoring.ab_test $(AB_ARGS)
 
 #################################################################################
 # Self Documenting Commands                                                     #
