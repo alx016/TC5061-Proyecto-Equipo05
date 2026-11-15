@@ -499,6 +499,67 @@ Capturas de la reproducción independiente en macOS con Docker: muestran la vers
 - `GET /model-info`: versión y linaje del modelo servido
   ![Información del modelo en Linux con Docker](reports/figures/entrega4/05-linux-docker-model-info.jpg)
 
+## Monitoreo y A/B testing (Entrega 5)
+
+La Entrega 5 agrega una capa de observabilidad al modelo P2 (`mibici-equipo05-p2-riesgo`), el
+mismo que sirve la API de la Entrega 4. El reporte completo está en
+[`reports/entrega5_monitoreo.md`](reports/entrega5_monitoreo.md).
+
+- **Drift (Evidently):** se compararon las filas con las que se entrenó el champion (enero a
+  septiembre de 2024) contra los mismos meses de 2025. Ninguna de las 18 variables, ni la
+  etiqueta ni la predicción, superó su umbral. Reporte interactivo:
+  [`reports/monitoring/drift_2024_vs_2025.html`](reports/monitoring/drift_2024_vs_2025.html).
+- **A/B testing:** el champion contra un challenger reentrenado con datos hasta julio de 2025,
+  evaluados en octubre a diciembre de 2025, un periodo que ninguno vio. El challenger mejora el
+  PR-AUC (+0.029), pero su recall de desabasto (0.836) no alcanza el piso de 0.85, así que se
+  queda el champion. El champion también está debajo del piso (0.785). Resumen:
+  [`reports/monitoring/ab_summary.json`](reports/monitoring/ab_summary.json).
+- **Continuous Training:** el disparador principal es el desempeño, porque la etiqueta de P2 llega
+  una hora después; el drift queda como alerta temprana. Se proponen umbrales recalibrados cada
+  semana y reentrenamiento mensual.
+
+```bash
+make features-current        # tabla de features de P2 para 2025
+make prepare-model           # champion v3 en models/p2-riesgo/
+make drift-report            # HTML y JSON en reports/monitoring/, PNG en reports/figures/entrega5/
+make features-challenger     # tabla continua 2024-2025 del challenger
+make train-challenger        # entrena el challenger (requiere make mlflow-server y el .env)
+make ab-test                 # A/B entre @champion y @challenger
+```
+
+La sección "Cómo reproducir" del reporte detalla el registro del challenger y cómo correr el A/B con el
+bundle exportado si el champion no está en el mismo Registry.
+
+### Comparación reproducible de reportes de drift
+
+Para comparar dos `drift_summary.json` de ejecuciones con los mismos datos, modelo,
+configuración y semilla, se omite `metadata.timestamp` y se comparan las distancias con
+tolerancia: entre máquinas, los `score` pueden diferir en el último dígito (del orden de
+10⁻¹⁸) por redondeo de punto flotante, así que una igualdad exacta falla aunque el resultado
+sea el mismo.
+
+```python
+import json
+import math
+from pathlib import Path
+
+a, b = (json.loads(Path(p).read_text()) for p in ("host.json", "replica.json"))
+for summary in (a, b):
+    summary["metadata"].pop("timestamp", None)
+assert a["metadata"] == b["metadata"] and a["summary"] == b["summary"]
+assert a["features"].keys() == b["features"].keys()
+for name, fa in a["features"].items():
+    fb = b["features"][name]
+    assert {k: v for k, v in fa.items() if k != "score"} == {
+        k: v for k, v in fb.items() if k != "score"
+    }, name
+    assert math.isclose(fa["score"], fb["score"], rel_tol=1e-9, abs_tol=1e-12), name
+```
+
+Las dos ejecuciones deben usar el mismo bundle del champion (`model.pkl` con SHA-256
+`6dbe6614…`): con otro bundle cambian el drift de la predicción y las variables más importantes.
+Los periodos reportados son las ventanas configuradas, no los extremos de la muestra.
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -519,10 +580,10 @@ Contribuciones de cada integrante según el historial de Git de `main`.
 
 | Integrante | Matrícula | Usuario | Contribuciones |
 |:---|:---|:---|:---|
-| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024-2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Entrega 2: MLflow Project (`MLproject` con `ingest`, `features` y `train`, `python_env.yaml`, `.env.example`), tracking con firma, input example y código del paquete, y P3 completo: candidatos (Ward, GMM, MiniBatch, K-Means escalado), búsqueda anidada de K y `select`. Entrega 3: prueba de reproducibilidad (misma semilla en P1, P2 y P3), script aislado de DeepChecks con límites WARN/FAIL y pruebas de drift inyectado. Entrega 4: API REST de inferencia de P2 con FastAPI (`api/main.py`, `api/model.py`), endpoints `/health`, `/model-info` y `/predict`, carga del modelo desde la carpeta exportada o desde `models:/` según `MODEL_URI`, y decisión de la estrategia de despliegue (tiempo real frente a lotes). |
-| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. Entrega 2: P2 con entrenamiento, búsqueda anidada y selección, umbrales calibrados en validación y guardrail de recall. Entrega 3: chequeos de seguridad (bandit, pip-audit, detect-secrets y gitleaks), endurecimiento de subprocess, pickle y URLs, `reports/security/resultados.md`, `make security` y `.secrets.baseline`. Entrega 4: script de exportación desacoplada del champion de P2 desde el Model Registry (`scripts/export_model.py`, `models/p2-riesgo/`, `registry_metadata.json`). |
-| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. Entrega 2: justificación teórica de la arquitectura del sistema, experimentos de P1 con búsqueda anidada (Study y Trials) y correcciones del registry (validación de promoción y selección de P3). Entrega 3: DeepChecks de drift entre entrenamiento y prueba, reportes, `check_policy.md`, `hallazgos.md` y glosario. Entrega 4: esquemas de validación de dominio con Pydantic v2 (`api/schemas.py`), suite de pruebas HTTP de la API (`tests/test_schemas.py`, `tests/test_api.py`, `tests/test_api_model.py`), validación de reproducibilidad técnica cruzada en macOS con Docker (WP-5) y documentación de la Entrega 4 en el README. |
-| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014-2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. Entrega 2: Model Registry (`registry.py`, entry point `register`, aliases `champion` y `challenger`, linaje y pruebas) y las secciones de MLflow Project y Model Registry del README. Entrega 3: `make check`, configuración de pytest, ajustes a `make security`, actualización de `pyasn1` y la sección "Pruebas y chequeos" del README con su evidencia. Entrega 4: empaquetado OCI rootless (`Containerfile`, `.containerignore`), gobernanza de dependencias de servicio en `pyproject.toml` y automatización en Makefile (`make export-model`, `make image`, `make container`, `make smoke`). |
+| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024-2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Entrega 2: MLflow Project (`MLproject` con `ingest`, `features` y `train`, `python_env.yaml`, `.env.example`), tracking con firma, input example y código del paquete, y P3 completo: candidatos (Ward, GMM, MiniBatch, K-Means escalado), búsqueda anidada de K y `select`. Entrega 3: prueba de reproducibilidad (misma semilla en P1, P2 y P3), script aislado de DeepChecks con límites WARN/FAIL y pruebas de drift inyectado. Entrega 4: API REST de inferencia de P2 con FastAPI (`api/main.py`, `api/model.py`), endpoints `/health`, `/model-info` y `/predict`, carga del modelo desde la carpeta exportada o desde `models:/` según `MODEL_URI`, y decisión de la estrategia de despliegue (tiempo real frente a lotes). Entrega 5: plan y esqueleto del reporte, entrenamiento de P2 con otra ventana temporal para el challenger (`train_classification.py`, `MLproject`) con pruebas contra fuga, reproducción del reporte de drift en una segunda máquina, y secciones de conjuntos de datos, reproducibilidad, Continuous Training, conclusiones y resumen del reporte, más su integración. |
+| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. Entrega 2: P2 con entrenamiento, búsqueda anidada y selección, umbrales calibrados en validación y guardrail de recall. Entrega 3: chequeos de seguridad (bandit, pip-audit, detect-secrets y gitleaks), endurecimiento de subprocess, pickle y URLs, `reports/security/resultados.md`, `make security` y `.secrets.baseline`. Entrega 4: script de exportación desacoplada del champion de P2 desde el Model Registry (`scripts/export_model.py`, `models/p2-riesgo/`, `registry_metadata.json`). Entrega 5: tablas de features de 2025 y del challenger con feriados por año (`features.py`, `config.py`) y sus pruebas, reporte de estaciones nuevas y retiradas, y sección de implicaciones para el modelo del reporte. |
+| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. Entrega 2: justificación teórica de la arquitectura del sistema, experimentos de P1 con búsqueda anidada (Study y Trials) y correcciones del registry (validación de promoción y selección de P3). Entrega 3: DeepChecks de drift entre entrenamiento y prueba, reportes, `check_policy.md`, `hallazgos.md` y glosario. Entrega 4: esquemas de validación de dominio con Pydantic v2 (`api/schemas.py`), suite de pruebas HTTP de la API (`tests/test_schemas.py`, `tests/test_api.py`, `tests/test_api_model.py`), validación de reproducibilidad técnica cruzada en macOS con Docker (WP-5) y documentación de la Entrega 4 en el README. Entrega 5: motor de drift con Evidently, muestreo estratificado por mes y figuras (`monitoring/datasets.py`, `drift.py`, `plots.py`) con sus pruebas, y sección del reporte de drift. |
+| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014-2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. Entrega 2: Model Registry (`registry.py`, entry point `register`, aliases `champion` y `challenger`, linaje y pruebas) y las secciones de MLflow Project y Model Registry del README. Entrega 3: `make check`, configuración de pytest, ajustes a `make security`, actualización de `pyasn1` y la sección "Pruebas y chequeos" del README con su evidencia. Entrega 4: empaquetado OCI rootless (`Containerfile`, `.containerignore`), gobernanza de dependencias de servicio en `pyproject.toml` y automatización en Makefile (`make export-model`, `make image`, `make container`, `make smoke`). Entrega 5: Evidently en el grupo `monitoring` y parches de CVE en dependencias, A/B testing (`monitoring/ab_test.py`) con sus pruebas, targets de monitoreo del Makefile, entrenamiento del challenger, reproducción del champion en un solo Registry y sección de A/B testing del reporte. |
 
 Los merges de los pull requests hechos desde la web de GitHub aparecen con el nombre de la cuenta
 de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el usuario de Git.
@@ -530,7 +591,8 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ## Estructura del proyecto
 
 ```
-├── Makefile                   <- Comandos: make data, make lint, make test, make security, make prepare-model, make export-model, make image, make container, make smoke
+├── Makefile                   <- Comandos: make data, make lint, make test, make security, make prepare-model, make export-model, make image, make container, make smoke,
+│                                 make features-current, make drift-report, make train-challenger, make ab-test
 ├── Containerfile              <- Imagen de la API (python:3.13-slim, usuario sin root)
 ├── .containerignore           <- Lista blanca de inclusiones para construcción de imágenes
 ├── README.md
@@ -547,10 +609,13 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
 ├── reports/                   <- Figuras y reportes generados; los HTML/JSON de deepchecks no se versionan
+│   ├── entrega5_monitoreo.md  <- Reporte de la Entrega 5: drift, A/B y Continuous Training
+│   ├── monitoring/            <- Reporte de Evidently (HTML y JSON) y resumen del A/B
 │   └── figures/
 │       ├── entrega2/          <- Evidencias de MLflow
 │       ├── entrega3/          <- Evidencias de pruebas, deepchecks y seguridad
-│       └── entrega4/          <- Evidencias de contenedor OCI y endpoints HTTP
+│       ├── entrega4/          <- Evidencias de contenedor OCI y endpoints HTTP
+│       └── entrega5/          <- Distribuciones comparativas del reporte de drift
 ├── tests/                     <- Pruebas unitarias y de integración de la API (pytest)
 ├── MLproject                  <- Entry points de MLflow: ingest, features, train, search, select, register
 ├── python_env.yaml            <- Entorno de Python del MLflow Project
@@ -570,6 +635,11 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
     ├── dataset.py             <- Descarga, limpieza y manifest de los datos
     ├── features.py            <- Panel estación-hora y recetas de features de P1, P2 y P3
     ├── plots.py               <- Figuras de justificación
+    ├── monitoring/
+    │   ├── datasets.py        <- Conjuntos de referencia y actual, con muestra estratificada por mes
+    │   ├── drift.py           <- Reporte de Evidently, resumen JSON y disparadores
+    │   ├── plots.py           <- Figuras de las variables con más drift
+    │   └── ab_test.py         <- A/B entre dos versiones de P2: bootstrap por día, McNemar y regla de decisión
     └── modeling/
         ├── common.py                <- Utilidades compartidas de MLflow y reproducibilidad
         ├── train.py                 <- Entry point train: un modelo de una pregunta por run
@@ -580,19 +650,3 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
         ├── train_classification.py  <- P2: clasificación de riesgo
         └── train_clustering.py      <- P3: clustering de estaciones
 ```
-
-### Comparación reproducible de reportes de drift
-
-Para comparar dos `drift_summary.json` de ejecuciones con los mismos datos, modelo,
-configuración y semilla, comparar sus contenidos después de omitir `metadata.timestamp`:
-
-```python
-import json
-from pathlib import Path
-a, b = (json.loads(Path(p).read_text()) for p in ("host.json", "replica.json"))
-a["metadata"].pop("timestamp", None)
-b["metadata"].pop("timestamp", None)
-assert a == b
-```
-
-Los periodos reportados son las ventanas configuradas, no los extremos de la muestra.
