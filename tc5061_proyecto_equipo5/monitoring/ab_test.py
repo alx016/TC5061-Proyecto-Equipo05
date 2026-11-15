@@ -22,6 +22,7 @@ from tc5061_proyecto_equipo5.config import (
     CLASSIFICATION_FEATURES_PATH,
     CURRENT_FEATURES_PATH,
     P2_MIN_RECALL_SHORTAGE,
+    PROJ_ROOT,
     REPORTS_DIR,
 )
 from tc5061_proyecto_equipo5.modeling.common import base_tags, setup_experiment
@@ -237,6 +238,14 @@ def load_reference_stations(path: Path) -> set[int] | None:
     return set(pd.read_parquet(path, columns=["station_id"])["station_id"])
 
 
+def _relative_to_root(path: Path) -> str:
+    """Path relative to the project root, so the summary does not depend on the machine."""
+    resolved = path.resolve()
+    return (
+        str(resolved.relative_to(PROJ_ROOT)) if resolved.is_relative_to(PROJ_ROOT) else str(path)
+    )
+
+
 def build_summary(
     champion_uri: str,
     challenger_uri: str,
@@ -262,7 +271,7 @@ def build_summary(
 
     return {
         "evaluation": {
-            "features_path": str(features_path),
+            "features_path": _relative_to_root(features_path),
             "split": split,
             "rows": len(rows),
             "days": n_dates,

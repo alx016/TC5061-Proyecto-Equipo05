@@ -1,6 +1,6 @@
 {
   "evaluation": {
-    "features_path": "/home/fernandosoft/proyectos/TC5061-Proyecto-Equipo05/data/processed/classification_features_2025.parquet",
+    "features_path": "data/processed/classification_features_2025.parquet",
     "split": "evaluation",
     "rows": 805920,
     "days": 93,
@@ -9,19 +9,19 @@
   },
   "versions": {
     "champion": {
-      "uri": "models/p2-riesgo",
+      "uri": "models:/mibici-equipo05-p2-riesgo@champion",
       "info": {
         "model_name": "mibici-equipo05-p2-riesgo",
         "model_version": "3",
         "model_alias": "champion",
-        "source_run_id": "7bf71250a91947ba8465d5db48d4bce5",
-        "git_commit": "71b6c42f47040bd5ada00078982a01fe6a8e9dd4",
+        "exported_at": null,
+        "source_run_id": "7c0d9747252845b99dfa4ace268508eb",
+        "git_commit": "6a63d75965e26900c3b9048284238c9c4e0424a4",
         "data_version": "4c54003cb6d8c15f49dd6016daf984dbacc464700d268f9691465ffdaead4246",
         "thresholds": {
           "shortage": 0.2,
           "saturation": 0.95
-        },
-        "exported_at": "2026-11-05T01:06:39Z"
+        }
       },
       "metrics": {
         "pr_auc_minority_mean": 0.1970406146020252,

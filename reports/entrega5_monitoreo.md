@@ -119,15 +119,15 @@ Dueño: Oscar (WP-4b). Resto del 20% de interpretación. Revisa Emilio.
 | Calibración de umbrales | 1 oct – 30 nov 2024 | 1 ago – 30 sep 2025 |
 | Umbrales (shortage / saturation) | 0.20 / 0.95 | 0.25 / 0.95 |
 | Evaluación | 1 oct – 31 dic 2025 | 1 oct – 31 dic 2025 |
-| Run ID | `7bf71250` | `8871e00b` |
+| Run ID | `7c0d9747` | `8871e00b` |
 
 La única diferencia entre las dos versiones son los datos de entrenamiento, así que el A/B mide
 si reentrenar con datos recientes mejora el modelo. Cada versión predice con sus propios
 umbrales, porque son parte del modelo.
 
-El conjunto de evaluación tiene 805,920 filas, 93 días y 365 estaciones (10 nuevas en 2025). El A/B quedó registrado en MLflow en el run `48fbcff2e90747b8bd4cc2ae18703409` (`stage_of_work=ab_test`) y en `reports/monitoring/ab_summary.json`.
+El conjunto de evaluación tiene 805,920 filas, 93 días y 365 estaciones (10 nuevas en 2025). El A/B quedó registrado en MLflow en el run `46f68cb42b3745f2ab3d9b734889ea92` (`stage_of_work=ab_test`) y en `reports/monitoring/ab_summary.json`.
 
-**Desviación del plan:** el challenger se registró en el Registry local de Fernando (v2) y no en el de Oscar, porque el host de Oscar no estuvo disponible por su guardia. El champion es la v3 exportada del Registry de Oscar a `models/p2-riesgo/`.
+**Desviación del plan:** el challenger se entrenó en la máquina de Fernando porque el host de Oscar no estuvo disponible por su guardia. Para tener las dos versiones en un solo Registry, el champion se reprodujo ahí desde `main` (commit `6a63d75`) con su ventana e hiperparámetros, y pasó por el mismo paso de selección. Sus métricas de validación y de test son idénticas a las del run original de Oscar `7bf71250` (`val_recall_shortage` 0.8605, `val_pr_auc_minority_mean` 0.2884, `test_recall_shortage` 0.8452, `test_pr_auc_minority_mean` 0.2462), así que es el mismo modelo.
 
 ### 4.2 Regla de decisión
 
@@ -177,7 +177,7 @@ El challenger mejora de forma constante en los tres meses, pero solo octubre sup
 
 **Se queda el champion v3.** El challenger es mejor en PR-AUC y en recall de faltantes sin perder macro F1 ni exceder el límite de alertas, pero no alcanza el requisito operativo mínimo de recall, así que no se promueve.
 
-**Hallazgo:** el champion también está por debajo del piso: 0.785 en oct–dic 2025, contra 0.845 en el test de diciembre 2024 (README, tabla de reproducibilidad, run `7bf71250`; ver sección 3). Su PR-AUC cayó de 0.246 a 0.197 y sus alertas por día subieron de 765.6 a 802.6. La regla no se modifica después de ver los resultados; mantener al champion no significa que esté sano. Se recomienda, para la siguiente iteración, revisar el umbral de faltante del challenger (0.25) o reentrenar con más datos recientes, y repetir el A/B.
+**Hallazgo:** el champion también está por debajo del piso: 0.785 en oct–dic 2025, contra 0.845 en el test de diciembre 2024 (README, tabla de reproducibilidad, run `7bf71250`; ver sección 3). Su PR-AUC cayó de 0.246 a 0.197 y sus alertas por día subieron de 765.6 a 802.6. La regla no se modifica después de ver los resultados; mantener al champion no significa que esté sano.
 
 ## 5. Reproducibilidad
 
