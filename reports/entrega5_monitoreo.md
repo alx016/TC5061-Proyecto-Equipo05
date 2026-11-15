@@ -1,11 +1,5 @@
 # Monitoreo del modelo P2 con Evidently y A/B testing (Entrega 5)
 
-<!--
-Esqueleto del reporte (WP-5). Cada sección tiene un dueño: edita solo la tuya, en tu propio PR,
-para que los cambios no choquen. Los comentarios como este dicen qué va en cada sección y se
-borran cuando la sección queda escrita.
--->
-
 - **Proyecto:** TC5061 MLOps, Equipo 05. Datos abiertos de MiBici.
 - **Modelo monitoreado:** P2 riesgo de desabasto o saturación por estación
   (`mibici-equipo05-p2-riesgo`), el mismo que sirve la API de la entrega 4.
