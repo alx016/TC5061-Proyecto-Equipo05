@@ -40,14 +40,9 @@ La referencia son las filas con las que se ajustó el champion, con las mismas f
 
 ## 2. Reporte de drift
 
-<!--
-Dueño: Emilio (WP-4a). Parte del 20% de interpretación de la rúbrica.
-Gráficas en reports/figures/entrega5/; HTML interactivo en reports/monitoring/.
--->
-
 ### 2.1 Configuración
 
-La detección de drift evalúa el cambio distributivo entre el conjunto de referencia (entrenamiento de 2024) y el conjunto actual (operación de 2025). La configuración técnica implementa los lineamientos de [ADR-0003](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/docs/adr/0003-distance-based-drift-detection.md).
+La detección de drift evalúa el cambio distributivo entre el conjunto de referencia (entrenamiento de 2024) y el conjunto actual (operación de 2025). La configuración usa métricas de distancia en lugar de pruebas con p-value, porque con muestras de 100,000 filas una prueba estadística marcaría drift en cualquier diferencia mínima.
 
 #### Presets de Evidently
 
@@ -150,13 +145,21 @@ Las variables de calendario presentan las distancias más bajas de todo el conju
 
 #### Distribuciones comparativas
 
-Las gráficas de distribución comparativa para las tres variables con mayor desplazamiento relativo se encuentran en el directorio [reports/figures/entrega5/](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/):
+Las gráficas de distribución comparativa para las tres variables con mayor desplazamiento relativo están en `reports/figures/entrega5/`:
 
-- [`drift_departures_lag3.png`](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/drift_departures_lag3.png): compara las distribuciones de salidas con tres horas de rezago (distancia Wasserstein 0.0294).
-- [`drift_departures_lag1.png`](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/drift_departures_lag1.png): muestra la distribución de salidas en la hora previa (distancia Wasserstein 0.0286).
-- [`drift_arrivals_lag1.png`](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/drift_arrivals_lag1.png): ilustra la distribución de arribos en la hora previa (distancia Wasserstein 0.0268).
+**`departures_lag3`**: salidas con tres horas de rezago (distancia Wasserstein 0.0294).
 
-El reporte interactivo completo en HTML se encuentra disponible en [reports/monitoring/drift_2024_vs_2025.html](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/monitoring/drift_2024_vs_2025.html).
+![Distribución comparativa de departures_lag3](figures/entrega5/drift_departures_lag3.png)
+
+**`departures_lag1`**: salidas en la hora previa (distancia Wasserstein 0.0286).
+
+![Distribución comparativa de departures_lag1](figures/entrega5/drift_departures_lag1.png)
+
+**`arrivals_lag1`**: arribos en la hora previa (distancia Wasserstein 0.0268).
+
+![Distribución comparativa de arrivals_lag1](figures/entrega5/drift_arrivals_lag1.png)
+
+El reporte interactivo completo en HTML está en [`reports/monitoring/drift_2024_vs_2025.html`](monitoring/drift_2024_vs_2025.html).
 
 ### 2.4 Control con variables de calendario
 
@@ -214,7 +217,7 @@ La muestra estratificada mensual de 100 000 registros por partición arroja los 
 
 La prevalencia de las clases minoritarias de riesgo se conserva prácticamente idéntica en ambos años. El desabasto representa cerca del 0.6% al 0.7% de los eventos por estación-hora. La saturación se mantiene estable en 0.60%. La divergencia Jensen-Shannon de 0.0033 confirma la ausencia de drift de concepto en el fenómeno físico de la demanda.
 
-La gráfica comparativa de la etiqueta se ubica en [reports/figures/entrega5/drift_target.png](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/drift_target.png):
+Gráfica comparativa de la etiqueta:
 
 ![Distribución comparativa de target](figures/entrega5/drift_target.png)
 
@@ -231,7 +234,7 @@ La distribución de las predicciones sobre las mismas 100 000 observaciones de c
 | `2: Riesgo_Saturacion` | 548 | 0.55% | 535 | 0.54% |
 | **Total** | **100 000** | **100.00%** | **100 000** | **100.00%** |
 
-La gráfica comparativa de predicciones se ubica en [reports/figures/entrega5/drift_prediction.png](file:///Users/emilio/Desktop/Proyectos/MNA/08-MLOps/TC5061-Proyecto-Equipo05/reports/figures/entrega5/drift_prediction.png):
+Gráfica comparativa de las predicciones:
 
 ![Distribución comparativa de predicción](figures/entrega5/drift_prediction.png)
 
