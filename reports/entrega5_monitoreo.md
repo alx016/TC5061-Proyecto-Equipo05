@@ -109,24 +109,25 @@ Dueño: Oscar (WP-4b). Resto del 20% de interpretación. Revisa Emilio.
 
 ## 4. A/B testing entre versiones
 
-<!--
-Dueño: Fernando (WP-3b). 30% de la rúbrica. Revisa Manuel.
--->
-
 ### 4.1 Diseño
 
 | | Champion | Challenger |
 |:---|:---|:---|
-| Versión en el Registry | *pendiente* (`@champion`) | *pendiente* (`@challenger`) |
-| Algoritmo e hiperparámetros | Los del champion | Los mismos que el champion |
+| Versión en el Registry | v3 (`@champion`) | v2 (`@challenger`) |
+| Algoritmo e hiperparámetros | LightGBM, `num_leaves=255`, `min_child_samples=100`, `n_estimators=200`, `class_weight=balanced` | Los mismos que el champion |
 | Ajuste | 1 ene – 30 sep 2024 | 1 ene 2024 – 31 jul 2025 |
 | Calibración de umbrales | 1 oct – 30 nov 2024 | 1 ago – 30 sep 2025 |
+| Umbrales (shortage / saturation) | 0.20 / 0.95 | 0.25 / 0.95 |
 | Evaluación | 1 oct – 31 dic 2025 | 1 oct – 31 dic 2025 |
-| Run ID | *pendiente* | *pendiente* |
+| Run ID | `7c0d9747` | `8871e00b` |
 
 La única diferencia entre las dos versiones son los datos de entrenamiento, así que el A/B mide
 si reentrenar con datos recientes mejora el modelo. Cada versión predice con sus propios
 umbrales, porque son parte del modelo.
+
+El conjunto de evaluación tiene 805,920 filas, 93 días y 365 estaciones (10 nuevas en 2025). El A/B quedó registrado en MLflow en el run `46f68cb42b3745f2ab3d9b734889ea92` (`stage_of_work=ab_test`) y en `reports/monitoring/ab_summary.json`.
+
+**Desviación del plan:** el challenger se entrenó en la máquina de Fernando porque el host de Oscar no estuvo disponible por su guardia. Para tener las dos versiones en un solo Registry, el champion se reprodujo ahí desde `main` (commit `6a63d75`) con su ventana e hiperparámetros, y pasó por el mismo paso de selección. Sus métricas de validación y de test son idénticas a las del run original de Oscar `7bf71250` (`val_recall_shortage` 0.8605, `val_pr_auc_minority_mean` 0.2884, `test_recall_shortage` 0.8452, `test_pr_auc_minority_mean` 0.2462), así que es el mismo modelo.
 
 ### 4.2 Regla de decisión
 
@@ -142,21 +143,41 @@ Si alguna falla, el champion se queda.
 
 ### 4.3 Resultados
 
-<!--
-Tabla por versión: pr_auc_minority_mean, macro_f1, recall_shortage, recall_saturation, precision_shortage, alerts_per_day; diferencia con su intervalo del 95%; McNemar.
-Desglose por mes y por estaciones nuevas vs. comunes. Datos: reports/monitoring/ab_summary.json y el run de MLflow con stage_of_work=ab_test.
--->
+| Métrica | Champion v3 | Challenger v2 | Diferencia (IC 95%) |
+|---|---:|---:|---:|
+| pr_auc_minority_mean | 0.1970 | 0.2263 | +0.0292 [+0.0257, +0.0324] |
+| macro_f1 | 0.4563 | 0.4540 | −0.0023 [−0.0051, +0.0004] |
+| recall_shortage | 0.7854 | 0.8358 | +0.0504 [+0.0409, +0.0610] |
+| alerts_per_day | 802.6 | 943.9 | +141.3 [+132.1, +149.5] |
+| recall_saturation | 0.3194 | 0.3586 | — |
+| precision_shortage | 0.0425 | 0.0385 | — |
 
-*Pendiente.*
+**McNemar** (horas con faltante o saturación real): 145 solo el champion acierta, 504 solo el challenger; estadístico 197.5, p ≈ 7×10⁻⁴⁵. Las horas de un mismo día no son independientes, así que el p-value es solo una referencia; la decisión se basa en los intervalos del bootstrap.
+
+**Por mes (recall_shortage):**
+
+| Mes | Champion | Challenger |
+|---|---:|---:|
+| 2025-10 | 0.807 | 0.857 |
+| 2025-11 | 0.757 | 0.808 |
+| 2025-12 | 0.786 | 0.836 |
+
+El challenger mejora de forma constante en los tres meses, pero solo octubre supera 0.85. PR-AUC baja en ambos modelos de octubre a diciembre (0.224 → 0.170 en el champion).
+
+**Por estación:** en las 355 estaciones comunes el resultado replica el global. En las 10 estaciones nuevas (22,080 filas) los dos modelos empatan en recall (0.818) y tienen PR-AUC muy baja (~0.016); la muestra es chica y ninguno de los dos aporta ventaja ahí.
 
 ### 4.4 Decisión
 
-<!--
-Aplicar la regla de 4.2 condición por condición y decir qué versión queda vigente.
-Si gana el challenger, la evidencia de la promoción la agrega Manuel en la sección 6.
--->
+| Condición (4.2) | Valor | ¿Cumple? |
+|---|---|:---:|
+| 1. `recall_shortage` del challenger ≥ 0.85 | 0.8358 | No |
+| 2. Límite inferior del IC de `pr_auc_minority_mean` > 0 | +0.0257 | Sí |
+| 3a. Límite inferior del IC de `macro_f1` ≥ −0.01 | −0.0051 | Sí |
+| 3b. `alerts_per_day` del challenger ≤ 1.20 × champion | 943.9 ≤ 963.1 (1.18×) | Sí |
 
-*Pendiente.*
+**Se queda el champion v3.** El challenger es mejor en PR-AUC y en recall de faltantes sin perder macro F1 ni exceder el límite de alertas, pero no alcanza el requisito operativo mínimo de recall, así que no se promueve.
+
+**Hallazgo:** el champion también está por debajo del piso: 0.785 en oct–dic 2025, contra 0.845 en el test de diciembre 2024 (README, tabla de reproducibilidad, run `7bf71250`; ver sección 3). Su PR-AUC cayó de 0.246 a 0.197 y sus alertas por día subieron de 765.6 a 802.6. La regla no se modifica después de ver los resultados; mantener al champion no significa que esté sano.
 
 ## 5. Reproducibilidad
 
