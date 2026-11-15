@@ -146,7 +146,7 @@ Para 2025, el código divide el total de alertas entre **93 fechas distintas de 
 
 Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. Las estaciones nuevas deben evaluarse por separado; estos conteos no cuantifican su efecto en el desempeño ni prueban la causa de una diferencia.
 
-El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La comparación con una versión alternativa y cualquier decisión de reentrenamiento requieren la evidencia y regla de la sección 4; las métricas anteriores corresponden únicamente al champion local.
+El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La sección 4 presenta la comparación con una versión alternativa y la decisión según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
 
 ## 4. A/B testing entre versiones
 
