@@ -1,44 +1,166 @@
 # Monitoreo del modelo P2 con Evidently y A/B testing (Entrega 5)
 
 - **Proyecto:** TC5061 MLOps, Equipo 05. Datos abiertos de MiBici.
-- **Modelo monitoreado:** P2 riesgo de desabasto o saturación por estación
-  (`mibici-equipo05-p2-riesgo`), el mismo que sirve la API de la entrega 4.
+- **Repositorio:** <https://github.com/alx016/TC5061-Proyecto-Equipo05> (código de monitoreo en
+  `tc5061_proyecto_equipo5/monitoring/`; reporte interactivo de Evidently en
+  `reports/monitoring/drift_2024_vs_2025.html`).
+- **Modelo monitoreado:** P2, riesgo de desabasto o saturación por estación
+  (`mibici-equipo05-p2-riesgo`), el mismo que sirve la API de la Entrega 4.
 - **Fecha:** 15 de noviembre de 2026.
 
 ## Resumen
 
-Se monitoreó el modelo P2 (riesgo de desabasto o saturación por estación) comparando lo que vio
-al entrenarse, de enero a septiembre de 2024, contra los mismos meses de 2025. Evidently no
-detectó drift: ninguna de las 18 variables, ni la etiqueta ni la predicción del champion,
-superó su umbral. Aun así, el champion se degradó: en octubre a diciembre de 2025 su recall de
-desabasto bajó a 0.785, debajo del piso operativo de 0.85. En el A/B, un challenger reentrenado
-con datos hasta julio de 2025 mejoró el PR-AUC en 0.029 (intervalo del 95% de +0.026 a +0.032),
-pero no se promueve porque su recall (0.836) tampoco alcanza el piso, según la regla fijada
-antes de ver resultados. Como la etiqueta de P2 llega una hora después, se recomienda que el
-disparador principal de reentrenamiento sea el desempeño observado y que el drift quede como
-alerta temprana, con recalibración semanal de umbrales y reentrenamiento mensual.
-
+Se comparó lo que vio el modelo P2 al entrenarse (enero a septiembre de 2024) contra los mismos
+meses de 2025. Evidently no detectó drift en ninguna de las 18 variables, ni en la etiqueta ni en
+la predicción. Aun así, el champion se degradó: en octubre a diciembre de 2025 su recall de
+desabasto fue 0.785, debajo del piso operativo de 0.85. Un challenger reentrenado con datos hasta
+julio de 2025 mejoró el PR-AUC en 0.029, pero no se promueve porque su recall (0.836) tampoco
+alcanza el piso. Se recomienda que el disparador principal de reentrenamiento sea el desempeño,
+con el drift como alerta temprana.
 
 ## 1. Conjuntos de datos
 
 | Conjunto | Periodo (hora objetivo) | Uso | Filas | Estaciones |
 |:---|:---|:---|---:|---:|
-| Referencia | 2 ene – 30 sep 2024 | Filas de `train` de P2: lo que vio el modelo al ajustarse | 2,344,900 | 358 |
-| Actual | 2 ene – 30 sep 2025 | Comparación de drift contra la referencia | 2,382,355 | 365 |
-| Evaluación del A/B | 1 oct – 31 dic 2025 | Evaluación de las dos versiones; ninguna lo vio | 805,920 | 365 |
+| Referencia | 2 ene – 30 sep 2024 | Filas con las que se ajustó el champion | 2,344,900 | 358 |
+| Actual | 2 ene – 30 sep 2025 | Comparación de drift | 2,382,355 | 365 |
+| Evaluación del A/B | 1 oct – 31 dic 2025 | Evaluación de las dos versiones | 805,920 | 365 |
 
-Los dos conjuntos de drift empiezan el 2 de enero porque los lags del 1 de enero no tienen historia del año anterior y esas filas se descartan (8,760 en 2025: 365 estaciones x 24 horas). La referencia termina a las 22:00 del 30 de septiembre por la fecha de corte de P2. Evidently compara una muestra de 100,000 filas por conjunto, estratificada por mes, con semilla 42. De las 365 estaciones de 2025, 10 son nuevas (389 a 398) y 355 también estaban en 2024; 3 estaciones de 2024 se retiraron (20, 180 y 240).
+- **Mismos meses de dos años:** la demanda cambia con la temporada, así que con los mismos meses
+  el drift que aparezca se explica por cambios en la demanda o en la red, no por el calendario.
+- **Referencia = solo `train`:** son exactamente las filas que vio el modelo al ajustarse, con las
+  fechas de corte del entrenamiento. Octubre a diciembre de 2024 se usaron para umbrales y test.
+- **Evaluación que ningún modelo vio:** el champion solo vio 2024 y el challenger se detuvo en
+  septiembre de 2025, así que octubre a diciembre de 2025 es nuevo para los dos. Una prueba del
+  entrenamiento verifica que ninguna fila de ese periodo entra al challenger.
 
-**Por qué los mismos meses de dos años.**. Se compara enero a septiembre de 2024 contra los mismos meses de 2025. La demanda de MiBici cambia con la temporada (lluvias, vacaciones, fin de año), así que comparar meses distintos mezclaría ese efecto con el drift. Con los mismos meses, el dirft que aparezca se explica por cambios reales en la demanda o en la red, no por el calendario. 
+Los conjuntos de drift empiezan el 2 de enero porque los lags del 1 de enero no tienen historia.
+Evidently compara una muestra de 100,000 filas por conjunto, estratificada por mes (semilla 42).
+En 2025 hay 10 estaciones nuevas y 3 de 2024 dejaron de operar todo el año.
 
-**Por qué la referencia es solo `train`**. 
-La referencia son las filas con las que se ajustó el champion, con las mismas fechas de corte del entrenamiento (`split_masks`): es exactamente lo que vio el modelo. Octubre a diciembre de 2024 se usaron para calibrar umbrales y para test, no para ajustar, así que no forman parte de lo que el modelo aprendió. 
+## 2. Reporte de drift e implicaciones
 
-**Por qué la evaluación queda fuera del challenger.** Octubre a diciembre de 2025 no se usó para ajustar ni para calibrar umbrales en ninguno de los dos modelos del A/B para evitar fuga de datos. El champion solo vio datos de 2024. El challenger se ajustó hasta julio de 2025 y calibró con agosto y septiembre. Una prueba del entrenamiento verifica que ninguna fila de ese periodo entra a `train` o `validation` del challenger. Además, son los mismos meses que el champion usó en 2024 (octubre y noviembre para validación, diciembre para test), así que sus métricas originales sirven de comparación sin el efecto de la temporada.
+Se usaron los presets `DataDriftPreset` y `DataSummaryPreset` de Evidently 0.7.23 sobre las 18
+variables de entrada, la etiqueta (`target`) y la predicción del champion (`prediction`). Con
+muestras de 100,000 filas, una prueba con p-value marcaría drift en cualquier diferencia mínima,
+así que se usaron distancias: Wasserstein normalizada para variables numéricas y Jensen-Shannon
+para categóricas, con umbral de 0.10. La calidad de datos no mostró problemas: mismo esquema y
+tipos, más del 99.7% de completitud y ninguna categoría nueva (Anexo A).
 
-## 2. Reporte de drift
+![Figura 1. Drift por columna en el reporte de Evidently](figures/entrega5/evidently_drift_overview.png)
 
-### 2.1 Configuración
+**Tabla 1.** Variables más importantes del champion, variables con mayor distancia y columnas de
+control. Ninguna supera el umbral de 0.10.
+
+| Variable | Importancia (gain) | Métrica | Distancia | ¿Drift? |
+|:---|---:|:---|---:|:---:|
+| `longitude` | 18.9% | Wasserstein | 0.0117 | No |
+| `latitude` | 14.5% | Wasserstein | 0.0150 | No |
+| `net_flow_lag24` | 14.0% | Wasserstein | 0.0162 | No |
+| `departures_lag3` (mayor distancia) | — | Wasserstein | 0.0294 | No |
+| `departures_lag1` | — | Wasserstein | 0.0286 | No |
+| Calendario (5 variables de control) | — | Ambas | 0.0004 – 0.0085 | No |
+| `target` | — | Jensen-Shannon | 0.0033 | No |
+| `prediction` | — | Jensen-Shannon | 0.0044 | No |
+
+**Variables afectadas.** Ninguna de las 18 variables tiene drift (0%), y tampoco se activan los
+disparadores de drift de datos ni de etiqueta. Las mayores distancias están en los rezagos de
+salidas y arribos (0.024 a 0.029): reflejan cambios en el volumen de viajes de un año a otro, pero
+quedan a menos de un tercio del umbral. Las variables de red (capacidad y coordenadas) quedan en
+posiciones intermedias pese a las estaciones nuevas. Las de calendario, que funcionan como control,
+tienen las distancias más bajas (todas debajo de 0.01), lo que respalda que las features de 2025
+se construyeron igual que las de 2024.
+
+![Figura 2. Distribución comparativa de departures_lag3 en el reporte de Evidently](figures/entrega5/evidently_departures_lag3.png)
+
+**Implicaciones para el modelo.** Las tres variables más importantes del champion (ubicación y
+flujo de 24 horas antes) son estables, y la prevalencia de las clases de riesgo cambió poco
+(desabasto de 0.674% a 0.596%; saturación de 0.610% a 0.571%). Con base solo en el drift, no habría
+motivo para reentrenar. Sin embargo, al medir el desempeño con la etiqueta real, el champion sí se
+degradó: su recall de desabasto bajó de 0.845 en el test de diciembre de 2024 a 0.785 en octubre a
+diciembre de 2025, y su PR-AUC de 0.246 a 0.197. Como son los mismos meses del calendario, la caída
+no se explica por la temporada. Hay dos explicaciones compatibles con lo observado: cambios que las
+distancias agregadas no captan (por estación o por franja horaria) y umbrales fijos calibrados en
+2024 que pierden cobertura cuando baja la prevalencia, que en la evaluación fue de 0.475% (Anexo B).
+
+## 3. A/B testing entre versiones
+
+Las dos versiones son del mismo modelo en el Registry de MLflow y usan el mismo algoritmo e
+hiperparámetros (LightGBM con `num_leaves=255`); solo cambian los datos. El **champion (v3)** se
+ajustó con enero a septiembre de 2024. El **challenger (v2)** se ajustó con enero de 2024 a julio de
+2025 y calibró sus umbrales con agosto y septiembre de 2025. Cada versión predice con sus propios
+umbrales. Las diferencias tienen intervalos del 95% por bootstrap pareado por día (1,000 réplicas,
+semilla 42), porque las filas de un mismo día están correlacionadas.
+
+La regla se fijó el 9 de noviembre, antes de entrenar el challenger. Para reemplazar al champion,
+el challenger debe cumplir tres condiciones: (1) `recall_shortage` ≥ 0.85; (2) el intervalo de la
+diferencia en `pr_auc_minority_mean` por encima de 0; y (3) `macro_f1` que no baje más de 0.01 y
+`alerts_per_day` que no suba más de 20%.
+
+**Tabla 2.** Comparación sobre octubre a diciembre de 2025 (805,920 filas, 365 estaciones).
+
+| Métrica | Champion v3 | Challenger v2 | Diferencia (IC 95%) | Condición |
+|:---|---:|---:|---:|:---:|
+| `recall_shortage` | 0.7854 | **0.8358** | +0.0504 [+0.041, +0.061] | ✗ (< 0.85) |
+| `pr_auc_minority_mean` | 0.1970 | **0.2263** | +0.0292 [+0.026, +0.032] | ✓ |
+| `macro_f1` | **0.4563** | 0.4540 | −0.0023 [−0.005, +0.000] | ✓ |
+| `alerts_per_day` | **802.6** | 943.9 | +141.3 (1.18×) | ✓ (≤ 1.20×) |
+| `recall_saturation` | 0.3194 | **0.3586** | — | — |
+| `precision_shortage` | **0.0425** | 0.0385 | — | — |
+
+**Decisión: se queda el champion.** El challenger mejora el PR-AUC y el recall de desabasto en los
+tres meses de la evaluación, sin perder macro F1 ni exceder el límite de alertas, pero no alcanza
+el piso operativo de recall, y la regla no se cambia después de ver los resultados. La prueba de
+McNemar (504 casos que solo acierta el challenger contra 145 del champion) apunta en la misma
+dirección. El desglose por mes y por estaciones nuevas, y la reproducción del champion en un solo
+Registry, están en el Anexo C.
+
+## 4. Recomendación de Continuous Training
+
+**No promover el challenger de esta entrega, pero iniciar ya una nueva iteración.** Reentrenar con
+datos recientes sí mejora el modelo (PR-AUC +0.029 en los tres meses); lo que le falta al
+challenger es cobertura de desabasto. Su umbral (0.25) se calibró para cumplir 0.85 justo en agosto
+y septiembre, y en octubre a diciembre, con menor prevalencia, bajó a 0.836. La siguiente iteración
+debe calibrar con margen (por ejemplo, recall de 0.88 en calibración) y repetir el A/B con la misma
+regla.
+
+**Disparadores.** El hallazgo central es que el drift no detectó la degradación, así que el
+disparador principal debe ser el desempeño, que en P2 se puede medir porque la etiqueta llega una
+hora después:
+
+- **Principal, por desempeño:** `recall_shortage` de los últimos 7 días debajo de 0.85, o
+  `pr_auc_minority_mean` más de 0.03 debajo del test de 2024. Con los resultados de esta entrega,
+  este disparador ya estaría activo.
+- **Alerta temprana, por drift:** más del 30% de las variables con drift, o drift en alguna de las
+  3 más importantes; o drift en `target` o `prediction`.
+
+**Cadencia.** Recalibrar los umbrales cada semana, que es barato y no requiere reentrenar;
+reentrenar el modelo cada mes con una ventana móvil de unos 18 meses; y hacerlo antes si se activa
+un disparador. Cada versión nueva se valida con `make ab-test` y la regla de la sección 3, y si gana
+se promueve con el Registry, `make export-model` y la reconstrucción de la imagen de la Entrega 4
+sin cambiar código (Anexo E).
+
+## 5. Conclusiones
+
+- No hay drift de datos entre 2024 y 2025, y las variables de calendario confirman que la
+  construcción de features es consistente.
+- Aun así, el champion se degradó por debajo del piso operativo: la ausencia de drift no garantiza
+  el desempeño.
+- Reentrenar con datos recientes ayuda, pero el challenger necesita umbrales calibrados con margen
+  antes de reemplazar al champion.
+- El monitoreo de P2 debe basarse en el desempeño, con el drift como alerta temprana. El flujo es
+  reproducible: el reporte de drift se repitió en una segunda máquina con los mismos resultados
+  (Anexo D).
+
+<div style="page-break-before: always"></div>
+
+# Anexos
+
+Los anexos amplían el cuerpo del reporte con el detalle de cada parte del trabajo.
+
+## Anexo A. Detalle del reporte de drift
+
+### A.1 Configuración
 
 La detección de drift evalúa el cambio distributivo entre el conjunto de referencia (entrenamiento de 2024) y el conjunto actual (operación de 2025). La configuración usa métricas de distancia en lugar de pruebas con p-value, porque con muestras de 100,000 filas una prueba estadística marcaría drift en cualquier diferencia mínima.
 
@@ -59,7 +181,7 @@ Para resolver este problema, la función `stratified_monthly_sample` extrae una 
 
 Las pruebas de hipótesis clásicas basadas en valores p, como Kolmogorov-Smirnov para variables continuas o Chi-cuadrada para categóricas, fallan en conjuntos masivos de datos. Al operar con muestras de $N \ge 100\,000$, la potencia estadística es extrema. Cualquier discrepancia distributiva minúscula e irrelevante en la operación práctica produce un valor p cercano a cero. Esto detonaría alertas falsas continuas en casi todas las columnas.
 
-Conforme a ADR-0003, la configuración sustituye las pruebas de hipótesis por métricas de distancia estadística y divergencia que cuantifican la magnitud real del cambio distributivo:
+La configuración sustituye las pruebas de hipótesis por métricas de distancia estadística y divergencia que cuantifican la magnitud real del cambio distributivo:
 
 - **Variables numéricas continuas (15 variables):** distancia de Wasserstein normalizada (`wasserstein`), que corresponde a la distancia $L_1$ de movimiento de tierra dividida entre la desviación estándar. El umbral operativo de drift es 0.1.
 - **Variables categóricas y booleanas (`day_of_week`, `is_weekend`, `is_holiday`):** divergencia de Jensen-Shannon (`jensenshannon`). El umbral operativo de drift es 0.1.
@@ -72,7 +194,7 @@ Se marca drift global del conjunto (`dataset_drift = True`) cuando la proporció
 - `trigger_data_drift`: se activa si más del 30% de las variables de entrada presentan drift (`DATA_DRIFT_SHARE_TRIGGER = 0.30`), o si cualquiera de las tres variables de mayor importancia del modelo (`longitude`, `latitude`, `net_flow_lag24`) supera su umbral de 0.1.
 - `trigger_label_drift`: se activa si se detecta drift en la distribución del `target` o en la distribución de la `prediction`.
 
-### 2.2 Calidad de datos
+### A.2 Calidad de datos
 
 La auditoría de calidad generada por `DataSummaryPreset` confirma la integridad del esquema tabular y la consistencia en los tipos de datos en las particiones de referencia (2024) y actual (2025). No se detectaron discrepancias en los tipos de datos ni columnas faltantes respecto a la firma requerida.
 
@@ -101,7 +223,7 @@ El preset audita si el conjunto actual de 2025 introduce categorías o comportam
 - **Dominio de la etiqueta objetivo:** las tres clases operativas (`0: Balanceado`, `1: Riesgo_Desabasto`, `2: Riesgo_Saturacion`) se conservan idénticas en ambas particiones.
 - **Expansión de la red de estaciones:** el sistema MiBici incorporó estaciones adicionales durante 2025. Al tratarse de características numéricas continuas (`latitude`, `longitude`, `capacity`), el pipeline no rechaza los registros por categorías no vistas. No obstante, estas coordenadas representan puntos espaciales no observados por el modelo de 2024 en su etapa de entrenamiento.
 
-### 2.3 Drift por variable
+### A.3 Drift por variable
 
 La evaluación de drift compara las 18 variables de entrada entre la referencia (enero a septiembre de 2024) y el periodo actual (enero a septiembre de 2025). La siguiente tabla presenta las variables ordenadas de mayor a menor distancia estadística, indicando la métrica aplicada, el umbral operativo y la detección de drift.
 
@@ -159,7 +281,7 @@ Las gráficas de distribución comparativa para las tres variables con mayor des
 
 El reporte interactivo completo en HTML está en [`reports/monitoring/drift_2024_vs_2025.html`](monitoring/drift_2024_vs_2025.html).
 
-### 2.4 Control con variables de calendario
+### A.4 Control con variables de calendario
 
 Conforme al problema técnico 6 del plan de acción, las variables de calendario actúan como un control negativo dentro del reporte de drift. Al comparar ventanas temporales idénticas de nueve meses (1 de enero al 30 de septiembre de 2024 frente al 1 de enero al 30 de septiembre de 2025), la distribución astronómica y matemática del tiempo no debe sufrir alteración. Si alguna de estas variables presentara drift estadístico, indicaría un error sistemático en la extracción de fechas, en el huso horario o en el algoritmo de muestreo.
 
@@ -185,7 +307,7 @@ Este resultado aporta tres confirmaciones metodológicas para la auditoría:
 2. **Validación del muestreo estratificado:** la función `stratified_monthly_sample` con semilla 42 preservó con exactitud la estructura mensual sin sobrerrepresentar ningún día o bloque horario.
 3. **Contraste con variables de demanda y red:** la estabilidad de este grupo contrasta con el desplazamiento observado en las variables de rezago y flujo. Mientras las variables de calendario se mantienen entre 0.0004 y 0.0085, `departures_lag3` (0.0294) y `departures_lag1` (0.0286) registran mayor sensibilidad operativa por el uso del sistema. Incluso `is_holiday` registra apenas 0.0004, confirmando que la proporción de días feriados se mantuvo balanceada entre ambas muestras.
 
-### 2.5 Drift del objetivo y de la predicción
+### A.5 Drift del objetivo y de la predicción
 
 La evaluación del objetivo real (`target`) y de la inferencia del modelo (`prediction`) compara la estabilidad de las etiquetas entre el periodo de referencia (enero a septiembre de 2024) y el periodo actual (enero a septiembre de 2025). Ambas columnas se analizan como variables categóricas mediante la divergencia de Jensen-Shannon con un umbral operativo de 0.10.
 
@@ -241,9 +363,9 @@ Gráfica comparativa de las predicciones:
 La comparación entre la etiqueta real y la salida inferida destaca dos hallazgos clave:
 
 1. **Efecto de la calibración asimétrica de umbrales:** La clase predicha `Riesgo_Desabasto` abarca cerca del 9% de los registros en ambos periodos, mientras que su prevalencia real ronda el 0.65%. Esta diferencia obedece al diseño intencional del modelo. Para satisfacer el requisito operativo de `recall_shortage ≥ 0.85`, el umbral de corte se redujo a 0.20 en la calibración. El modelo prefiere emitir alertas preventivas adicionales antes que omitir eventos de desabasto.
-2. **Estabilidad temporal de la política:** La divergencia Jensen-Shannon de la predicción es de 0.0044 frente al umbral de 0.10. El volumen relativo de alertas de desabasto pasó de 9.10% en 2024 a 8.75% en 2025. El volumen de alertas de saturación pasó de 0.55% a 0.54%. Esta consistencia demuestra que las predicciones del champion no sufrieron degradación ni explosión de falsas alarmas ante los datos de 2025.
+2. **Estabilidad temporal de la política:** La divergencia Jensen-Shannon de la predicción es de 0.0044 frente al umbral de 0.10. El volumen relativo de alertas de desabasto pasó de 9.10% en 2024 a 8.75% en 2025. El volumen de alertas de saturación pasó de 0.55% a 0.54%. Esta consistencia muestra que el volumen de alertas del champion no cambió ante los datos de 2025; no dice si las alertas siguen acertando, lo que solo se puede medir con la etiqueta real (Anexo C).
 
-## 3. Implicaciones para el modelo
+## Anexo B. Implicaciones para el modelo
 
 El análisis se realizó con el bundle local del champion P2 v3, run `7bf71250a91947ba8465d5db48d4bce5`. La ausencia de drift detectado en la muestra de entradas no garantiza que el modelo conserve su desempeño: en la evaluación posterior el recall de desabasto quedó por debajo del piso operativo de 0.85.
 
@@ -251,7 +373,7 @@ El análisis se realizó con el bundle local del champion P2 v3, run `7bf71250a9
 
 La importancia se mide como gain de LightGBM normalizado a 100%; indica la contribución a las particiones del modelo, no una relación causal. Se compararon las filas elegibles de ajuste de 2024 contra enero–septiembre de 2025 mediante muestras estratificadas de 100,000 filas por periodo, semilla 42.
 
-**Tabla 3.1. Importancia del champion y drift de las cinco variables principales.**
+**Tabla B.1. Importancia del champion y drift de las cinco variables principales.**
 
 Fuente: gain del bundle champion v3 y comparación de drift descrita arriba.
 
@@ -269,7 +391,7 @@ Las tres variables de mayor gain son `longitude`, `latitude` y `net_flow_lag24`:
 
 El champion usa umbrales de 0.20 para desabasto y 0.95 para saturación. Las clases de riesgo son poco frecuentes:
 
-**Tabla 3.2. Prevalencia observada por cohorte.**
+**Tabla B.2. Prevalencia observada por cohorte.**
 
 Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y `split_masks`.
 
@@ -281,7 +403,7 @@ Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y
 
 La referencia aplica las máscaras temporales del ajuste; la cohorte actual cuenta el split bruto con etiqueta conocida. Con umbrales fijos, cambios en la prevalencia y en la distribución de probabilidades pueden modificar la precisión y la carga operativa; las prevalencias por sí solas no determinan esos resultados. En el periodo reservado de octubre–diciembre 2025, sobre 805,920 filas, el champion local obtuvo recall de desabasto de **0.7854**, precisión de desabasto de **0.0425** y PR-AUC medio de clases minoritarias de **0.1970**. El recall quedó debajo del piso de 0.85; debe revisarse el equilibrio entre cobertura y carga operativa con etiquetas observadas.
 
-**Tabla 3.3. Desempeño del champion original en dos periodos de evaluación.**
+**Tabla B.3. Desempeño del champion original en dos periodos de evaluación.**
 
 Fuente: métricas del run original en la tabla de reproducibilidad del README y evaluación local sobre el split `evaluation` de 2025 con `monitoring.ab_test`.
 
@@ -295,13 +417,13 @@ Para 2025, el código divide el total de alertas entre **93 fechas distintas de 
 
 ### Estaciones y lectura para P2
 
-Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. El desglose A/B de la sección 4 compara 783,840 filas de estaciones comunes con 22,080 de estaciones nuevas. Para el champion reproducido del A/B, el PR-AUC medio de las clases minoritarias fue 0.1984 en las comunes y 0.0170 en las nuevas; los recall de desabasto fueron 0.7853 y 0.8182, respectivamente. En nuestro parquet local de evaluación, las 10 estaciones clasificadas como nuevas tienen solo 11 etiquetas de desabasto y 12 de saturación entre 22,080 filas; esa escasez limita la estabilidad de las métricas calculadas sobre nuestro segmento local. No se ha verificado el hash ni las identidades de estaciones del parquet usado en el A/B, por lo que estos conteos locales no acreditan los de aquella ejecución; si sus datos son iguales, la misma limitación se aplicaría a ese desglose. Estas métricas describen segmentos distintos y dependen también de sus etiquetas y prevalencias; no demuestran que la novedad de una estación cause la diferencia ni prueban que las predicciones del champion reproducido sean idénticas a las del bundle local.
+Las tablas de estaciones de año completo contienen 358 estaciones en 2024 y 365 en 2025: 355 comunes, 10 presentes solo en el panel de 2025 y tres ausentes de este. Una ausencia del panel no prueba que la estación haya sido retirada. El constructor de la tabla continua del challenger conserva la intersección de estaciones de año completo en ambos años, por lo que excluye las 10 estaciones nuevas de ese panel de entrenamiento. El desglose A/B del Anexo C compara 783,840 filas de estaciones comunes con 22,080 de estaciones nuevas. Para el champion reproducido del A/B, el PR-AUC medio de las clases minoritarias fue 0.1984 en las comunes y 0.0170 en las nuevas; los recall de desabasto fueron 0.7853 y 0.8182, respectivamente. En nuestro parquet local de evaluación, las 10 estaciones clasificadas como nuevas tienen solo 11 etiquetas de desabasto y 12 de saturación entre 22,080 filas; esa escasez limita la estabilidad de las métricas calculadas sobre nuestro segmento local. No se ha verificado el hash ni las identidades de estaciones del parquet usado en el A/B, por lo que estos conteos locales no acreditan los de aquella ejecución; si sus datos son iguales, la misma limitación se aplicaría a ese desglose. Estas métricas describen segmentos distintos y dependen también de sus etiquetas y prevalencias; no demuestran que la novedad de una estación cause la diferencia ni prueban que las predicciones del champion reproducido sean idénticas a las del bundle local.
 
-El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. La sección 4 presenta la comparación con una versión alternativa y conserva al champion porque el recall de desabasto del challenger no alcanza 0.85, según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
+El drift de entrada es una alerta complementaria y no sustituye la evaluación de desempeño cuando llega la etiqueta. El Anexo C presenta la comparación con una versión alternativa y conserva al champion porque el recall de desabasto del challenger no alcanza 0.85, según la regla acordada. Allí se usa un champion reproducido en otro Registry, con un run distinto; las métricas agregadas del champion coinciden con las obtenidas aquí, pero esa coincidencia no demuestra por sí sola identidad de los artefactos o de todas las predicciones.
 
-## 4. A/B testing entre versiones
+## Anexo C. Detalle del A/B testing
 
-### 4.1 Diseño
+### C.1 Diseño
 
 | | Champion | Challenger |
 |:---|:---|:---|
@@ -319,9 +441,9 @@ umbrales, porque son parte del modelo.
 
 El conjunto de evaluación tiene 805,920 filas, 93 días y 365 estaciones (10 nuevas en 2025). El A/B quedó registrado en MLflow en el run `46f68cb42b3745f2ab3d9b734889ea92` (`stage_of_work=ab_test`) y en `reports/monitoring/ab_summary.json`.
 
-**Desviación del plan:** el challenger se entrenó en la máquina de Fernando porque el host de Oscar no estuvo disponible por su guardia. Para tener las dos versiones en un solo Registry, el champion se reprodujo ahí desde `main` (commit `6a63d75`) con su ventana e hiperparámetros, y pasó por el mismo paso de selección. Sus métricas de validación y de test son idénticas a las del run original de Oscar `7bf71250` (`val_recall_shortage` 0.8605, `val_pr_auc_minority_mean` 0.2884, `test_recall_shortage` 0.8452, `test_pr_auc_minority_mean` 0.2462), así que se trata del mismo modelo para efectos del A/B: mismo código, datos, ventana e hiperparámetros, y métricas idénticas. Esto no demuestra que los artefactos sean idénticos byte a byte (sección 3).
+**Desviación del plan:** el challenger se entrenó en la máquina de Fernando porque el host de Oscar no estuvo disponible por su guardia. Para tener las dos versiones en un solo Registry, el champion se reprodujo ahí desde `main` (commit `6a63d75`) con su ventana e hiperparámetros, y pasó por el mismo paso de selección. Sus métricas de validación y de test son idénticas a las del run original de Oscar `7bf71250` (`val_recall_shortage` 0.8605, `val_pr_auc_minority_mean` 0.2884, `test_recall_shortage` 0.8452, `test_pr_auc_minority_mean` 0.2462), así que se trata del mismo modelo para efectos del A/B: mismo código, datos, ventana e hiperparámetros, y métricas idénticas. Esto no demuestra que los artefactos sean idénticos byte a byte (Anexo B).
 
-### 4.2 Regla de decisión
+### C.2 Regla de decisión
 
 Esta regla se fijó el 9 de noviembre de 2026, antes de entrenar el challenger y de ver
 cualquier resultado (decisión 5.6 del plan). El challenger reemplaza al champion solo si
@@ -333,7 +455,7 @@ cumple las tres condiciones sobre el conjunto de evaluación:
 
 Si alguna falla, el champion se queda.
 
-### 4.3 Resultados
+### C.3 Resultados
 
 | Métrica | Champion v3 | Challenger v2 | Diferencia (IC 95%) |
 |---|---:|---:|---:|
@@ -358,9 +480,9 @@ El challenger mejora de forma constante en los tres meses, pero solo octubre sup
 
 **Por estación:** en las 355 estaciones comunes el resultado replica el global. En las 10 estaciones nuevas (22,080 filas) los dos modelos empatan en recall (0.818) y tienen PR-AUC muy baja (~0.016); la muestra es chica y ninguno de los dos aporta ventaja ahí.
 
-### 4.4 Decisión
+### C.4 Decisión
 
-| Condición (4.2) | Valor | ¿Cumple? |
+| Condición (C.2) | Valor | ¿Cumple? |
 |---|---|:---:|
 | 1. `recall_shortage` del challenger ≥ 0.85 | 0.8358 | No |
 | 2. Límite inferior del IC de `pr_auc_minority_mean` > 0 | +0.0257 | Sí |
@@ -369,9 +491,9 @@ El challenger mejora de forma constante en los tres meses, pero solo octubre sup
 
 **Se queda el champion v3.** El challenger es mejor en PR-AUC y en recall de faltantes sin perder macro F1 ni exceder el límite de alertas, pero no alcanza el requisito operativo mínimo de recall, así que no se promueve.
 
-**Hallazgo:** el champion también está por debajo del piso: 0.785 en oct–dic 2025, contra 0.845 en el test de diciembre 2024 (README, tabla de reproducibilidad, run `7bf71250`; ver sección 3). Su PR-AUC cayó de 0.246 a 0.197 y sus alertas por día subieron de 765.6 a 802.6. La regla no se modifica después de ver los resultados; mantener al champion no significa que esté sano.
+**Hallazgo:** el champion también está por debajo del piso: 0.785 en oct–dic 2025, contra 0.845 en el test de diciembre 2024 (README, tabla de reproducibilidad, run `7bf71250`; ver Anexo B). Su PR-AUC cayó de 0.246 a 0.197 y sus alertas por día subieron de 765.6 a 802.6. La regla no se modifica después de ver los resultados; mantener al champion no significa que esté sano.
 
-## 5. Reproducibilidad
+## Anexo D. Reproducibilidad
 
 Para comprobar que el reporte de drift no depende de la máquina, se repitió en una segunda máquina desde `main` (commit `64b56f1`):
 
@@ -386,14 +508,14 @@ Para comprobar que el reporte de drift no depende de la máquina, se repitió en
 **Hallazgo:** un primer intento con un bundle anterior (v1) dio las mismas distancias en todas las variables de entrada, pero otro drift de predicción (0.0069 contra 0.0044) y otro orden de importancias. La parte de datos se reproduce por sí sola; la parte del modelo exige verificar
 el hash del bundle antes de correr el reporte.
 
-## 6. Recomendación de Continuous Training
+## Anexo E. Detalle de la recomendación de Continuous Training
 
-### 6.1 ¿Conviene reentrenar ahora?
+### E.1 ¿Conviene reentrenar ahora?
 
 **No se promueve el challenger de esta entrega, pero sí conviene iniciar ya una nueva iteración
-de reentrenamiento.** Ambas declaraciones son respladadas por los datos de la sección 4:
+de reentrenamiento.** Ambas declaraciones son respaldadas por los datos del Anexo C:
 
-- El challenger no pasa la regla de 4.2: su `recall_shortage` es 0.836, debajo del piso de 0.85.
+- El challenger no pasa la regla de C.2: su `recall_shortage` es 0.836, debajo del piso de 0.85.
 - El champion tampoco está sano. Su `recall_shortage` bajó de 0.845 en el test de diciembre de
   2024 a 0.785 en octubre a diciembre de 2025, y su PR-AUC de 0.246 a 0.197. Como son los mismos
   meses del calendario, la caída no se explica por la temporada.
@@ -406,14 +528,14 @@ El problema concreto está en los umbrales. El challenger calibró su umbral de 
 para cumplir 0.85 de recall en agosto y septiembre de 2025, y en octubre a diciembre ese recall
 bajó a 0.836. La siguiente iteración debe calibrar con margen: buscar un recall de al menos 0.88
 en la ventana de calibración, para que conserve 0.85 cuando cambie la prevalencia (que bajó de
-0.674% en 2024 a 0.475% en la evaluación, tabla 3.2). Después se repite el A/B con la misma
+0.674% en 2024 a 0.475% en la evaluación, tabla B.2). Después se repite el A/B con la misma
 regla.
 
-### 6.2 ¿Con qué disparadores?
+### E.2 ¿Con qué disparadores?
 
 El hallazgo principal de esta entrega es que **el drift de datos no detectó la degradación**:
 ninguna de las 18 variables tuvo drift, el `target` y la predicción quedaron en 0.0033 y 0.0044
-(sección 2), y aun así el recall del champion cayó debajo del piso. Un esquema basado solo en
+(Anexo A), y aun así el recall del champion cayó debajo del piso. Un esquema basado solo en
 drift nunca habría disparado. Por eso el disparador principal es el desempeño, y el drift queda
 como alerta temprana:
 
@@ -429,7 +551,7 @@ prevalencia actual, unas 300 horas de desabasto, suficientes para estimar el rec
 estabilidad. Con los resultados de esta entrega, el disparador por desempeño **ya estaría
 activo** (recall de 0.785 y PR-AUC de 0.197).
 
-### 6.3 ¿Cada cuánto?
+### E.3 ¿Cada cuánto?
 
 - **Umbrales, cada semana.** Recalibrar los umbrales con la última semana etiquetada no requiere
   reentrenar, es barato y responde a cambios de prevalencia como el que explica el caso del
@@ -438,35 +560,24 @@ activo** (recall de 0.785 y PR-AUC de 0.197).
   desempeño cambió de un mes a otro dentro de la evaluación (el recall del champion fue 0.807 en
   octubre, 0.757 en noviembre y 0.786 en diciembre), así que esperar un año, como pasó con el
   champion, deja varios meses debajo del piso.
-- **En cuanto se active un disparador** de 6.2, sin esperar a la siguiente fecha programada.
+- **En cuanto se active un disparador** de E.2, sin esperar a la siguiente fecha programada.
 
-### 6.4 Cómo se promueve una versión
+### E.4 Cómo se promueve una versión
 
-La regla de 4.2 se vuelve el paso de validación automática del pipeline. Cada versión nueva pasa
+La regla de C.2 se vuelve el paso de validación automática del pipeline. Cada versión nueva pasa
 por el mismo flujo, con comandos que ya existen en el repositorio:
 
 1. `make features-challenger` y `make train-challenger`: construir la tabla con la ventana nueva
    y entrenar con los hiperparámetros del champion.
 2. Registrar el run como `@challenger` (`mlflow run . -e register -P run_id=<run> -P alias=challenger`).
 3. `make ab-test`: evaluar las dos versiones sobre un periodo que ninguna vio y aplicar la regla
-   de 4.2 sin cambiarla.
+   de C.2 sin cambiarla.
 4. Si el challenger pasa las tres condiciones: registrarlo como `@champion`, `make export-model`,
    y reconstruir la imagen de la Entrega 4 (`make image`, `make container`, `make smoke`) sin
    cambiar código.
 5. Si no pasa, el champion se queda y `ab_summary.json` documenta por qué, como en esta entrega.
 
-
-## 7. Conclusiones y limitaciones
-
-### 7.1 Conclusiones
-
-1. **No hay drift de datos entre enero-septiembre de 2024 y de 2025.** Ninguna de las 18 variables superó su umbral; el `target` y la predicción del champion quedaron en 0.0033 y 0.0044, más de un orden de magnitud debajo de 0.10. Las variables de calendario, que sirven de control, tampoco mostraron drift, lo que respalda que las features de 2025 se construyeron igual que las de 2024.
-2. **Aun así, el champion se degradó.** Su `recall_shortage` bajó de 0.845 en el test de diciembre de 2024 a 0.785 en octubre-diciembre de 2025, debajo del piso operativo de 0.85, y su PR-AUC de 0.246 a 0.197. La ausencia de drift en las distribuciones no garantiza que el modelo conserve su desempeño.
-3. **Reentrenar con datos recientes ayuda, pero no basta todavía.** El challenger mejora el PR-AUC en los tres meses de la evaluación y sube el recall de desabasto en 0.05, sin perder macro F1 ni exceder el límite de alertas. No se promueve porque su recall (0.836) no alcanza 0.85, según la regla fijada antes de ver los resultados.
-4. **El monitoreo de P2 debe basarse en el desempeño.** Como la etiqueta llega una hora después, el disparador principal de reentrenamiento es el desempeño observado, y el drift queda como alerta temprana (sección 6). Con los resultados de esta entrega, ese disparador ya estaría activo.
-5. **El flujo es reproducible.** El reporte de drift se repitió en una segunda máquina con las mismas 20 decisiones y diferencias de 10⁻¹⁸ en las distancias (sección 5), y el champion se reprodujo en otro Registry con métricas idénticas (sección 4).
-
-### 7.2 Limitaciones
+## Anexo F. Limitaciones
 
 - **Capacidad estática.** El catálogo de estaciones es una sola foto (`nomenclatura_2026_09.csv`), y `net_flow` se normaliza por capacidad. Si una estación cambió de tamaño entre 2024 y 2025, ese cambio no aparece en los datos ni en el drift.
 - **Lags del 1 de enero.** Las tablas de cada año se construyen por separado, así que las filas del 1 de enero no tienen lags y se descartan de los conjuntos de drift (8,760 filas en 2025).
@@ -476,8 +587,7 @@ por el mismo flujo, con comandos que ya existen en el repositorio:
 - **Un solo periodo de evaluación.** El A/B usa un trimestre. Repetirlo con enero a septiembre de 2026, que ya está en los datos, daría una prueba de robustez de la decisión.
 - **Champion reproducido.** El A/B final usa una reproducción del champion en el Registry de Fernando. Sus métricas coinciden con las del run original de Oscar, pero eso no demuestra que los artefactos sean idénticos byte a byte.
 
-
-## Cómo reproducir
+## Anexo G. Cómo reproducir
 
 Desde la raíz del repositorio, con los datos de `data/interim/viajes/` descargados
 (`make data`):
@@ -485,13 +595,13 @@ Desde la raíz del repositorio, con los datos de `data/interim/viajes/` descarga
 ```bash
 uv sync                      # dependencias, incluido el grupo monitoring (Evidently)
 
-# Reporte de drift (secciones 2 y 5)
+# Reporte de drift (sección 2 y Anexos A y D)
 make features-current        # tabla de features de P2 para 2025 (current y evaluation)
 make prepare-model           # champion v3 en models/p2-riesgo/
 shasum -a 256 models/p2-riesgo/model.pkl   # debe empezar con 6dbe6614
 make drift-report            # HTML y JSON en reports/monitoring/, PNG en reports/figures/entrega5/
 
-# A/B testing (sección 4); requiere el servidor de MLflow (make mlflow-server) y el .env
+# A/B testing (sección 3 y Anexo C); requiere el servidor de MLflow (make mlflow-server) y el .env
 make features-challenger     # tabla continua 2024-2025 para el challenger
 make train-challenger        # entrena el challenger con los hiperparámetros del champion
 uv run mlflow run . -e register -P run_id=<run_id> -P alias=challenger --env-manager local
