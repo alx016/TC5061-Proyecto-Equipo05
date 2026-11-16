@@ -47,7 +47,9 @@ así que se usaron distancias: Wasserstein normalizada para variables numéricas
 para categóricas, con umbral de 0.10. La calidad de datos no mostró problemas: mismo esquema y
 tipos, más del 99.7% de completitud y ninguna categoría nueva (Anexo A).
 
-![Figura 1. Drift por columna en el reporte de Evidently](figures/entrega5/evidently_drift_overview.png)
+![Figura 1. Drift por columna en Evidently](figures/entrega5/evidently_drift_overview.png)
+
+**Figura 1.** Tabla de drift por columna del reporte de Evidently, ordenada por distancia: 0 de 20 columnas (18 variables, `target` y `prediction`) con drift.
 
 **Tabla 1.** Variables más importantes del champion, variables con mayor distancia y columnas de
 control. Ninguna supera el umbral de 0.10.
@@ -71,7 +73,9 @@ posiciones intermedias pese a las estaciones nuevas. Las de calendario, que func
 tienen las distancias más bajas (todas debajo de 0.01), lo que respalda que las features de 2025
 se construyeron igual que las de 2024.
 
-![Figura 2. Distribución comparativa de departures_lag3 en el reporte de Evidently](figures/entrega5/evidently_departures_lag3.png)
+![Figura 2. departures_lag3 en Evidently](figures/entrega5/evidently_departures_lag3.png)
+
+**Figura 2.** `departures_lag3`, la variable con mayor distancia, en el reporte de Evidently: la media del periodo actual (rojo) se mantiene dentro de ±1 desviación estándar de la referencia (verde) a lo largo de toda la muestra.
 
 **Implicaciones para el modelo.** Las tres variables más importantes del champion (ubicación y
 flujo de 24 horas antes) son estables, y la prevalencia de las clases de riesgo cambió poco
@@ -375,7 +379,7 @@ La importancia se mide como gain de LightGBM normalizado a 100%; indica la contr
 
 **Tabla B.1. Importancia del champion y drift de las cinco variables principales.**
 
-Fuente: gain del bundle champion v3 y comparación de drift descrita arriba.
+**Fuente:** gain del bundle champion v3 y comparación de drift descrita arriba.
 
 | Variable | Gain | Distancia Wasserstein | Umbral | ¿Drift? |
 |:---|---:|---:|---:|:---:|
@@ -393,7 +397,7 @@ El champion usa umbrales de 0.20 para desabasto y 0.95 para saturación. Las cla
 
 **Tabla B.2. Prevalencia observada por cohorte.**
 
-Fuente: tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y `split_masks`.
+**Fuente:** tablas de features de 2024 y 2025; referencia filtrada con `load_rows` y `split_masks`.
 
 | Cohorte | Filas con etiqueta | Desabasto | Saturación |
 |:---|---:|---:|---:|
@@ -405,7 +409,7 @@ La referencia aplica las máscaras temporales del ajuste; la cohorte actual cuen
 
 **Tabla B.3. Desempeño del champion original en dos periodos de evaluación.**
 
-Fuente: métricas del run original en la tabla de reproducibilidad del README y evaluación local sobre el split `evaluation` de 2025 con `monitoring.ab_test`.
+**Fuente:** métricas del run original en la tabla de reproducibilidad del README y evaluación local sobre el split `evaluation` de 2025 con `monitoring.ab_test`.
 
 | Métrica | Test de diciembre 2024 | Evaluación octubre–diciembre 2025 |
 |:---|---:|---:|
