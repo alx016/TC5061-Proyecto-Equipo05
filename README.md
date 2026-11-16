@@ -503,7 +503,7 @@ Capturas de la reproducción independiente en macOS con Docker: muestran la vers
 
 La Entrega 5 agrega una capa de observabilidad al modelo P2 (`mibici-equipo05-p2-riesgo`), el
 mismo que sirve la API de la Entrega 4. El reporte completo está en
-[`reports/entrega5_monitoreo.md`](reports/entrega5_monitoreo.md).
+[`reports/TC5061_Drift_ABTest_Equipo05.md`](reports/TC5061_Drift_ABTest_Equipo05.md).
 
 - **Drift (Evidently):** se compararon las filas con las que se entrenó el champion (enero a
   septiembre de 2024) contra los mismos meses de 2025. Ninguna de las 18 variables, ni la
@@ -609,7 +609,7 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
 ├── reports/                   <- Figuras y reportes generados; los HTML/JSON de deepchecks no se versionan
-│   ├── entrega5_monitoreo.md  <- Reporte de la Entrega 5: drift, A/B y Continuous Training
+│   ├── TC5061_Drift_ABTest_Equipo05.md  <- Reporte de la Entrega 5: drift, A/B y Continuous Training
 │   ├── monitoring/            <- Reporte de Evidently (HTML y JSON) y resumen del A/B
 │   └── figures/
 │       ├── entrega2/          <- Evidencias de MLflow
