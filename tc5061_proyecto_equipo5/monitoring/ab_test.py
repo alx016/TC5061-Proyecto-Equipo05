@@ -1,8 +1,8 @@
 """A/B test between two versions of the P2 model on the same evaluation period.
 
 Each version predicts with its own thresholds. The difference challenger - champion gets a 95%
-interval from a bootstrap that resamples whole days, and the decision follows section 4.2 of
-reports/entrega5_monitoreo.md, which was fixed before seeing any result.
+interval from a bootstrap that resamples whole days, and the decision follows Annex C.2 of
+reports/TC5061_Drift_ABTest_Equipo05.md, which was fixed before seeing any result.
 """
 
 from dataclasses import dataclass
