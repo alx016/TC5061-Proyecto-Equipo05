@@ -22,3 +22,4 @@ def test_champion_bundle_archive_exists_and_uncorrupted():
 
     elapsed = time.perf_counter() - start_time
     assert elapsed < 0.100, f"Archive inspection took {elapsed:.4f}s, expected < 0.100s"
+

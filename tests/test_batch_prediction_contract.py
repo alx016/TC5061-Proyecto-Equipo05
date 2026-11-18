@@ -88,3 +88,4 @@ def test_batch_prediction_cardinality_and_station_traceability(
 
 def test_dependency_overrides_cleaned_up_after_tests():
     assert len(app.dependency_overrides) == 0
+
