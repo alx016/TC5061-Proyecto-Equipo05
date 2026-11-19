@@ -87,9 +87,21 @@ inferencia actual y optimizado, y la recomendación principal. Se escribe al fin
 | Créditos de CPU (`t3` unlimited) | $0.05 USD por vCPU-hora sobre la línea base (20% por vCPU) | Amazon Web Services (2026c) |
 
 <!-- Las instancias t3 son burstable: sostener 80% de CPU consume créditos. El costo a capacidad
-sostenible debe sumar ese cargo o compararse contra una instancia sin burst. La tarifa y las
-especificaciones de t3.small y la tarifa de EBS gp3 se confirmaron el 18 de noviembre de 2026.
-Falta confirmar los créditos de CPU y poner su fecha de consulta en Referencias (WP-3b). -->
+sostenible debe sumar ese cargo o compararse contra una instancia sin burst. Las especificaciones
+y tarifa de t3.small, la tarifa de EBS gp3 y el cargo por créditos de CPU ($0.05 USD por vCPU-hora
+sobre la línea base del 20%, Amazon Web Services 2026c) se verificaron el 18 de noviembre de 2026. -->
+
+**Comparativa de precios serverless y ejecución bajo demanda (Optimización 4: scale-to-zero).** Tarifas públicas sin nivel gratuito verificadas el 18 de noviembre de 2026.
+
+| Plataforma y configuración | Tarifa pública de cómputo y peticiones | Lote horario consolidado (batch=365: 730 req/mes, ~0.5 s/req = 365 s/mes) | Peticiones unitarias (batch=1: 262,800 req/mes, ~50 ms/req = 13,140 s/mes) | Ahorro mensual vs. t3.small 24/7 ($15.98 USD/mes) | Fecha de consulta y fuente |
+|:---|:---|:---|:---|:---|:---|
+| AWS EC2 `t3.small` 24/7 (`us-east-1`, 2 vCPU, 2 GiB + 10 GB EBS `gp3`; 20 GB EBS = $16.78 USD/mes) | $0.0208 USD/h ($15.18 USD/mes en 730 h) + $0.08 USD/GB-mes EBS ($0.80 USD/mes por 10 GB; $1.60 USD/mes por 20 GB) + $0.05 USD/vCPU-h créditos `t3` sobre línea base del 20% | $15.98 USD/mes (99.99% tiempo ocioso: 365 s activos de 2,628,000 s) | $15.98 USD/mes (99.50% tiempo ocioso: 13,140 s activos de 2,628,000 s) | Línea base (0%) | 18 de noviembre de 2026; Amazon Web Services (2026a, 2026b, 2026c) |
+| AWS Lambda (`us-east-1`, x86, 1024 MB / 1 GB RAM) | $0.0000166667 USD/GB-s + $0.20 USD por 1,000,000 de invocaciones | $0.0062 USD/mes ($0.00608 USD cómputo + $0.00015 USD invocaciones; < $0.02 USD/mes) | $0.2716 USD/mes ($0.2190 USD cómputo + $0.0526 USD invocaciones; < $0.45 USD/mes) | 99.96% (lote) / 98.30% (unitario) | 18 de noviembre de 2026; Amazon Web Services (2026d) |
+| Google Cloud Run (`us-central1`, Tier 1, *scale-to-zero* facturado por petición, 1 vCPU, 1 GiB RAM) | $0.00002400 USD/vCPU-s + $0.00000250 USD/GiB-s ($0.00002650 USD/s activo) + $0.40 USD por 1,000,000 de peticiones | $0.0100 USD/mes ($0.00967 USD cómputo + $0.00029 USD peticiones; < $0.02 USD/mes) | $0.4494 USD/mes a 49.5 ms ($0.4533 USD/mes a 50 ms: $0.3482 USD cómputo + $0.1051 USD peticiones; ~$0.38–$0.45 USD/mes en el rango 40–50 ms) | 99.94% (lote) / 97.16%–97.60% (unitario) | 18 de noviembre de 2026; Google Cloud (2026) |
+
+Una instancia dedicada AWS EC2 `t3.small` encendida las 24 horas del día durante 730 horas al mes factura 2,628,000 segundos continuos por un costo fijo de $15.98 USD/mes con 10 GB de almacenamiento EBS `gp3`, o $16.78 USD/mes con 20 GB de EBS `gp3` (Amazon Web Services, 2026a, 2026b). Sin embargo, la operación real de MiBici para el modelo P2 requiere predecir 365 estaciones activas cada hora, lo que equivale a 8,760 predicciones diarias y 262,800 predicciones mensuales. Bajo peticiones unitarias (`batch=1`, 262,800 invocaciones mensuales a ~50 ms por petición), el servicio `api` consume 13,140 segundos de cómputo efectivo al mes y deja ocioso el 99.50% del tiempo facturado. Al consolidar la inferencia en un lote horario por corrida (`batch=365`, 730 peticiones mensuales a ~0.5 s por lote), el tiempo activo cae a 365 segundos al mes y el desperdicio por capacidad ociosa alcanza el 99.99% (~99.9% de la ventana mensual).
+
+La combinación del lote horario consolidado (Optimización 1, `batch=365`) con el desacoplamiento de MLflow del camino crítico de inferencia mediante `--no-deps api` y el paquete inmutable `models/p2-champion-v3.zip` (Optimización 2) convierte al contenedor `api` en un servicio sin estado apto para ejecución bajo demanda con reducción a cero instancias (*scale-to-zero*, Optimización 4). Con el patrón por lote horario (730 invocaciones y 365 segundos de cómputo al mes), el gasto mensual baja a $0.0062 USD/mes en AWS Lambda (`us-east-1`, 1 GB RAM) y a $0.0100 USD/mes en Google Cloud Run (`us-central1`, 1 vCPU y 1 GiB RAM facturados por petición), y mantiene el costo por debajo de $0.02 USD/mes con un ahorro superior al 99.9% frente a la instancia `t3.small` dedicada (Amazon Web Services, 2026d; Google Cloud, 2026). Incluso sin agrupar peticiones (`batch=1`, 262,800 peticiones y 13,140 segundos al mes), un despliegue *serverless* factura $0.2716 USD/mes en AWS Lambda y entre $0.4494 y $0.4533 USD/mes en Google Cloud Run (< $0.45 USD/mes), lo que representa una reducción del 97.16% al 98.30% respecto al esquema 24/7.
 
 ## 5. Conclusiones
 
