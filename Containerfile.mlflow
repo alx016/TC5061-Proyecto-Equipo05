@@ -1,0 +1,30 @@
+FROM docker.io/library/python:3.13-slim
+
+## uv pinned to the same release as the API image
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
+
+WORKDIR /opt/mlflow
+# The server only stores runs and the Registry; MLflow 3 job workers would take ~1.4 GB extra
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy \
+    MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false
+
+# Only MLflow and its dependencies, pinned to the exact versions of uv.lock
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-hashes --no-emit-project --no-default-groups -o constraints.txt \
+    && uv pip install --system --constraint constraints.txt "mlflow==3.17.2" \
+    && rm constraints.txt
+
+# Run without root privileges; /mlflow holds the database and artifacts (named volume)
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /mlflow \
+    && chown app:app /mlflow
+USER app
+
+EXPOSE 5001
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=4)"
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "sqlite:////mlflow/mlflow.db", \
+     "--artifacts-destination", "/mlflow/mlartifacts", \
+     "--host", "0.0.0.0", "--port", "5001", "--workers", "1", \
+     "--allowed-hosts", "mlflow:5001,mlflow,localhost:5001,127.0.0.1:5001"]
