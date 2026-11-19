@@ -109,39 +109,39 @@ La combinación del lote horario consolidado (Optimización 1, `batch=365`) con 
 Cuatro o cinco bullets: operación en un comando, CI, comportamiento bajo carga, costo y
 siguiente paso. -->
 
+- **Orquestación reproducible en un comando y respaldo por paquete inmutable.** `docker-compose.yml` despliega `mibici-api` (`1.0 vCPU`, `1024 MiB`) y `mibici-mlflow` (`0.5 vCPU`, `512 MiB`, MLflow `3.17.2` con `--allowed-hosts` y volumen `mlflow_data`) en la red `mibici-net` sincronizados mediante `depends_on` con `condition: service_healthy`. El `Containerfile` desempaqueta automáticamente `models/p2-champion-v3.zip` cuando falta el directorio local, lo que garantiza el arranque con `docker compose up -d --build` desde un clon limpio y permite alternar sin cambios de código hacia la resolución en vivo del Registry (`models:/mibici-equipo05-p2-riesgo@champion`).
+- **Gobernanza automatizada de CI/CD y seguridad en GitHub Actions.** El flujo `.github/workflows/ci.yml` bloquea regresiones mediante compuertas estáticas y de seguridad (`ruff`, `bandit`, `pip-audit` y `detect-secrets`), ejecuta en paralelo la matriz de pruebas `fast` y `slow` con caché de `uv` (incluyendo DeepChecks en Python 3.12 y el contrato del paquete `v3` con `make prepare-model`), valida la pila completa con pruebas de humo en Docker Compose (`/health`, `/model-info` y `/predict`) y publica imágenes verificadas en GHCR (`ghcr.io/alx016/mibici-p2-api`).
+- **Resiliencia bajo carga de 365 estaciones y perfilado de concurrencia en Locust.** Las pruebas de carga (`load_tests/locustfile.py`) y la telemetría de `docker stats` (`scripts/collect_load_metrics.py`) sobre escalones de 10, 50 y 120 usuarios concurrentes demuestran que agrupar las 365 estaciones activas de MiBici en lotes (`batch=20` y `batch=365` frente a `batch=1`) multiplica el rendimiento efectivo en predicciones por segundo. El perfilado bajo saturación identifica como cuellos de botella la contención del GIL en un único proceso Uvicorn, la construcción repetida de `pd.DataFrame` con `astype(SIGNATURE_DTYPES)` en `mlflow.pyfunc` y la competencia de hilos OpenMP en LightGBM, lo que fundamenta la ejecución directa sobre `Booster` con arreglos `numpy` (Optimización 3).
+- **Eficiencia FinOps mediante procesamiento por lotes, desacoplamiento y scale-to-zero.** La demanda real de MiBici (`365` estaciones por `24 h` = `262,800` predicciones/mes) deja ociosa una instancia dedicada AWS EC2 `t3.small` (`$15.98 USD/mes` con 10 GB EBS `gp3` o `$16.78 USD/mes` con 20 GB) entre el `99.50%` (`batch=1`) y el `99.99%` (`batch=365`) del mes. Combinar el lote horario consolidado (`730` peticiones/mes, Optimización 1) y el retiro de MLflow del camino de inferencia (`--no-deps api`, Optimización 2) con ejecución *serverless* bajo demanda (Optimización 4) reduce el gasto mensual a `$0.0062 USD/mes` en AWS Lambda y `$0.0100 USD/mes` en Google Cloud Run (`< $0.02 USD/mes`, ahorro `>99.9%`), o a `< $0.45 USD/mes` bajo peticiones unitarias (ahorro `>97%` a `98.3%`, FinOps Foundation, 2026).
+- **Madurez MLOps de extremo a extremo para la operación de MiBici P2.** La integración de las Entregas 1 a 6 consolida un ciclo operativo trazable que enlaza datos versionados por manifiesto y validación DeepChecks (E1 y E3), gobierno de experimentos y Model Registry en MLflow (E2), servicio contenedorizado con contratos estrictos en FastAPI y Pydantic (E4), monitoreo de *data drift* con Evidently y pruebas A/B con disparadores de reentrenamiento continuo (E5), y operación reproducible con CI/CD, pruebas de estrés y disciplina FinOps lista para producción (E6; Gift & Deza, 2021; Treveil et al., 2020; Wilson, 2022).
+
 ## Referencias
 
 <!-- Emilio (WP-3b) completa y ordena en APA 7. Las de precios llevan fecha de consulta. -->
 
-Amazon Web Services. (2026a). *Amazon EC2 On-Demand pricing*. Recuperado el 18 de noviembre de 2026, de
-https://aws.amazon.com/ec2/pricing/on-demand/
+Amazon Web Services. (2026a). *Amazon EC2 On-Demand pricing*. Recuperado el 18 de noviembre de 2026, de https://aws.amazon.com/ec2/pricing/on-demand/
 
-Amazon Web Services. (2026b). *Amazon EBS pricing*. Recuperado el 18 de noviembre de 2026, de
-https://aws.amazon.com/ebs/pricing/
+Amazon Web Services. (2026b). *Amazon EBS pricing*. Recuperado el 18 de noviembre de 2026, de https://aws.amazon.com/ebs/pricing/
 
-Amazon Web Services. (2026c). *Burstable performance instances: Unlimited mode*. Recuperado el
-[fecha] de https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode.html
+Amazon Web Services. (2026c). *Burstable performance instances: Unlimited mode*. Recuperado el 18 de noviembre de 2026, de https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode.html
 
-Docker. (2026). *Docker Compose documentation* [Documentación de software].
-https://docs.docker.com/compose/
+Amazon Web Services. (2026d). *AWS Lambda pricing*. Recuperado el 18 de noviembre de 2026, de https://aws.amazon.com/lambda/pricing/
 
-FinOps Foundation. (2026). *What is FinOps?* Recuperado el [fecha] de
-https://www.finops.org/introduction/what-is-finops/
+Docker. (2026). *Docker Compose documentation* [Documentación de software]. https://docs.docker.com/compose/
 
-Gift, N., & Deza, A. (2021). *Practical MLOps: Operationalizing machine learning models*.
-O'Reilly Media.
+FinOps Foundation. (2026). *What is FinOps?* Recuperado el 18 de noviembre de 2026, de https://www.finops.org/introduction/what-is-finops/
 
-GitHub. (2026). *GitHub Actions documentation* [Documentación de software].
-https://docs.github.com/en/actions
+Gift, N., & Deza, A. (2021). *Practical MLOps: Operationalizing machine learning models*. O'Reilly Media.
+
+GitHub. (2026). *GitHub Actions documentation* [Documentación de software]. https://docs.github.com/en/actions
+
+Google Cloud. (2026). *Cloud Run pricing*. Recuperado el 18 de noviembre de 2026, de https://cloud.google.com/run/pricing
 
 Locust. (2026). *Locust documentation* [Documentación de software]. https://docs.locust.io/
 
-MLflow Project. (2026). *MLflow documentation* [Documentación de software].
-https://mlflow.org/docs/latest/
+MLflow Project. (2026). *MLflow documentation* [Documentación de software]. https://mlflow.org/docs/latest/
 
-Treveil, M., Omont, N., Stenac, C., Lefevre, K., Phan, D., Zentici, J., Lavoillotte, A.,
-Miyazaki, M., & Heidmann, L. (2020). *Introducing MLOps: How to scale machine learning in the
-enterprise*. O'Reilly Media.
+Treveil, M., Omont, N., Stenac, C., Lefevre, K., Phan, D., Zentici, J., Lavoillotte, A., Miyazaki, M., & Heidmann, L. (2020). *Introducing MLOps: How to scale machine learning in the enterprise*. O'Reilly Media.
 
 Wilson, B. (2022). *Machine learning engineering in action*. Manning Publications.
 
