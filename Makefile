@@ -11,6 +11,9 @@ API_PORT ?= 8000
 MLFLOW_HOST ?= 127.0.0.1
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)
 BUILD_FLAGS ?= $(if $(findstring podman,$(CONTAINER_ENGINE)),--format docker,)
+MLFLOW_PORT ?= 5001
+# docker compose respects depends_on: service_healthy; podman-compose 1.0.x does not
+COMPOSE ?= $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo podman-compose)
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -136,13 +139,9 @@ prepare-model:
 api:
 	uv run uvicorn tc5061_proyecto_equipo5.api.main:app --reload --port $(API_PORT)
 
-## Build the API image (needs make export-model first)
+## Build the API image (uses models/p2-riesgo/ or unpacks models/p2-champion-v3.zip)
 .PHONY: image
 image:
-	@test -f models/p2-riesgo/registry_metadata.json || { \
-		echo ">>> Falta models/p2-riesgo/. Corre 'make prepare-model' o 'make export-model' primero."; \
-		exit 1; \
-	}
 	$(CONTAINER_ENGINE) build $(BUILD_FLAGS) -t $(IMAGE) -f Containerfile .
 
 ## Run the API container in the background
@@ -158,6 +157,30 @@ smoke:
 	curl -fsS -X POST http://localhost:$(API_PORT)/predict \
 		-H "Content-Type: application/json" -d @scripts/smoke_request.json
 	@echo
+
+## Start MLflow and the API with Compose, building the images if needed
+.PHONY: up
+up:
+	API_PORT=$(API_PORT) MLFLOW_PORT=$(MLFLOW_PORT) $(COMPOSE) up -d --build
+
+## Stop the Compose stack (the mlflow_data volume is kept)
+.PHONY: down
+down:
+	$(COMPOSE) down
+
+## Follow the logs of the Compose stack
+.PHONY: logs
+logs:
+	$(COMPOSE) logs -f --tail=100
+
+## Check the Compose stack: MLflow /health, API /model-info, then the API smoke test
+.PHONY: compose-smoke
+compose-smoke:
+	curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:$(MLFLOW_PORT)/health
+	@echo
+	curl -fsS --retry 15 --retry-delay 2 --retry-all-errors http://localhost:$(API_PORT)/model-info
+	@echo
+	@$(MAKE) --no-print-directory smoke API_PORT=$(API_PORT)
 
 ## Build the 2025 P2 feature table (current and evaluation splits)
 .PHONY: features-current
