@@ -14,6 +14,7 @@ LOCUST_COLUMNS = [
     "Failure Count",
     "Median Response Time",
     "Requests/s",
+    "50%",
 ]
 STATS_COLUMNS = [
     "timestamp",
@@ -29,31 +30,35 @@ STATS_COLUMNS = [
 ]
 
 
-def write_locust(load_dir: Path, scenario: str, rows: list[tuple[str, int, int, float, float]]):
-    """Write locust_<slug>_stats.csv; each row is (name, requests, failures, median ms, req/s)."""
+def write_locust(load_dir: Path, scenario: str, rows: list[tuple]) -> None:
+    """Write locust_<slug>_stats.csv: (name, requests, failures, median, req/s[, p50])."""
     path = load_dir / f"locust_{scenario}_stats.csv"
     with path.open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(LOCUST_COLUMNS)
-        for name, requests, failures, median, rps in rows:
+        for name, requests, failures, median, rps, *p50 in rows:
             kind = "" if name == "Aggregated" else "POST"
-            writer.writerow([kind, name, requests, failures, median, rps])
+            writer.writerow(
+                [kind, name, requests, failures, median, rps, p50[0] if p50 else median]
+            )
 
 
-def write_stats(load_dir: Path, scenario: str, cpu: dict[str, float], mem: dict[str, float]):
-    """Write docker_stats_<slug>.csv with two identical samples per container."""
+def write_stats(
+    load_dir: Path, scenario: str, cpu: dict[str, float], mem: dict[str, float]
+) -> None:
+    """Write docker_stats_<slug>.csv with two identical samples per container in ``cpu``."""
     path = load_dir / f"docker_stats_{scenario}.csv"
     with path.open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(STATS_COLUMNS)
         for second in range(2):
-            for name in ("api", "mlflow"):
+            for name, cpu_pct in cpu.items():
                 writer.writerow(
                     [
                         f"2026-11-20T00:00:0{second}Z",
                         scenario,
                         name,
-                        cpu[name],
+                        cpu_pct,
                         mem[name],
                         1024,
                         0,
@@ -62,6 +67,17 @@ def write_stats(load_dir: Path, scenario: str, cpu: dict[str, float], mem: dict[
                         10,
                     ]
                 )
+
+
+def write_benchmark(load_dir: Path, rows: list[tuple[str, int, float]]) -> Path:
+    """Write opt3_benchmark.json; each row is (path, batch size, speedup)."""
+    path = load_dir / "opt3_benchmark.json"
+    results = [
+        {"path": name, "batch_size": batch, "speedup_vs_pyfunc": speedup}
+        for name, batch, speedup in rows
+    ]
+    path.write_text(json.dumps({"results": results}))
+    return path
 
 
 @pytest.fixture
@@ -87,6 +103,7 @@ def load_dir(tmp_path: Path) -> Path:
             tmp_path, scenario, {"api": api_cpu, "mlflow": 10.0}, {"api": 300.0, "mlflow": 300.0}
         )
 
+    # 0.5 s per batch of 365, the assumption of section 4 of the report
     write_locust(
         tmp_path,
         "batch_1x365",
@@ -106,6 +123,19 @@ def load_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def summary_of(load_dir: Path, **params) -> dict:
+    """build_summary with default parameters unless overridden."""
+    return finops_calc.build_summary(load_dir, finops_calc.Params(**params))
+
+
+def opt(summary: dict, opt_id: str) -> dict:
+    """One optimization of a summary by id."""
+    return next(item for item in summary["optimizations"] if item["id"] == opt_id)
+
+
+# Reading the load outputs
+
+
 def test_predictions_per_second_weight_each_request_by_its_batch(load_dir: Path):
     throughput = finops_calc.read_throughput(load_dir / "locust_high_50u_stats.csv", "high_50u")
     assert throughput.req_per_s == pytest.approx(16.0)
@@ -117,6 +147,46 @@ def test_error_rate_comes_from_the_aggregated_row(load_dir: Path):
         load_dir / "locust_stress_120u_stats.csv", "stress_120u"
     )
     assert throughput.error_pct == pytest.approx(5.0)
+
+
+@pytest.mark.parametrize("missing", ["N/A", "--", ""])
+def test_missing_median_falls_back_to_the_p50_column(tmp_path: Path, missing: str):
+    write_locust(
+        tmp_path,
+        "batch_1x365",
+        [("/predict?batch=365", 5, 0, missing, 1.0, "480"), ("Aggregated", 5, 0, 1, 1.0)],
+    )
+    path = tmp_path / "locust_batch_1x365_stats.csv"
+    throughput = finops_calc.read_throughput(path, "batch_1x365")
+    assert throughput.median_ms_by_batch[365] == pytest.approx(480.0)
+
+
+def test_a_median_missing_everywhere_is_skipped(tmp_path: Path):
+    write_locust(
+        tmp_path,
+        "batch_1x365",
+        [("/predict?batch=365", 5, 5, "N/A", 0.0, "N/A"), ("Aggregated", 5, 5, "N/A", 0.0)],
+    )
+    path = tmp_path / "locust_batch_1x365_stats.csv"
+    throughput = finops_calc.read_throughput(path, "batch_1x365")
+    assert 365 not in throughput.median_ms_by_batch
+
+
+def test_resources_without_mlflow_count_it_as_zero(tmp_path: Path):
+    write_stats(tmp_path, "high_50u", {"api": 60.0}, {"api": 300.0})
+    resources = finops_calc.read_resources(tmp_path / "docker_stats_high_50u.csv", "high_50u")
+    assert resources.present == ("api",)
+    assert resources.cpu_pct["mlflow"] == 0.0
+    assert finops_calc.attribution(resources) == {"api": 100.0, "mlflow": 0.0}
+
+
+def test_resources_without_api_fail(tmp_path: Path):
+    write_stats(tmp_path, "high_50u", {"mlflow": 5.0}, {"mlflow": 300.0})
+    with pytest.raises(ValueError, match="api container"):
+        finops_calc.read_resources(tmp_path / "docker_stats_high_50u.csv", "high_50u")
+
+
+# Peak, credits and attribution
 
 
 def test_peak_skips_steps_with_errors_or_a_saturated_api(load_dir: Path):
@@ -132,8 +202,13 @@ def test_peak_fails_when_no_step_is_sustainable(load_dir: Path):
 
 
 def test_cpu_credits_only_charge_above_the_t3_baseline():
-    idle = finops_calc.Resources("idle", {"api": 20.0, "mlflow": 10.0}, {"api": 1, "mlflow": 1})
-    busy = finops_calc.Resources("busy", {"api": 90.0, "mlflow": 10.0}, {"api": 1, "mlflow": 1})
+    both = ("api", "mlflow")
+    idle = finops_calc.Resources(
+        "idle", {"api": 20.0, "mlflow": 10.0}, {"api": 1, "mlflow": 1}, both
+    )
+    busy = finops_calc.Resources(
+        "busy", {"api": 90.0, "mlflow": 10.0}, {"api": 1, "mlflow": 1}, both
+    )
     assert finops_calc.cpu_credit_usd_per_hour(idle) == 0.0
     # 1.0 vCPU used - 0.4 vCPU baseline = 0.6 vCPU-hour at $0.05
     assert finops_calc.cpu_credit_usd_per_hour(busy) == pytest.approx(0.03)
@@ -147,26 +222,36 @@ def test_cost_per_unit_divides_the_hourly_price_by_the_units_per_hour():
 
 def test_attribution_averages_cpu_and_memory_shares():
     resources = finops_calc.Resources(
-        "peak", {"api": 75.0, "mlflow": 25.0}, {"api": 500.0, "mlflow": 500.0}
+        "peak", {"api": 75.0, "mlflow": 25.0}, {"api": 500.0, "mlflow": 500.0}, ("api", "mlflow")
     )
     shares = finops_calc.attribution(resources)
     assert shares["api"] == pytest.approx(62.5)
     assert shares["api"] + shares["mlflow"] == pytest.approx(100.0)
 
 
-def test_real_demand_uses_the_same_hours_per_month_as_the_price(load_dir: Path):
-    summary = finops_calc.build_summary(load_dir, 20.0, None, None)
-    baseline = summary["baseline"]
-    assert baseline["real_pred_per_month"] == 365 * 730
-    expected_monthly = 0.0208 * 730 + 20 * 0.08
+# Monthly figures and contract
+
+
+def test_defaults_match_section_4_of_the_report(load_dir: Path):
+    baseline = summary_of(load_dir)["baseline"]
+    # t3.small 730 h + 10 GB gp3 = $15.98 per month
+    assert baseline["monthly_usd"] == pytest.approx(0.0208 * 730 + 10 * 0.08)
+    assert baseline["monthly_usd"] == pytest.approx(15.98, abs=0.01)
+
+
+@pytest.mark.parametrize("hours", [720.0, 730.0])
+def test_price_and_demand_use_the_same_hours_per_month(load_dir: Path, hours: float):
+    baseline = summary_of(load_dir, storage_gb=20.0, hours_per_month=hours)["baseline"]
+    expected_monthly = 0.0208 * hours + 20 * 0.08
+    assert baseline["real_pred_per_month"] == pytest.approx(365 * hours)
     assert baseline["monthly_usd"] == pytest.approx(expected_monthly)
     assert baseline["cost_per_1m_pred_real_24_7_usd"] == pytest.approx(
-        expected_monthly / (365 * 730) * 1e6
+        expected_monthly / (365 * hours) * 1e6
     )
 
 
 def test_summary_keeps_the_contract_keys(load_dir: Path):
-    summary = finops_calc.build_summary(load_dir, 20.0, None, None)
+    summary = summary_of(load_dir)
     contract = {
         "instance_type",
         "hourly_usd",
@@ -181,78 +266,156 @@ def test_summary_keeps_the_contract_keys(load_dir: Path):
         "attribution_pct",
     }
     assert contract <= summary["baseline"].keys()
-    for opt in summary["optimizations"]:
-        assert {"id", "name", "cost_per_1m_pred_usd", "monthly_usd", "savings_pct"} <= opt.keys()
+    for item in summary["optimizations"]:
+        assert {
+            "id",
+            "name",
+            "reference",
+            "cost_per_1m_pred_usd",
+            "monthly_usd",
+            "savings_pct",
+        } <= item.keys()
+        assert item["reference"] in {"peak", "real_24_7"}
+
+
+# Optimizations
 
 
 def test_batching_is_cheaper_than_one_station_per_request(load_dir: Path):
-    summary = finops_calc.build_summary(load_dir, 20.0, None, None)
-    opt1 = next(opt for opt in summary["optimizations"] if opt["id"] == "opt1")
+    opt1 = opt(summary_of(load_dir), "opt1")
     # 2 req/s x 365 = 730 pred/s against 73 pred/s with the same resources
     assert opt1["detail"]["throughput_ratio"] == pytest.approx(10.0)
     assert opt1["detail"]["savings_vs_unit_pct"] == pytest.approx(90.0)
 
 
-def test_optional_optimizations_need_their_parameters(load_dir: Path):
-    without = finops_calc.build_summary(load_dir, 20.0, None, None)
-    assert {opt["id"] for opt in without["optimizations"]} == {"opt1", "opt2"}
-
-    with_all = finops_calc.build_summary(load_dir, 20.0, 2.0, 0.00002)
-    by_id = {opt["id"]: opt for opt in with_all["optimizations"]}
-    assert by_id["opt3"]["savings_pct"] == pytest.approx(50.0)
-    # 730 hourly runs of a 0.5 s batch
-    assert by_id["opt4"]["detail"]["active_seconds_per_month"] == pytest.approx(365.0)
-    assert by_id["opt4"]["monthly_usd"] == pytest.approx(365.0 * 0.00002)
+def test_opt3_is_pending_without_a_speedup(load_dir: Path):
+    summary = summary_of(load_dir)
+    assert "opt3" not in {item["id"] for item in summary["optimizations"]}
+    assert "opt3" in summary["pending"]
 
 
-def test_main_writes_the_json_and_the_annex(load_dir: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        "sys.argv", ["finops_calc.py", "--load-dir", str(load_dir), "--opt3-speedup", "2"]
+def test_opt3_divides_the_peak_cost_by_the_speedup(load_dir: Path):
+    assert opt(summary_of(load_dir, opt3_speedup=2.0), "opt3")["savings_pct"] == pytest.approx(
+        50.0
     )
-    finops_calc.main()
-    summary = json.loads((load_dir / "finops_summary.json").read_text())
-    annex = (load_dir / "anexo_c.md").read_text()
-    assert summary["baseline"]["peak_scenario"] == "high_50u"
-    assert "### C.3 Cálculo" in annex
-    assert "Pendientes por falta de parámetro: opt4." in annex
 
 
-def write_benchmark(load_dir: Path, rows: list[tuple[str, int, float]]) -> Path:
-    """Write opt3_benchmark.json; each row is (path, batch size, speedup)."""
-    path = load_dir / "opt3_benchmark.json"
-    results = [
-        {"path": name, "batch_size": batch, "speedup_vs_pyfunc": speedup}
-        for name, batch, speedup in rows
-    ]
-    path.write_text(json.dumps({"results": results}))
-    return path
+def test_opt4_reproduces_the_lambda_bill_of_section_4(load_dir: Path):
+    opt4 = opt(summary_of(load_dir), "opt4")
+    batch = opt4["detail"]["batch"]
+    # 730 hourly runs of 0.5 s = 365 s of Lambda at 1 GB, plus 730 invocations
+    assert batch["active_seconds_per_month"] == pytest.approx(365.0)
+    assert batch["compute_usd"] == pytest.approx(365 * 0.0000166667)
+    assert batch["requests_usd"] == pytest.approx(730 * 0.2e-6)
+    assert opt4["monthly_usd"] == pytest.approx(0.0062, abs=0.0001)
+    assert opt4["reference"] == "real_24_7"
+
+
+def test_opt4_also_prices_one_station_per_request(load_dir: Path):
+    unit = opt(summary_of(load_dir), "opt4")["detail"]["unit"]
+    # 365 x 730 calls of 10 ms each
+    assert unit["requests_per_month"] == pytest.approx(365 * 730)
+    assert unit["active_seconds_per_month"] == pytest.approx(365 * 730 * 0.010)
+
+
+def test_opt4_is_pending_without_a_valid_batch_latency(load_dir: Path):
+    write_locust(
+        load_dir,
+        "batch_1x365",
+        [("/predict?batch=365", 50, 0, 0.0, 2.0, 0.0), ("Aggregated", 50, 0, 0.0, 2.0)],
+    )
+    summary = summary_of(load_dir)
+    assert "opt4" not in {item["id"] for item in summary["optimizations"]}
+    assert "opt4" in summary["pending"]
+
+
+# Inputs
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"storage_gb": -1.0},
+        {"hours_per_month": 0.0},
+        {"opt3_speedup": 0.0},
+        {"opt3_speedup": -2.0},
+        {"serverless_usd_per_second": 0.0},
+        {"serverless_usd_per_request": -0.1},
+    ],
+)
+def test_invalid_parameters_are_rejected(params: dict):
+    with pytest.raises(ValueError):
+        finops_calc.Params(**params)
+
+
+@pytest.mark.parametrize(
+    "flag", [["--opt3-speedup", "0"], ["--storage-gb", "-5"], ["--serverless-usd-per-second", "0"]]
+)
+def test_the_cli_rejects_invalid_values(
+    load_dir: Path, monkeypatch: pytest.MonkeyPatch, flag: list[str]
+):
+    monkeypatch.setattr("sys.argv", ["finops_calc.py", "--load-dir", str(load_dir), *flag])
+    with pytest.raises(SystemExit):
+        finops_calc.main()
 
 
 def test_opt3_speedup_keeps_the_worst_batch_of_the_best_path(tmp_path: Path):
     path = write_benchmark(
         tmp_path,
         [
-            ("pyfunc", 1, 1.0),
             ("booster_numpy", 1, 4.0),
             ("booster_numpy", 365, 1.5),
-            ("booster_df", 1, 2.0),
-            ("booster_df", 365, 1.8),
+            ("pyfunc_dataframe", 1, 1.0),
+            ("booster_numpy_1thread", 1, 2.0),
+            ("booster_numpy_1thread", 365, 1.8),
         ],
     )
-    # booster_numpy is worst at 1.5, booster_df at 1.8: the conservative pick is 1.8
+    # The pyfunc reference is skipped by name, wherever it appears in the file
     assert finops_calc.read_opt3_speedup(path) == pytest.approx(1.8)
+
+
+def test_opt3_speedup_ignores_non_positive_values(tmp_path: Path):
+    path = write_benchmark(tmp_path, [("pyfunc_dataframe", 1, 1.0), ("booster_numpy", 1, 0.0)])
+    assert finops_calc.read_opt3_speedup(path) is None
 
 
 def test_opt3_speedup_is_none_without_a_benchmark(tmp_path: Path):
     assert finops_calc.read_opt3_speedup(tmp_path / "opt3_benchmark.json") is None
 
 
+# Command line and annex
+
+
 def test_main_reads_the_opt3_speedup_from_the_benchmark(
     load_dir: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    write_benchmark(load_dir, [("pyfunc", 1, 1.0), ("booster_numpy", 1, 4.0)])
+    write_benchmark(load_dir, [("pyfunc_dataframe", 1, 1.0), ("booster_numpy", 1, 4.0)])
     monkeypatch.setattr("sys.argv", ["finops_calc.py", "--load-dir", str(load_dir)])
     finops_calc.main()
     summary = json.loads((load_dir / "finops_summary.json").read_text())
-    opt3 = next(opt for opt in summary["optimizations"] if opt["id"] == "opt3")
-    assert opt3["savings_pct"] == pytest.approx(75.0)
+    assert opt(summary, "opt3")["savings_pct"] == pytest.approx(75.0)
+
+
+def test_an_explicit_opt3_speedup_wins_over_the_benchmark(
+    load_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    write_benchmark(load_dir, [("pyfunc_dataframe", 1, 1.0), ("booster_numpy", 1, 4.0)])
+    monkeypatch.setattr(
+        "sys.argv", ["finops_calc.py", "--load-dir", str(load_dir), "--opt3-speedup", "2"]
+    )
+    finops_calc.main()
+    summary = json.loads((load_dir / "finops_summary.json").read_text())
+    assert opt(summary, "opt3")["savings_pct"] == pytest.approx(50.0)
+
+
+def test_main_writes_the_json_and_an_annex_with_both_references(
+    load_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("sys.argv", ["finops_calc.py", "--load-dir", str(load_dir)])
+    finops_calc.main()
+    summary = json.loads((load_dir / "finops_summary.json").read_text())
+    annex = (load_dir / "anexo_c.md").read_text()
+    assert summary["baseline"]["peak_scenario"] == "high_50u"
+    assert "### C.4 Optimizaciones contra el pico sostenible" in annex
+    assert "### C.5 Optimizaciones contra la operación real 24/7" in annex
+    assert "Pendiente opt3" in annex
