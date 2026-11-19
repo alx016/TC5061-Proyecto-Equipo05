@@ -79,6 +79,9 @@ api = [
 monitoring = [
     "evidently==0.7.23",
 ]
+perf = [
+    "locust==2.47.0",
+]
 
 [tool.uv]
 default-groups = ["dev", "notebooks", "docs", "api", "monitoring"]
