@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch or PR cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.7" # same uv as the Containerfile
+
+jobs:
+  lint-and-security:
+    name: Lint and security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-suffix: lint
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint (ruff)
+        run: make lint
+
+      - name: Security (bandit, pip-audit, detect-secrets)
+        run: make security
+
+  test-matrix:
+    name: Tests (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: fast
+            marker: "not slow"
+          - suite: slow
+            marker: "slow"
+    steps:
+      - uses: actions/checkout@v7
+
+      # The cache also keeps the DeepChecks environment that scripts/data_checks.py builds
+      # with Python 3.12, so tests/test_data_checks.py does not reinstall it on every run.
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-python: true
+          cache-suffix: tests-${{ matrix.suite }}
+          cache-dependency-glob: |
+            uv.lock
+            scripts/data_checks.py
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Without the bundle, test_real_export_serves_smoke_request is skipped.
+      - name: Restore champion bundle
+        run: make prepare-model
+
+      - name: Run pytest
+        run: uv run pytest tests -m "${{ matrix.marker }}" -q -rs | tee pytest.log
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo "### Tests (${{ matrix.suite }})"
+            echo
+            echo '```'
+            tail -n 1 pytest.log 2>/dev/null || echo "pytest did not run"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
