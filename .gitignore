@@ -222,6 +222,7 @@ models/p2-riesgo/
 # Regenerable check outputs; keep the scripts, the policies and the findings write-ups
 /reports/deepchecks/*.html
 /reports/deepchecks/*.json
+/reports/load/*.html
 /reports/security/detect-secrets.json
 
 /reports/verification/
