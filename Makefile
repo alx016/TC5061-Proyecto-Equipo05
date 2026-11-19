@@ -182,6 +182,21 @@ compose-smoke:
 	@echo
 	@$(MAKE) --no-print-directory smoke API_PORT=$(API_PORT)
 
+## Run the official load scenarios against the API, with docker stats and the Opt 3 benchmark
+LOAD_ARGS ?= --with-benchmark
+.PHONY: load-test
+load-test:
+	@test -f models/p2-riesgo/MLmodel || $(MAKE) --no-print-directory prepare-model
+	uv run --group perf python scripts/collect_load_metrics.py run \
+		--host http://127.0.0.1:$(API_PORT) $(LOAD_ARGS)
+
+## Render anexo_b.md and the FinOps summary (finops_summary.json, anexo_c.md) from reports/load/
+FINOPS_ARGS ?=
+.PHONY: load-report
+load-report:
+	uv run python scripts/collect_load_metrics.py report
+	uv run python scripts/finops_calc.py $(FINOPS_ARGS)
+
 ## Build the 2025 P2 feature table (current and evaluation splits)
 .PHONY: features-current
 features-current:
