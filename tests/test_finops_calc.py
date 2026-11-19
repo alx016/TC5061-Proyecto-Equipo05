@@ -215,3 +215,44 @@ def test_main_writes_the_json_and_the_annex(load_dir: Path, monkeypatch: pytest.
     assert summary["baseline"]["peak_scenario"] == "high_50u"
     assert "### C.3 Cálculo" in annex
     assert "Pendientes por falta de parámetro: opt4." in annex
+
+
+def write_benchmark(load_dir: Path, rows: list[tuple[str, int, float]]) -> Path:
+    """Write opt3_benchmark.json; each row is (path, batch size, speedup)."""
+    path = load_dir / "opt3_benchmark.json"
+    results = [
+        {"path": name, "batch_size": batch, "speedup_vs_pyfunc": speedup}
+        for name, batch, speedup in rows
+    ]
+    path.write_text(json.dumps({"results": results}))
+    return path
+
+
+def test_opt3_speedup_keeps_the_worst_batch_of_the_best_path(tmp_path: Path):
+    path = write_benchmark(
+        tmp_path,
+        [
+            ("pyfunc", 1, 1.0),
+            ("booster_numpy", 1, 4.0),
+            ("booster_numpy", 365, 1.5),
+            ("booster_df", 1, 2.0),
+            ("booster_df", 365, 1.8),
+        ],
+    )
+    # booster_numpy is worst at 1.5, booster_df at 1.8: the conservative pick is 1.8
+    assert finops_calc.read_opt3_speedup(path) == pytest.approx(1.8)
+
+
+def test_opt3_speedup_is_none_without_a_benchmark(tmp_path: Path):
+    assert finops_calc.read_opt3_speedup(tmp_path / "opt3_benchmark.json") is None
+
+
+def test_main_reads_the_opt3_speedup_from_the_benchmark(
+    load_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    write_benchmark(load_dir, [("pyfunc", 1, 1.0), ("booster_numpy", 1, 4.0)])
+    monkeypatch.setattr("sys.argv", ["finops_calc.py", "--load-dir", str(load_dir)])
+    finops_calc.main()
+    summary = json.loads((load_dir / "finops_summary.json").read_text())
+    opt3 = next(opt for opt in summary["optimizations"] if opt["id"] == "opt3")
+    assert opt3["savings_pct"] == pytest.approx(75.0)

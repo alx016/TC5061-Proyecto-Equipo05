@@ -11,7 +11,8 @@ Usage:
     uv run python scripts/finops_calc.py --storage-gb 20 --opt3-speedup 2.5
     uv run python scripts/finops_calc.py --serverless-usd-per-second 0.000024
 
-Prices default to the base parameters agreed in WP-0 (section 4 of
+Opt 3 reads its speedup from ``opt3_benchmark.json`` when that file exists. Prices default
+to the base parameters agreed in WP-0 (section 4 of
 reports/TC5061_Operacion_FinOps_Equipo05.md).
 """
 
@@ -176,6 +177,23 @@ def attribution(resources: Resources) -> dict[str, float]:
         mem_share = resources.mem_mib[name] / mem_total if mem_total else 0.5
         shares[name] = 100 * (cpu_share + mem_share) / 2
     return shares
+
+
+def read_opt3_speedup(path: Path) -> float | None:
+    """Conservative speedup of the WP-4b microbenchmark, or None when it was not run.
+
+    Each alternative path keeps its worst speedup across batch sizes; the best of those is
+    used, so the saving holds for every batch size the API serves.
+    """
+    if not path.exists():
+        return None
+    worst_by_path: dict[str, float] = {}
+    for row in json.loads(path.read_text())["results"]:
+        speedup = float(row["speedup_vs_pyfunc"])
+        worst_by_path[row["path"]] = min(speedup, worst_by_path.get(row["path"], speedup))
+    # The first path is the pyfunc reference itself (speedup 1.0)
+    alternatives = list(worst_by_path.values())[1:]
+    return max(alternatives) if alternatives else None
 
 
 def savings_pct(reference: float, value: float) -> float:
@@ -410,7 +428,10 @@ def main() -> None:
     parser.add_argument("--load-dir", type=Path, default=DEFAULT_LOAD_DIR)
     parser.add_argument("--storage-gb", type=float, default=20.0)
     parser.add_argument(
-        "--opt3-speedup", type=float, default=None, help="Speedup of the WP-4b microbenchmark"
+        "--opt3-speedup",
+        type=float,
+        default=None,
+        help="Speedup for Opt 3; by default it is read from opt3_benchmark.json (WP-4b)",
     )
     parser.add_argument(
         "--serverless-usd-per-second",
@@ -420,8 +441,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    opt3_speedup = args.opt3_speedup or read_opt3_speedup(args.load_dir / "opt3_benchmark.json")
     summary = build_summary(
-        args.load_dir, args.storage_gb, args.opt3_speedup, args.serverless_usd_per_second
+        args.load_dir, args.storage_gb, opt3_speedup, args.serverless_usd_per_second
     )
     (args.load_dir / "finops_summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
