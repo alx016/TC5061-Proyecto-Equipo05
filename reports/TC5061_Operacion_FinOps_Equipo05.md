@@ -1,3 +1,15 @@
+<style>
+@page {
+  size: letter;
+  margin: 2.54cm;
+}
+body {
+  font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
+  font-size: 11pt;
+  line-height: 1.15;
+}
+</style>
+
 # Operación, pruebas de carga y FinOps del modelo P2 (Entrega 6)
 
 - **Proyecto:** TC5061 MLOps, Equipo 05. Datos abiertos de MiBici.
