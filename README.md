@@ -3,6 +3,9 @@
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
+<a target="_blank" href="https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/workflows/ci.yml">
+    <img src="https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/workflows/ci.yml/badge.svg" alt="CI" />
+</a>
 
 ## Propósito
 
@@ -559,6 +562,81 @@ for name, fa in a["features"].items():
 Las dos ejecuciones deben usar el mismo bundle del champion (`model.pkl` con SHA-256
 `6dbe6614…`): con otro bundle cambian el drift de la predicción y las variables más importantes.
 Los periodos reportados son las ventanas configuradas, no los extremos de la muestra.
+
+## Microservicios, CI/CD y FinOps (Entrega 6)
+
+La Entrega 6 implementa la orquestación multicontenedor mediante Docker Compose, automatiza la integración y despliegue continuo con GitHub Actions, ejecuta pruebas de carga pertinentes a la red de MiBici y evalúa la economía operativa (FinOps) de la solución. El reporte completo está en [`reports/TC5061_Operacion_FinOps_Equipo05.md`](reports/TC5061_Operacion_FinOps_Equipo05.md).
+
+### Orquestación con Docker Compose
+
+El archivo `docker-compose.yml` orquesta dos servicios en red bridge (`mibici-net`) con límites de cómputo y healthchecks activos:
+
+1. **`mlflow`:** Servidor de tracking y Model Registry (`Containerfile.mlflow`, puerto `5001`, límite de memoria de `512m` y `0.5` CPU). Persiste sus datos y artefactos en el volumen con nombre `mlflow_data`.
+2. **`api`:** Servicio REST de inferencia de P2 con FastAPI (`Containerfile`, puerto `8000`, límite de memoria de `1024m` y `1.0` CPU). Depende del arranque saludable de MLflow (`condition: service_healthy`).
+
+La construcción es autosuficiente desde un clon limpio: si la carpeta `models/p2-riesgo/` no existe localmente, la construcción de `Containerfile` extrae automáticamente el bundle versionado `models/p2-champion-v3.zip`.
+
+Comandos de ciclo de vida con Make:
+
+```bash
+make up               # Construye y arranca el stack en segundo plano (docker compose up -d --build)
+make compose-smoke    # Verifica MLflow /health, API /model-info y ejecuta la prueba de humo POST /predict
+make logs             # Sigue los registros en tiempo real (docker compose logs -f --tail=100)
+make down             # Detiene y remueve los contenedores conservando el volumen mlflow_data
+```
+
+Para verificar manualmente los endpoints del stack en ejecución:
+
+```bash
+# Verificación de liveness en MLflow Tracking Server
+curl -fsS http://localhost:5001/health
+
+# Verificación de metadatos de linaje y modelo servido en la API
+curl -fsS http://localhost:8000/model-info
+
+# Inferencia de prueba con la carga útil de ejemplo
+curl -fsS -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @scripts/smoke_request.json
+```
+
+El stack es compatible con Docker Compose en Linux, Docker Desktop en macOS/Windows y Podman Compose (`podman-compose`).
+
+### Configuración y variables de entorno (`.env.example`)
+
+La plantilla `.env.example` documenta las variables requeridas para la ejecución local y en contenedores:
+
+```bash
+cp .env.example .env
+```
+
+Variables disponibles:
+
+| Variable | Valor por defecto | Descripción |
+|:---|:---|:---|
+| `MLFLOW_TRACKING_URI` | `http://127.0.0.1:5001` | URI del servidor de tracking para la CLI del host (`mlflow run`). Dentro de `docker-compose.yml`, este valor se fija internamente en `http://mlflow:5001` para que las variables locales del host no interfieran con la resolución DNS de la red interna del contenedor. |
+| `MLFLOW_EXPERIMENT_NAME` | `mibici-equipo05` | Nombre del experimento en MLflow donde se registran las corridas. |
+| `MODEL_URI` | `/app/models/p2-riesgo` | Origen del modelo que carga la API. Admite dos modos operativos (ver tabla siguiente). |
+| `API_PORT` | `8000` | Puerto expuesto en el host para la API de inferencia. |
+| `MLFLOW_PORT` | `5001` | Puerto expuesto en el host para el servidor de MLflow. Se utiliza `5001` para evitar colisiones con el servicio AirPlay en macOS (puerto 5000). |
+
+#### Modos de resolución del modelo (`MODEL_URI`)
+
+La API soporta dos estrategias de carga según el escenario de operación:
+
+| Modo | Configuración de `MODEL_URI` | Comportamiento |
+|:---|:---|:---|
+| **Bundle inmutable (default)** | `/app/models/p2-riesgo` | Carga el modelo empaquetado directamente en la imagen de contenedor. Permite que la API arranque y responda inmediatamente en clon limpio sin requerir conexión a un servidor de MLflow activo. |
+| **Live Model Registry** | `models:/mibici-equipo05-p2-riesgo@champion` | Descarga y resuelve dinámicamente el modelo registrado con el alias `champion` desde el servicio `mlflow:5001` en tiempo de ejecución. Requiere que el modelo esté registrado en el servidor de tracking. |
+
+### Pipeline de CI/CD (GitHub Actions)
+
+El flujo de trabajo en [`.github/workflows/ci.yml`](.github/workflows/ci.yml) se ejecuta automáticamente en cada `push` o `pull_request` hacia la rama `main`:
+
+1. **`lint-and-security`:** Ejecuta `make lint` con Ruff y `make security` con Bandit, Pip-Audit y Detect-Secrets.
+2. **`test-matrix`:** Matriz de pruebas paralelas de `pytest` dividida en suite rápida (`not slow`) y suite completa (`slow` con DeepChecks en Python 3.12 y caché de `uv`). Restaura previamente el bundle del champion con `make prepare-model`.
+3. **`compose-and-smoke`:** Construye las imágenes mediante Buildx con caché de capas GitHub Actions (`type=gha`), arranca el stack con `docker compose up -d --no-build --wait`, valida la respuesta de `/health`, `/model-info` y `/predict` con `make compose-smoke`, y verifica que el modelo servido sea `mibici-equipo05-p2-riesgo` en versión `3`.
+4. **`publish-image`:** Tras aprobar las etapas anteriores en eventos de `push` a `main`, publica la imagen final en GitHub Container Registry (`ghcr.io/alx016/mibici-p2-api:latest` y `ghcr.io/alx016/mibici-p2-api:<sha>`).
 
 ## Flujo de trabajo con Git
 
