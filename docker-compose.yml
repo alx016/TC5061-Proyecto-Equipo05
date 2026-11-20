@@ -1,0 +1,61 @@
+# MiBici P2: MLflow (Tracking Server + Model Registry) and the FastAPI service.
+# One command from a clean clone: docker compose up -d --build
+name: mibici
+
+services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: Containerfile.mlflow
+    image: mibici-mlflow:local
+    container_name: mibici-mlflow
+    ports:
+      - "${MLFLOW_PORT:-5001}:5001"
+    volumes:
+      - mlflow_data:/mlflow
+    networks:
+      - mibici-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: mibici-p2-api:local
+    container_name: mibici-api
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # Default: the immutable champion bundle inside the image
+      MODEL_URI: ${MODEL_URI:-/app/models/p2-riesgo}
+      # Fixed on purpose: a local .env with 127.0.0.1 must not break the internal DNS
+      MLFLOW_TRACKING_URI: http://mlflow:5001
+    networks:
+      - mibici-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    mem_limit: 1024m
+    cpus: 1.0
+    restart: unless-stopped
+
+networks:
+  mibici-net:
+    driver: bridge
+
+volumes:
+  mlflow_data:
