@@ -56,52 +56,39 @@ inferencia actual y optimizado, y la recomendación principal. Se escribe al fin
 
 ## 3. Pruebas de carga con Locust y uso de recursos
 
-<!-- Oscar (WP-4d). ~1.2 pág.
-- Escenario y por qué es pertinente para MiBici (365 estaciones, lotes de 1, 20 y 365).
-- Escalones: baseline, 10, 50 y 120 usuarios; comparación de batching.
-- Figura 1: RPS y usuarios. Figura 2: latencia p50/p95/p99 y tasa de error.
-- Figura 3: CPU y memoria por contenedor (docker stats).
-- Interpretación: punto de saturación, cuellos de botella y áreas de mejora.
-- Tablas completas en el Anexo B. -->
+El modelo P2 predice por hora las **365 estaciones activas** de MiBici (`POST /predict` admite de 1 a 500 instancias). En `load_tests/locustfile.py`, el escenario **`mixed`** (`wait_time` de `0.2` a `1.0 s`) combina consultas unitarias (`@task(5)`, `batch=1`), zonales (`@task(3)`, `batch=20`), de red completa (`@task(1)`, `batch=365`) y lecturas `/model-info` y `/health` (`@task(1)`), validando HTTP `200` y longitud exacta de `predictions`. Además, **`batch_1x365`** y **`batch_365x1`** (1 usuario, sin pausa) contrastan el envío por lote completo frente a peticiones individuales. La corrida oficial en Linux Docker (`mibici-api`: `1.0` vCPU, `1,024 MiB`; `mibici-mlflow`: `0.5` vCPU, `512 MiB`) con `docker stats` cada `1.5 s` (`scripts/collect_load_metrics.py`) registró **0 fallos (0.00%)** y `OOMKilled=false` en los 6 escenarios (**Anexo B**).
+
+![Figura 1. Throughput (RPS) y usuarios concurrentes a lo largo de la corrida oficial y por endpoint](figures/entrega6/01_rps_y_usuarios_vs_tiempo.png)
+
+**Figura 1.** Throughput (RPS) y usuarios concurrentes por escalón (arriba) y endpoint (abajo). En carga mixta, `nominal_10u` sostiene `14.26 req/s` (`583.8 pred/s`), `high_50u` alcanza el techo HTTP de `23.82 req/s` (`917.4 pred/s`) y `stress_120u` cae a `20.95 req/s` (`830.0 pred/s`); por lotes, `batch_1x365` logra `11.94 req/s` (`4,358.1 pred/s`) frente a `55.48 req/s` (`55.5 pred/s`) en `batch_365x1`.
+
+![Figura 2. Percentiles de latencia p50, p95 y p99, desglose p95 por tamaño de lote y tasa de error](figures/entrega6/02_latencia_percentiles.png)
+
+**Figura 2.** Latencias (`p50`/`p95`/`p99`), `p95` por tamaño de lote y tasa de error (`0.0%` en todos los casos). En `nominal_10u` la mediana es `38 ms` (`p95=320 ms`, `p99=810 ms`; `batch=365`: `p50=120 ms`, `p95=710 ms`), pero al saturar CPU sube a `p50=1,300 ms` (`p95=2,800 ms`) en `high_50u` y a `p50=4,600 ms` (`p95=7,700 ms`, `p99=8,300 ms`) en `stress_120u`.
+
+![Figura 3. Consumo de CPU y memoria RAM por contenedor según docker stats](figures/entrega6/03_recursos_contenedores.png)
+
+**Figura 3.** CPU y RAM observadas en `docker stats`. El cuello es puramente de cómputo en `api` (`1.8%` en `baseline`, `47.8%` en `nominal_10u`, `99.2%` en `high_50u`, `100.5%` en `stress_120u`), mientras su RAM sube apenas de `241.3 MiB` a `293.9 MiB` máx. (`28.7%` de `1,024 MiB`) y `mlflow` permanece casi inactivo (`3.1%–4.0%` CPU, `~374 MiB` / `73%` de `512 MiB`).
+
+**Interpretación y áreas de mejora.** La rodilla de saturación ocurre entre `10` y `50` usuarios: `nominal_10u` cumple `CPU <= 80%` con `0%` de error, pero con `50` usuarios la única vCPU de `api` satura y con `120` usuarios la mediana crece `3.5x` (`4.6 s`) y los RPS caen `12%`. En `tc5061_proyecto_equipo5/api/main.py` y `model.py`, `predict_risk` es síncrona (hilos AnyIO bajo 1 worker Uvicorn en `Containerfile`) y en cada llamada reconstruye un `pd.DataFrame` con `astype(SIGNATURE_DTYPES)` para `mlflow.pyfunc`, provocando contención del GIL y competencia de hilos OpenMP en LightGBM. Cuatro mejoras atacan estos cuellos: (1) agrupar en lotes (`batch_1x365` multiplica `78.56x` las `pred/s` frente a `batch_365x1`); (2) retirar `mlflow` en inferencia (`--no-deps api`, liberando `~374 MiB` y `0.5` vCPU); (3) invocar el `Booster` con `numpy` sin DataFrame (`opt3_benchmark.json`: `20.37x` en `batch=1`, `4.31x` en `batch=20` y `1.61x` en `batch=365` con `max_prob_diff=0.0`; 1 hilo acelera `batch=1` a `54.91x` pero degrada `batch=365` a `0.45x`); y (4) escalar workers Uvicorn con vCPUs.
 
 ## 4. Análisis FinOps
 
-<!-- Oscar (WP-4d), con la comparativa de precios de Emilio (WP-3b). ~1.3 pág.
-- Instancia de referencia y precios (parámetros de la tabla de abajo).
-- Costo por petición y por predicción, en tres regímenes: capacidad sostenible, demanda real
-  24/7 de MiBici y atribución por servicio (api vs mlflow).
-- Figura 4: costo por 1M de predicciones, línea base vs optimizaciones.
-- Optimizaciones cuantificadas: batching, MLflow fuera del camino de inferencia, concurrencia y
-  sobrecarga por petición, scale-to-zero.
-- Memoria de cálculo en el Anexo C. -->
+**Parámetros base y armonización mensual (730 h/mes).** Siguiendo `scripts/finops_calc.py` y la facturación AWS de `730 h/mes` (`2,628,000 s/mes`), la instancia de referencia AWS EC2 `t3.small` (`us-east-1`, 2 vCPU, 2 GiB) cuesta `$0.0208/h` (`$15.18/mes`) más `10 GB` EBS `gp3` a `$0.08/GB-mes` (`$0.80/mes`), sumando **`$15.98 USD/mes`** (`$16.78/mes` con `20 GB`), más `$0.05/vCPU-h` por *burst* sobre la línea base del `20%` (`0.4` vCPU; Amazon Web Services, 2026a, 2026b, 2026c). La demanda real armonizada de MiBici es `365 estaciones × 730 h/mes =` **`266,450 predicciones/mes`** (`~8,760/día`, **Anexo C**).
 
-**Parámetros base acordados (WP-0).** Los usan `scripts/finops_calc.py` y esta sección.
+**Tres regímenes de costo (`finops_summary.json`).** (1) **Pico sostenible (`nominal_10u`):** mayor rendimiento con error `<= 1%` y CPU `api <= 80%` (`14.26 req/s`, `583.8 pred/s`, `0.5125` vCPU; `+$0.005627/h` de créditos = `$0.02643/h`), equivalente a **`$5.15×10⁻⁷/req`**, **`$1.26×10⁻⁸/pred`** y **`$0.01258 USD/1M pred`**. (2) **Operación real 24/7:** pagar `$15.98/mes` para `266,450 pred/mes` equivale a **`$59.99 USD/1M pred`** (`4,769x` el costo pico, al quedar ociosa `99.84%` del mes en `batch=1` y `99.998%` en `batch=365`). (3) **Atribución por servicio en el pico:** promediando CPU y RAM en `nominal_10u`, **`api` explica 66.5%** (`$10.63/mes`) y **`mlflow` 33.5%** (`$5.35/mes`).
 
-| Parámetro | Valor | Fuente |
-|:---|:---|:---|
-| Instancia de referencia | AWS EC2 `t3.small` (2 vCPU, 2 GiB, solo EBS, red de hasta 5 Gbps), Linux, `us-east-1` | Amazon Web Services (2026a) |
-| Tarifa bajo demanda | $0.0208 USD/h | Amazon Web Services (2026a) |
-| Almacenamiento | EBS `gp3`, $0.08 USD/GB-mes | Amazon Web Services (2026b) |
-| Horas por mes | 730 h | Convención de AWS |
-| Demanda real de MiBici | 365 estaciones × 24 h = 8,760 predicciones/día (262,800/mes) | Entrega 5 |
-| Créditos de CPU (`t3` unlimited) | $0.05 USD por vCPU-hora sobre la línea base (20% por vCPU) | Amazon Web Services (2026c) |
+![Figura 4. Comparativa FinOps de costo por 1M de predicciones frente a la línea base correspondiente](figures/entrega6/04_finops_comparativa_optimizaciones.png)
 
-<!-- Las instancias t3 son burstable: sostener 80% de CPU consume créditos. El costo a capacidad
-sostenible debe sumar ese cargo o compararse contra una instancia sin burst. Las especificaciones
-y tarifa de t3.small, la tarifa de EBS gp3 y el cargo por créditos de CPU ($0.05 USD por vCPU-hora
-sobre la línea base del 20%, Amazon Web Services 2026c) se verificaron el 18 de noviembre de 2026. -->
+**Figura 4.** Costo por 1M de predicciones frente a su línea base: arriba, optimizaciones de capacidad (pico, `$0.0126`); abajo, *scale-to-zero* sobre demanda real 24/7 (`$59.99`).
 
-**Comparativa de precios serverless y ejecución bajo demanda (Optimización 4: scale-to-zero).** Tarifas públicas sin nivel gratuito verificadas el 18 de noviembre de 2026.
+**Optimizaciones cuantificadas y comparativa *scale-to-zero*.** Frente al pico (`$0.01258/1M`), **Opt 1 (`batch_1x365`)** alcanza `4,358.1 pred/s` y baja el costo a **`$0.00315/1M`** (`74.95%` de ahorro vs. pico mixto; `98.65%` vs. unitario `$0.2332/1M`); **Opt 2 (`--no-deps api`)** elimina el `33.49%` atribuido a `mlflow` (`$0.008364/1M`, `$10.63/mes`); y **Opt 3 (`Booster` + `numpy`)**, con el speedup conservador de `batch=365` (`1.61x`), lo reduce a **`$0.007811/1M`** (`37.89%`). Frente al gasto real 24/7 (`$15.98/mes`), **Opt 4 (*scale-to-zero*)** factura solo el tiempo activo, logrando `< $0.01/mes` (`>99.9%` ahorro) en lote horario tanto con `p50` medido (`78 ms` lote, `16 ms` unitario) como con margen conservador (`0.5 s` / `50 ms`):
 
-| Plataforma y configuración | Tarifa pública de cómputo y peticiones | Lote horario consolidado (batch=365: 730 req/mes, ~0.5 s/req = 365 s/mes) | Peticiones unitarias (batch=1: 262,800 req/mes, ~50 ms/req = 13,140 s/mes) | Ahorro mensual vs. t3.small 24/7 ($15.98 USD/mes) | Fecha de consulta y fuente |
-|:---|:---|:---|:---|:---|:---|
-| AWS EC2 `t3.small` 24/7 (`us-east-1`, 2 vCPU, 2 GiB + 10 GB EBS `gp3`; 20 GB EBS = $16.78 USD/mes) | $0.0208 USD/h ($15.18 USD/mes en 730 h) + $0.08 USD/GB-mes EBS ($0.80 USD/mes por 10 GB; $1.60 USD/mes por 20 GB) + $0.05 USD/vCPU-h créditos `t3` sobre línea base del 20% | $15.98 USD/mes (99.99% tiempo ocioso: 365 s activos de 2,628,000 s) | $15.98 USD/mes (99.50% tiempo ocioso: 13,140 s activos de 2,628,000 s) | Línea base (0%) | 18 de noviembre de 2026; Amazon Web Services (2026a, 2026b, 2026c) |
-| AWS Lambda (`us-east-1`, x86, 1024 MB / 1 GB RAM) | $0.0000166667 USD/GB-s + $0.20 USD por 1,000,000 de invocaciones | $0.0062 USD/mes ($0.00608 USD cómputo + $0.00015 USD invocaciones; < $0.02 USD/mes) | $0.2716 USD/mes ($0.2190 USD cómputo + $0.0526 USD invocaciones; < $0.45 USD/mes) | 99.96% (lote) / 98.30% (unitario) | 18 de noviembre de 2026; Amazon Web Services (2026d) |
-| Google Cloud Run (`us-central1`, Tier 1, *scale-to-zero* facturado por petición, 1 vCPU, 1 GiB RAM) | $0.00002400 USD/vCPU-s + $0.00000250 USD/GiB-s ($0.00002650 USD/s activo) + $0.40 USD por 1,000,000 de peticiones | $0.0100 USD/mes ($0.00967 USD cómputo + $0.00029 USD peticiones; < $0.02 USD/mes) | $0.4494 USD/mes a 49.5 ms ($0.4533 USD/mes a 50 ms: $0.3482 USD cómputo + $0.1051 USD peticiones; ~$0.38–$0.45 USD/mes en el rango 40–50 ms) | 99.94% (lote) / 97.16%–97.60% (unitario) | 18 de noviembre de 2026; Google Cloud (2026) |
-
-Una instancia dedicada AWS EC2 `t3.small` encendida las 24 horas del día durante 730 horas al mes factura 2,628,000 segundos continuos por un costo fijo de $15.98 USD/mes con 10 GB de almacenamiento EBS `gp3`, o $16.78 USD/mes con 20 GB de EBS `gp3` (Amazon Web Services, 2026a, 2026b). Sin embargo, la operación real de MiBici para el modelo P2 requiere predecir 365 estaciones activas cada hora, lo que equivale a 8,760 predicciones diarias y 262,800 predicciones mensuales. Bajo peticiones unitarias (`batch=1`, 262,800 invocaciones mensuales a ~50 ms por petición), el servicio `api` consume 13,140 segundos de cómputo efectivo al mes y deja ocioso el 99.50% del tiempo facturado. Al consolidar la inferencia en un lote horario por corrida (`batch=365`, 730 peticiones mensuales a ~0.5 s por lote), el tiempo activo cae a 365 segundos al mes y el desperdicio por capacidad ociosa alcanza el 99.99% (~99.9% de la ventana mensual).
-
-La combinación del lote horario consolidado (Optimización 1, `batch=365`) con el desacoplamiento de MLflow del camino crítico de inferencia mediante `--no-deps api` y el paquete inmutable `models/p2-champion-v3.zip` (Optimización 2) convierte al contenedor `api` en un servicio sin estado apto para ejecución bajo demanda con reducción a cero instancias (*scale-to-zero*, Optimización 4). Con el patrón por lote horario (730 invocaciones y 365 segundos de cómputo al mes), el gasto mensual baja a $0.0062 USD/mes en AWS Lambda (`us-east-1`, 1 GB RAM) y a $0.0100 USD/mes en Google Cloud Run (`us-central1`, 1 vCPU y 1 GiB RAM facturados por petición), y mantiene el costo por debajo de $0.02 USD/mes con un ahorro superior al 99.9% frente a la instancia `t3.small` dedicada (Amazon Web Services, 2026d; Google Cloud, 2026). Incluso sin agrupar peticiones (`batch=1`, 262,800 peticiones y 13,140 segundos al mes), un despliegue *serverless* factura $0.2716 USD/mes en AWS Lambda y entre $0.4494 y $0.4533 USD/mes en Google Cloud Run (< $0.45 USD/mes), lo que representa una reducción del 97.16% al 98.30% respecto al esquema 24/7.
+| Plataforma (`730 h/mes`, `266,450 pred/mes`) | Tarifa pública (18 nov 2026) | Lote (`730 req/mes`, USD/mes): `78 ms` / `0.5 s` | Unitario (`266,450 req/mes`, USD/mes): `16 ms` / `50 ms` | Ahorro vs. `t3.small` |
+|:---|:---|---:|---:|---:|
+| EC2 `t3.small` (`us-east-1`, `10 GB gp3`) | `$0.0208/h` + `$0.80/mes` + burst | `$15.98` (`99.998%` ocioso) | `$15.98` (`99.84%` ocioso) | Base (`0%`) |
+| AWS Lambda (`us-east-1`, `1 GB` x86) | `$1.667e-5/GB-s` + `$0.20/1M` inv. (Amazon Web Services, 2026d) | **`$0.0011`** / `$0.0062` | **`$0.1243`** / `$0.2753` | **`99.99%`** (`99.96%`) lote; **`99.22%`** (`98.28%`) unit. |
+| Cloud Run (`us-central1`, `1 vCPU/1 GiB`) | `$2.65e-5/s` + `$0.40/1M` req. (Google Cloud, 2026) | **`$0.0018`** / `$0.0100` | **`$0.2196`** / `$0.4596` | **`99.99%`** (`99.94%`) lote; **`98.63%`** (`97.12%`) unit. |
 
 ## 5. Conclusiones
 
@@ -112,7 +99,7 @@ siguiente paso. -->
 - **Orquestación reproducible en un comando y respaldo por paquete inmutable.** `docker-compose.yml` despliega `mibici-api` (`1.0 vCPU`, `1024 MiB`) y `mibici-mlflow` (`0.5 vCPU`, `512 MiB`, MLflow `3.17.2` con `--allowed-hosts` y volumen `mlflow_data`) en la red `mibici-net` sincronizados mediante `depends_on` con `condition: service_healthy`. El `Containerfile` desempaqueta automáticamente `models/p2-champion-v3.zip` cuando falta el directorio local, lo que garantiza el arranque con `docker compose up -d --build` desde un clon limpio y permite alternar sin cambios de código hacia la resolución en vivo del Registry (`models:/mibici-equipo05-p2-riesgo@champion`).
 - **Gobernanza automatizada de CI/CD y seguridad en GitHub Actions.** El flujo `.github/workflows/ci.yml` bloquea regresiones mediante compuertas estáticas y de seguridad (`ruff`, `bandit`, `pip-audit` y `detect-secrets`), ejecuta en paralelo la matriz de pruebas `fast` y `slow` con caché de `uv` (incluyendo DeepChecks en Python 3.12 y el contrato del paquete `v3` con `make prepare-model`), valida la pila completa con pruebas de humo en Docker Compose (`/health`, `/model-info` y `/predict`) y publica imágenes verificadas en GHCR (`ghcr.io/alx016/mibici-p2-api`).
 - **Resiliencia bajo carga de 365 estaciones y perfilado de concurrencia en Locust.** Las pruebas de carga (`load_tests/locustfile.py`) y la telemetría de `docker stats` (`scripts/collect_load_metrics.py`) sobre escalones de 10, 50 y 120 usuarios concurrentes demuestran que agrupar las 365 estaciones activas de MiBici en lotes (`batch=20` y `batch=365` frente a `batch=1`) multiplica el rendimiento efectivo en predicciones por segundo. El perfilado bajo saturación identifica como cuellos de botella la contención del GIL en un único proceso Uvicorn, la construcción repetida de `pd.DataFrame` con `astype(SIGNATURE_DTYPES)` en `mlflow.pyfunc` y la competencia de hilos OpenMP en LightGBM, lo que fundamenta la ejecución directa sobre `Booster` con arreglos `numpy` (Optimización 3).
-- **Eficiencia FinOps mediante procesamiento por lotes, desacoplamiento y scale-to-zero.** La demanda real de MiBici (`365` estaciones por `24 h` = `262,800` predicciones/mes) deja ociosa una instancia dedicada AWS EC2 `t3.small` (`$15.98 USD/mes` con 10 GB EBS `gp3` o `$16.78 USD/mes` con 20 GB) entre el `99.50%` (`batch=1`) y el `99.99%` (`batch=365`) del mes. Combinar el lote horario consolidado (`730` peticiones/mes, Optimización 1) y el retiro de MLflow del camino de inferencia (`--no-deps api`, Optimización 2) con ejecución *serverless* bajo demanda (Optimización 4) reduce el gasto mensual a `$0.0062 USD/mes` en AWS Lambda y `$0.0100 USD/mes` en Google Cloud Run (`< $0.02 USD/mes`, ahorro `>99.9%`), o a `< $0.45 USD/mes` bajo peticiones unitarias (ahorro `>97%` a `98.3%`, FinOps Foundation, 2026).
+- **Eficiencia FinOps mediante procesamiento por lotes, desacoplamiento y scale-to-zero.** La demanda real de MiBici (`365` estaciones × `730 h/mes` = `266,450` predicciones/mes) deja ociosa una instancia dedicada AWS EC2 `t3.small` (`$15.98 USD/mes` con 10 GB EBS `gp3` o `$16.78 USD/mes` con 20 GB) entre el `99.49%`–`99.84%` (`batch=1`) y el `99.99%`–`99.998%` (`batch=365`) del mes. Combinar el lote horario consolidado (`730` peticiones/mes, Optimización 1) y el retiro de MLflow del camino de inferencia (`--no-deps api`, Optimización 2) con ejecución *serverless* bajo demanda (Optimización 4) reduce el gasto mensual a `$0.0011`–`$0.0062 USD/mes` en AWS Lambda y `$0.0018`–`$0.0100 USD/mes` en Google Cloud Run (`< $0.02 USD/mes`, ahorro `>99.9%`), o a `$0.12`–`$0.46 USD/mes` bajo peticiones unitarias (ahorro `97.1%` a `99.2%`, FinOps Foundation, 2026).
 - **Madurez MLOps de extremo a extremo para la operación de MiBici P2.** La integración de las Entregas 1 a 6 consolida un ciclo operativo trazable que enlaza datos versionados por manifiesto y validación DeepChecks (E1 y E3), gobierno de experimentos y Model Registry en MLflow (E2), servicio contenedorizado con contratos estrictos en FastAPI y Pydantic (E4), monitoreo de *data drift* con Evidently y pruebas A/B con disparadores de reentrenamiento continuo (E5), y operación reproducible con CI/CD, pruebas de estrés y disciplina FinOps lista para producción (E6; Gift & Deza, 2021; Treveil et al., 2020; Wilson, 2022).
 
 ## Referencias
@@ -162,9 +149,131 @@ Registry en vivo y del modo sin MLflow (`--no-deps api`). -->
 
 ## Anexo B. Resultados completos de las pruebas de carga
 
-<!-- Oscar (WP-4d). Pegar reports/load/anexo_b.md (lo genera collect_load_metrics.py). -->
+*Generado automáticamente el 2026-11-20T00:58:06Z desde `reports/load` (`reports/load/anexo_b.md`).*
+
+### B.1. Métricas de Locust por escenario y endpoint
+
+| Escenario | Método | Endpoint | Peticiones | Fallos | Error (%) | p50 (ms) | p95 (ms) | p99 (ms) | RPS |
+|:---|:---|:---|---:|---:|---:|---:|---:|---:|---:|
+| `nominal_10u` | `GET` | `/health` | 145 | 0 | 0.00 | 10.0 | 110.0 | 310.0 | 1.22 |
+| `nominal_10u` | `GET` | `/model-info` | 161 | 0 | 0.00 | 11.0 | 180.0 | 410.0 | 1.35 |
+| `nominal_10u` | `POST` | `/predict?batch=1` | 746 | 0 | 0.00 | 38.0 | 260.0 | 770.0 | 6.26 |
+| `nominal_10u` | `POST` | `/predict?batch=20` | 486 | 0 | 0.00 | 42.0 | 340.0 | 630.0 | 4.08 |
+| `nominal_10u` | `POST` | `/predict?batch=365` | 162 | 0 | 0.00 | 120.0 | 710.0 | 1200.0 | 1.36 |
+| `high_50u` | `GET` | `/health` | 257 | 0 | 0.00 | 790.0 | 1800.0 | 2400.0 | 2.15 |
+| `high_50u` | `GET` | `/model-info` | 250 | 0 | 0.00 | 1100.0 | 2500.0 | 2900.0 | 2.09 |
+| `high_50u` | `POST` | `/predict?batch=1` | 1290 | 0 | 0.00 | 1300.0 | 2800.0 | 4200.0 | 10.81 |
+| `high_50u` | `POST` | `/predict?batch=20` | 793 | 0 | 0.00 | 1400.0 | 2800.0 | 4300.0 | 6.64 |
+| `high_50u` | `POST` | `/predict?batch=365` | 253 | 0 | 0.00 | 1800.0 | 3100.0 | 4900.0 | 2.12 |
+| `stress_120u` | `GET` | `/health` | 228 | 0 | 0.00 | 3300.0 | 5800.0 | 6300.0 | 1.91 |
+| `stress_120u` | `GET` | `/model-info` | 237 | 0 | 0.00 | 4500.0 | 7500.0 | 8000.0 | 1.99 |
+| `stress_120u` | `POST` | `/predict?batch=1` | 1144 | 0 | 0.00 | 4700.0 | 7600.0 | 8200.0 | 9.60 |
+| `stress_120u` | `POST` | `/predict?batch=20` | 656 | 0 | 0.00 | 4700.0 | 7700.0 | 8400.0 | 5.50 |
+| `stress_120u` | `POST` | `/predict?batch=365` | 232 | 0 | 0.00 | 5500.0 | 8200.0 | 9200.0 | 1.95 |
+| `batch_1x365` | `POST` | `/predict?batch=365` | 705 | 0 | 0.00 | 78.0 | 110.0 | 200.0 | 11.94 |
+| `batch_365x1` | `POST` | `/predict?batch=1` | 3277 | 0 | 0.00 | 16.0 | 27.0 | 43.0 | 55.48 |
+
+### B.2. Comparativa de batching (`batch_1x365` vs `batch_365x1`)
+
+| Escenario | Tamaño lote | RPS HTTP | Predicciones/s | p50 (ms) | p95 (ms) | Factor Pred/s |
+|:---|---:|---:|---:|---:|---:|---:|
+| `batch_365x1` | 1 | 55.48 | 55.48 | 16.0 | 27.0 | 1.00x |
+| `batch_1x365` | 365 | 11.94 | 4358.06 | 78.0 | 110.0 | 78.56x |
+
+### B.3. Consumo de recursos de contenedores (`docker stats`)
+
+| Escenario | Contenedor | Muestras | CPU prom (%) | CPU máx (%) | RAM prom (MiB) | RAM máx (MiB) | RAM prom (%) | PIDs máx |
+|:---|:---|---:|---:|---:|---:|---:|---:|---:|
+| `baseline` | `api` | 30 | 1.75 | 21.87 | 241.25 | 241.50 | 23.56 | 24 |
+| `baseline` | `mlflow` | 30 | 2.97 | 39.21 | 373.71 | 384.30 | 72.99 | 21 |
+| `nominal_10u` | `api` | 60 | 47.79 | 101.85 | 247.31 | 259.20 | 24.15 | 33 |
+| `nominal_10u` | `mlflow` | 60 | 3.47 | 41.99 | 374.27 | 387.50 | 73.10 | 21 |
+| `high_50u` | `api` | 60 | 99.16 | 109.10 | 267.02 | 282.70 | 26.08 | 65 |
+| `high_50u` | `mlflow` | 60 | 3.37 | 43.68 | 373.99 | 384.70 | 73.04 | 21 |
+| `stress_120u` | `api` | 60 | 100.54 | 108.15 | 280.32 | 293.90 | 27.38 | 69 |
+| `stress_120u` | `mlflow` | 60 | 3.20 | 48.20 | 374.64 | 386.00 | 73.17 | 26 |
+| `batch_1x365` | `api` | 31 | 94.12 | 101.85 | 277.98 | 288.00 | 27.15 | 63 |
+| `batch_1x365` | `mlflow` | 31 | 3.12 | 47.31 | 374.93 | 375.30 | 73.23 | 20 |
+| `batch_365x1` | `api` | 31 | 87.54 | 99.90 | 277.46 | 288.40 | 27.10 | 26 |
+| `batch_365x1` | `mlflow` | 31 | 4.00 | 48.79 | 377.05 | 389.20 | 73.64 | 21 |
+
+### B.4. Microbenchmark de sobrecarga por petición (Opt 3)
+
+| Lote | Ruta de inferencia | Media (ms) | p50 (ms) | p95 (ms) | Predicciones/s | Aceleración |
+|---:|:---|---:|---:|---:|---:|---:|
+| 1 | `pyfunc_dataframe` | 10.4810 | 9.0135 | 19.5737 | 95.41 | 1.00x |
+| 1 | `booster_numpy` | 0.5145 | 0.1959 | 2.8341 | 1943.72 | 20.37x |
+| 1 | `booster_numpy_1thread` | 0.1909 | 0.1886 | 0.2308 | 5238.91 | 54.91x |
+| 20 | `pyfunc_dataframe` | 13.8600 | 10.2022 | 26.0605 | 1443.00 | 1.00x |
+| 20 | `booster_numpy` | 3.2150 | 1.4230 | 8.1398 | 6220.92 | 4.31x |
+| 20 | `booster_numpy_1thread` | 2.3379 | 2.2566 | 3.0486 | 8554.61 | 5.93x |
+| 365 | `pyfunc_dataframe` | 17.3909 | 15.6613 | 26.8483 | 20987.95 | 1.00x |
+| 365 | `booster_numpy` | 10.8354 | 8.0723 | 22.7326 | 33686.03 | 1.61x |
+| 365 | `booster_numpy_1thread` | 38.5979 | 35.1957 | 54.9231 | 9456.46 | 0.45x |
 
 ## Anexo C. Memoria de cálculo FinOps
 
-<!-- Oscar (WP-4d). Pegar reports/load/anexo_c.md (lo genera finops_calc.py) y los comandos
-para reproducir. -->
+*Generado automáticamente desde `reports/load/finops_summary.json` (`reports/load/anexo_c.md`).*
+
+### C.1 Parámetros
+
+| Parámetro | Valor |
+|:---|:---|
+| Instancia | AWS EC2 `t3.small`, $0.0208/h |
+| Disco | 10 GB EBS gp3, $0.8/mes |
+| Horas por mes (precio y demanda) | 730 |
+| Créditos de CPU | $0.05 por vCPU-hora sobre 20% de cada vCPU |
+| Demanda real | 365 estaciones × 730 h = 266,450 predicciones/mes |
+| Serverless (Opt 4) | $1.667e-05/s activo + $2e-07/petición |
+
+### C.2 Escenarios medidos
+
+| Escenario | Peticiones/s | Predicciones/s | Error (%) | CPU api (%) | CPU mlflow (%) |
+|:---|---:|---:|---:|---:|---:|
+| `nominal_10u` | 14.3 | 583.8 | 0.00 | 47.8 | 3.5 |
+| `high_50u` | 23.8 | 917.4 | 0.00 | 99.2 | 3.4 |
+| `stress_120u` | 20.9 | 830.0 | 0.00 | 100.5 | 3.2 |
+| `batch_1x365` | 11.9 | 4358.1 | 0.00 | 94.1 | 3.1 |
+| `batch_365x1` | 55.5 | 55.5 | 0.00 | 87.5 | 4.0 |
+
+Pico sostenible: `nominal_10u` (más predicciones/s con error ≤ 1% y CPU de `api` ≤ 80%).
+
+### C.3 Cálculo
+
+- Costo/hora en el pico = tarifa + créditos = $0.0208 + $0.005627
+- Costo/petición = costo/hora / (peticiones/s × 3600) = $5.148e-07
+- Costo/predicción = costo/hora / (predicciones/s × 3600) = $1.258e-08
+- Costo por 1M de predicciones en el pico = $0.01258
+- Costo mensual 24/7 = tarifa × 730 + disco = $15.98
+- Costo por 1M de predicciones con la demanda real = costo mensual / 266,450 × 10⁶ = $59.99
+- Atribución: `api` 66.5%, `mlflow` 33.5% (promedio de su parte de CPU y de memoria)
+
+### C.4 Optimizaciones contra el pico sostenible
+
+Línea base: $0.01258 por 1M de predicciones.
+
+| Optimización | Costo por 1M pred. | Costo mensual | Ahorro |
+|:---|---:|---:|---:|
+| Batching de 365 estaciones por petición | $0.00315 | $15.98 | 74.95% |
+| MLflow fuera del camino de inferencia | $0.008364 | $10.63 | 33.49% |
+| Inferencia directa con el Booster y menos sobrecarga por petición | $0.007811 | $15.98 | 37.89% |
+
+### C.5 Optimizaciones contra la operación real 24/7
+
+Línea base: $15.98/mes, $59.99 por 1M de predicciones. Las dos escalas no son comparables entre sí.
+
+| Optimización | Costo por 1M pred. | Costo mensual | Ahorro |
+|:---|---:|---:|---:|
+| Scale-to-zero con una corrida por hora | $0.00411 | $0.001095 | 99.99% |
+
+Sin agrupar (365 peticiones de 1 estación por hora): $0.1243/mes, ahorro de 99.22%.
+
+### C.6 Comandos de reproducción
+
+```bash
+make up && make compose-smoke
+make load-test
+make load-report
+uv run python scripts/plot_load_and_finops.py --load-dir reports/load --output-dir reports/figures/entrega6
+```
+
