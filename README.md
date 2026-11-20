@@ -3,6 +3,9 @@
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
+<a target="_blank" href="https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/workflows/ci.yml">
+    <img src="https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/workflows/ci.yml/badge.svg" alt="CI" />
+</a>
 
 ## Propósito
 
@@ -560,6 +563,133 @@ Las dos ejecuciones deben usar el mismo bundle del champion (`model.pkl` con SHA
 `6dbe6614…`): con otro bundle cambian el drift de la predicción y las variables más importantes.
 Los periodos reportados son las ventanas configuradas, no los extremos de la muestra.
 
+## Microservicios, CI/CD y FinOps (Entrega 6)
+
+La Entrega 6 implementa la orquestación multicontenedor mediante Docker Compose, automatiza la integración y despliegue continuo con GitHub Actions, ejecuta pruebas de carga pertinentes a la red de MiBici y evalúa la economía operativa (FinOps) de la solución. El reporte completo está en [`reports/TC5061_Operacion_FinOps_Equipo05.md`](reports/TC5061_Operacion_FinOps_Equipo05.md).
+
+### Orquestación con Docker Compose
+
+El archivo `docker-compose.yml` orquesta dos servicios en red bridge (`mibici-net`) con límites de cómputo y healthchecks activos:
+
+1. **`mlflow`:** Servidor de tracking y Model Registry (`Containerfile.mlflow`, puerto `5001`, límite de memoria de `512m` y `0.5` CPU). Persiste sus datos y artefactos en el volumen con nombre `mlflow_data`.
+2. **`api`:** Servicio REST de inferencia de P2 con FastAPI (`Containerfile`, puerto `8000`, límite de memoria de `1024m` y `1.0` CPU). Depende del arranque saludable de MLflow (`condition: service_healthy`).
+
+La construcción es autosuficiente desde un clon limpio: si la carpeta `models/p2-riesgo/` no existe localmente, la construcción de `Containerfile` extrae automáticamente el bundle versionado `models/p2-champion-v3.zip`.
+
+Comandos de ciclo de vida con Make:
+
+```bash
+make up               # Construye y arranca el stack en segundo plano (docker compose up -d --build)
+make compose-smoke    # Verifica MLflow /health, API /model-info y ejecuta la prueba de humo POST /predict
+make logs             # Sigue los registros en tiempo real (docker compose logs -f --tail=100)
+make down             # Detiene y remueve los contenedores conservando el volumen mlflow_data
+```
+
+Para verificar manualmente los endpoints del stack en ejecución:
+
+```bash
+# Verificación de liveness en MLflow Tracking Server
+curl -fsS http://localhost:5001/health
+
+# Verificación de metadatos de linaje y modelo servido en la API
+curl -fsS http://localhost:8000/model-info
+
+# Inferencia de prueba con la carga útil de ejemplo
+curl -fsS -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @scripts/smoke_request.json
+```
+
+El stack es compatible con Docker Compose en Linux, Docker Desktop en macOS/Windows y Podman Compose (`podman-compose`).
+
+### Configuración y variables de entorno (`.env.example`)
+
+La plantilla `.env.example` documenta las variables requeridas para la ejecución local y en contenedores:
+
+```bash
+cp .env.example .env
+```
+
+Variables disponibles:
+
+| Variable | Valor por defecto | Descripción |
+|:---|:---|:---|
+| `MLFLOW_TRACKING_URI` | `http://127.0.0.1:5001` | URI del servidor de tracking para la CLI del host (`mlflow run`). Dentro de `docker-compose.yml`, este valor se fija internamente en `http://mlflow:5001` para que las variables locales del host no interfieran con la resolución DNS de la red interna del contenedor. |
+| `MLFLOW_EXPERIMENT_NAME` | `mibici-equipo05` | Nombre del experimento en MLflow donde se registran las corridas. |
+| `MODEL_URI` | `/app/models/p2-riesgo` | Origen del modelo que carga la API. Admite dos modos operativos (ver tabla siguiente). |
+| `API_PORT` | `8000` | Puerto expuesto en el host para la API de inferencia. |
+| `MLFLOW_PORT` | `5001` | Puerto expuesto en el host para el servidor de MLflow. Se utiliza `5001` para evitar colisiones con el servicio AirPlay en macOS (puerto 5000). |
+
+#### Modos de resolución del modelo (`MODEL_URI`)
+
+La API soporta dos estrategias de carga según el escenario de operación:
+
+| Modo | Configuración de `MODEL_URI` | Comportamiento |
+|:---|:---|:---|
+| **Bundle inmutable (default)** | `/app/models/p2-riesgo` | Carga el modelo empaquetado directamente en la imagen de contenedor. Permite que la API arranque y responda inmediatamente en clon limpio sin requerir conexión a un servidor de MLflow activo. |
+| **Live Model Registry** | `models:/mibici-equipo05-p2-riesgo@champion` | Descarga y resuelve dinámicamente el modelo registrado con el alias `champion` desde el servicio `mlflow:5001` en tiempo de ejecución. Requiere que el modelo esté registrado en el servidor de tracking. |
+
+### Pipeline de CI/CD (GitHub Actions)
+
+El flujo de trabajo en [`.github/workflows/ci.yml`](.github/workflows/ci.yml) se ejecuta automáticamente en cada `push` o `pull_request` hacia la rama `main`:
+
+1. **`lint-and-security`:** Ejecuta `make lint` con Ruff y `make security` con Bandit, Pip-Audit y Detect-Secrets.
+2. **`test-matrix`:** Matriz de pruebas paralelas de `pytest` dividida en suite rápida (`not slow`) y suite completa (`slow` con DeepChecks en Python 3.12 y caché de `uv`). Restaura previamente el bundle del champion con `make prepare-model`.
+3. **`compose-and-smoke`:** Construye las imágenes mediante Buildx con caché de capas GitHub Actions (`type=gha`), arranca el stack con `docker compose up -d --no-build --wait`, valida la respuesta de `/health`, `/model-info` y `/predict` con `make compose-smoke`, y verifica que el modelo servido sea `mibici-equipo05-p2-riesgo` en versión `3`.
+4. **`publish-image`:** Tras aprobar las etapas anteriores en eventos de `push` a `main`, publica la imagen final en GitHub Container Registry (`ghcr.io/alx016/mibici-p2-api:latest` y `ghcr.io/alx016/mibici-p2-api:<sha>`).
+
+### Pruebas de carga y economía operativa FinOps (`load_tests/`)
+
+Las pruebas de carga evalúan el comportamiento de la API bajo condiciones realistas de tráfico y permiten cuantificar la economía operativa del servicio. El reporte completo con figuras empíricas se encuentra en [`reports/TC5061_Operacion_FinOps_Equipo05.md`](reports/TC5061_Operacion_FinOps_Equipo05.md).
+
+#### Justificación de dominio y suite de Locust
+
+- **Dominio de MiBici:** El sistema cuenta con 365 estaciones activas en el Área Metropolitana de Guadalajara. El esquema `PredictRequest` admite consultas por lotes de 1 a 500 estaciones por llamada HTTP.
+- **Aislamiento de dependencias:** La biblioteca `locust` está aislada en el grupo opcional `perf` (`[dependency-groups] perf` en `pyproject.toml`). No se incluye en los grupos por defecto de `uv.lock`, protegiendo la imagen de producción y evitando falsos positivos en auditorías de seguridad (`make security`).
+- **Generadores deterministas:** `load_tests/payloads.py` genera lotes sintéticos con valores válidos de coordenadas, capacidades y lags mediante la biblioteca estándar de Python (sin importar `locust`), garantizando pruebas unitarias reproducibles bajo `uv sync --frozen`.
+- **Perfiles de tráfico (`load_tests/locustfile.py`):**
+  - `mixed` (predeterminado): Simula tráfico operacional ponderado con 50% peticiones unitarias (`batch=1`), 30% corredores o zonas (`batch=20`), 10% red completa (`batch=365`) y 10% consultas de metadatos y salud (`/model-info`, `/health`), con tiempos de reflexión entre 0.2 y 1.0 segundos.
+  - `batch_1x365`: Envía peticiones continuas de la red completa (365 estaciones por llamada) sin tiempo de espera, modelando la ingesta por lotes para el cálculo de FinOps.
+  - `batch_365x1`: Envía peticiones individuales continuas (1 estación por llamada) sin tiempo de espera, modelando el peor escenario de consultas fragmentadas.
+
+#### Comandos de ejecución y reporte
+
+```bash
+# 1. Ejecutar la suite de carga contra el contenedor de la API (muestreando docker stats y Opt 3)
+make load-test
+
+# Personalizar escenarios o banderas de Locust
+make load-test LOAD_ARGS="--scenarios baseline,nominal_10u"
+make load-test LOAD_ARGS="--with-benchmark"
+
+# 2. Generar el reporte de métricas y el cálculo de FinOps
+make load-report
+
+# Personalizar parámetros de almacenamiento o aceleración
+make load-report FINOPS_ARGS="--storage-gb 20 --opt3-speedup 2.5"
+```
+
+También es posible ejecutar Locust de forma interactiva con interfaz gráfica en el puerto 8089:
+
+```bash
+uv run --group perf locust -f load_tests/locustfile.py --host http://127.0.0.1:8000
+```
+
+#### Artefactos y resultados clave
+
+La ejecución de `make load-test` y `make load-report` produce los siguientes artefactos en `reports/load/`:
+
+- `locust_<slug>_stats.csv`: Rendimiento HTTP (peticiones por segundo, latencias p50, p95, p99 y tasa de error).
+- `docker_stats_<slug>.csv`: Muestreo concurrente de CPU y memoria para los contenedores `mibici-api` y `mibici-mlflow`.
+- `opt3_benchmark.csv` y `opt3_benchmark.json`: Microbenchmarks de tiempo de inferencia para optimización de preprocesamiento vectorial.
+- `finops_summary.json`: Desglose cuantitativo de costo por petición, por predicción estación-hora y por 1 millón de inferencias.
+- `anexo_b.md` y `anexo_c.md`: Tablas en Markdown listas para el reporte técnico.
+
+Resultados de economía operativa:
+
+- **Ventaja del procesamiento por lotes:** En el pico sostenible, evaluar la red completa en un solo lote de 365 estaciones cuesta **$0.0381 USD** por millón de inferencias, comparado con **$11.02 USD** evaluando estación por estación de forma unitaria (reducción del 99.65% en costos de cómputo).
+- **Atribución de costos:** Durante inferencia activa, la API consume el 95.8% del cómputo mientras que MLflow permanece pasivo (4.2%), justificando el desacople del Tracking Server en ambientes de producción para reducir capacidad aprovisionada.
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
@@ -580,10 +710,10 @@ Contribuciones de cada integrante según el historial de Git de `main`.
 
 | Integrante | Matrícula | Usuario | Contribuciones |
 |:---|:---|:---|:---|
-| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024-2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Entrega 2: MLflow Project (`MLproject` con `ingest`, `features` y `train`, `python_env.yaml`, `.env.example`), tracking con firma, input example y código del paquete, y P3 completo: candidatos (Ward, GMM, MiniBatch, K-Means escalado), búsqueda anidada de K y `select`. Entrega 3: prueba de reproducibilidad (misma semilla en P1, P2 y P3), script aislado de DeepChecks con límites WARN/FAIL y pruebas de drift inyectado. Entrega 4: API REST de inferencia de P2 con FastAPI (`api/main.py`, `api/model.py`), endpoints `/health`, `/model-info` y `/predict`, carga del modelo desde la carpeta exportada o desde `models:/` según `MODEL_URI`, y decisión de la estrategia de despliegue (tiempo real frente a lotes). Entrega 5: plan y esqueleto del reporte, entrenamiento de P2 con otra ventana temporal para el challenger (`train_classification.py`, `MLproject`) con pruebas contra fuga, reproducción del reporte de drift en una segunda máquina, y secciones de conjuntos de datos, reproducibilidad, Continuous Training, conclusiones y resumen del reporte, más su integración. |
-| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. Entrega 2: P2 con entrenamiento, búsqueda anidada y selección, umbrales calibrados en validación y guardrail de recall. Entrega 3: chequeos de seguridad (bandit, pip-audit, detect-secrets y gitleaks), endurecimiento de subprocess, pickle y URLs, `reports/security/resultados.md`, `make security` y `.secrets.baseline`. Entrega 4: script de exportación desacoplada del champion de P2 desde el Model Registry (`scripts/export_model.py`, `models/p2-riesgo/`, `registry_metadata.json`). Entrega 5: tablas de features de 2025 y del challenger con feriados por año (`features.py`, `config.py`) y sus pruebas, reporte de estaciones nuevas y retiradas, y sección de implicaciones para el modelo del reporte. |
-| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. Entrega 2: justificación teórica de la arquitectura del sistema, experimentos de P1 con búsqueda anidada (Study y Trials) y correcciones del registry (validación de promoción y selección de P3). Entrega 3: DeepChecks de drift entre entrenamiento y prueba, reportes, `check_policy.md`, `hallazgos.md` y glosario. Entrega 4: esquemas de validación de dominio con Pydantic v2 (`api/schemas.py`), suite de pruebas HTTP de la API (`tests/test_schemas.py`, `tests/test_api.py`, `tests/test_api_model.py`), validación de reproducibilidad técnica cruzada en macOS con Docker (WP-5) y documentación de la Entrega 4 en el README. Entrega 5: motor de drift con Evidently, muestreo estratificado por mes y figuras (`monitoring/datasets.py`, `drift.py`, `plots.py`) con sus pruebas, y sección del reporte de drift. |
-| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014-2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. Entrega 2: Model Registry (`registry.py`, entry point `register`, aliases `champion` y `challenger`, linaje y pruebas) y las secciones de MLflow Project y Model Registry del README. Entrega 3: `make check`, configuración de pytest, ajustes a `make security`, actualización de `pyasn1` y la sección "Pruebas y chequeos" del README con su evidencia. Entrega 4: empaquetado OCI rootless (`Containerfile`, `.containerignore`), gobernanza de dependencias de servicio en `pyproject.toml` y automatización en Makefile (`make export-model`, `make image`, `make container`, `make smoke`). Entrega 5: Evidently en el grupo `monitoring` y parches de CVE en dependencias, A/B testing (`monitoring/ab_test.py`) con sus pruebas, targets de monitoreo del Makefile, entrenamiento del challenger, reproducción del champion en un solo Registry y sección de A/B testing del reporte. |
+| Manuel Alejandro Preciado Morán | A01639643 | `alx016` | Estructura inicial del proyecto (plantilla Cookiecutter Data Science). Ingesta: descarga, limpieza a Parquet y manifest de los viajes (`dataset.py`), descarga del catálogo de estaciones y rango de datos 2024-2026. P1: script de regresión con MLflow (`train_regression.py`), registro de las fechas de cada split y de los hiperparámetros con `get_params()`. Tags `git_commit` y `git_dirty` para todos los runs (`common.py`). Validación de capacidad y festivos en `features.py`. Entrega 2: MLflow Project (`MLproject` con `ingest`, `features` y `train`, `python_env.yaml`, `.env.example`), tracking con firma, input example y código del paquete, y P3 completo: candidatos (Ward, GMM, MiniBatch, K-Means escalado), búsqueda anidada de K y `select`. Entrega 3: prueba de reproducibilidad (misma semilla en P1, P2 y P3), script aislado de DeepChecks con límites WARN/FAIL y pruebas de drift inyectado. Entrega 4: API REST de inferencia de P2 con FastAPI (`api/main.py`, `api/model.py`), endpoints `/health`, `/model-info` y `/predict`, carga del modelo desde la carpeta exportada o desde `models:/` según `MODEL_URI`, y decisión de la estrategia de despliegue (tiempo real frente a lotes). Entrega 5: plan y esqueleto del reporte, entrenamiento de P2 con otra ventana temporal para el challenger (`train_classification.py`, `MLproject`) con pruebas contra fuga, reproducción del reporte de drift en una segunda máquina, y secciones de conjuntos de datos, reproducibilidad, Continuous Training, conclusiones y resumen del reporte, más su integración. Entrega 6: diseño del esqueleto y base FinOps (WP-0), pipeline completo de CI/CD en GitHub Actions (`.github/workflows/ci.yml`, WP-2a y WP-2b) con etapas de lint, security, matriz pytest fast/slow con caché de uv, compose smoke test y publicación de imagen en GHCR (`ghcr.io/alx016/mibici-p2-api`) con caché Buildx, script de visualización de métricas de carga y FinOps (`scripts/plot_load_and_finops.py`, WP-2c), y cierre/integración del reporte final (WP-D). |
+| Oscar Ulises López Vázquez | A01840039 | `oscarlv` | P2: feature engineering de clasificación, figuras de justificación del proxy de riesgo (`plots.py`) y baselines de clasificación con MLflow, incluido el candidato LightGBM (`train_classification.py`). P3: baselines de clustering con MLflow (`train_clustering.py`). Separación en un script de entrenamiento por pregunta con utilidades compartidas (`common.py`). Incorporación de MLflow al proyecto, catálogo de estaciones en el manifest y sus pruebas, y regeneración de `uv.lock`. Entrega 2: P2 con entrenamiento, búsqueda anidada y selección, umbrales calibrados en validación y guardrail de recall. Entrega 3: chequeos de seguridad (bandit, pip-audit, detect-secrets y gitleaks), endurecimiento de subprocess, pickle y URLs, `reports/security/resultados.md`, `make security` y `.secrets.baseline`. Entrega 4: script de exportación desacoplada del champion de P2 desde el Model Registry (`scripts/export_model.py`, `models/p2-riesgo/`, `registry_metadata.json`). Entrega 5: tablas de features de 2025 y del challenger con feriados por año (`features.py`, `config.py`) y sus pruebas, reporte de estaciones nuevas y retiradas, y sección de implicaciones para el modelo del reporte. Entrega 6: suite de pruebas de carga con Locust en `load_tests/` bajo el grupo opcional `perf` (WP-4a), orquestador de métricas y muestreo concurrente de recursos `docker stats` (`scripts/collect_load_metrics.py`, WP-4b), benchmark de inferencia optimizada (Opt 3), ejecución de la corrida oficial de carga en Linux Docker (WP-4c) y redacción de las secciones de pruebas de carga y FinOps del reporte (WP-4d). |
+| Emilio Alejandro Martínez López | A01796936 | `Emilio` | Feature engineering causal por modelo (`features.py`) con sus pruebas y su validación. Sitio de documentación MkDocs: los ML Canvas de P1, P2 y P3, el contrato de feature engineering, la investigación de fuentes y la justificación técnica del periodo de estudio 2024 y de la partición temporal. Notebook de exploración inicial (`0.01-eaml`) y versiones exactas de las dependencias en `pyproject.toml`. Entrega 2: justificación teórica de la arquitectura del sistema, experimentos de P1 con búsqueda anidada (Study y Trials) y correcciones del registry (validación de promoción y selección de P3). Entrega 3: DeepChecks de drift entre entrenamiento y prueba, reportes, `check_policy.md`, `hallazgos.md` y glosario. Entrega 4: esquemas de validación de dominio con Pydantic v2 (`api/schemas.py`), suite de pruebas HTTP de la API (`tests/test_schemas.py`, `tests/test_api.py`, `tests/test_api_model.py`), validación de reproducibilidad técnica cruzada en macOS con Docker (WP-5) y documentación de la Entrega 4 en el README. Entrega 5: motor de drift con Evidently, muestreo estratificado por mes y figuras (`monitoring/datasets.py`, `drift.py`, `plots.py`) con sus pruebas, y sección del reporte de drift. Entrega 6: parametrización de variables de entorno y compatibilidad local en `.env.example` (WP-3a), prueba de contrato para lotes de 1, 20 y 365 estaciones (`tests/test_batch_365_contract.py`) con validación de integridad de `models/p2-champion-v3.zip`, investigación de tarifas cloud y arquitectura serverless Opt 4 con bibliografía APA 7 (WP-3b), actualización completa del `README.md` (WP-3c) y auditoría de calidad QA (WP-3d). |
+| Fernando Gutiérrez Escárrega | A01840067 | `Fernando cuenta TEC` | Configuración del entorno con uv, Python 3.13 y dependencias fijas. Análisis exploratorio (`1.0-fge-eda-mibici.ipynb`): nomenclatura de estaciones, histórico 2014-2026, análisis de 2024 para feature engineering, auditoría de limpieza de 2024 y calendario de festivos, con sus figuras en `reports/figures/`. Entrega 2: Model Registry (`registry.py`, entry point `register`, aliases `champion` y `challenger`, linaje y pruebas) y las secciones de MLflow Project y Model Registry del README. Entrega 3: `make check`, configuración de pytest, ajustes a `make security`, actualización de `pyasn1` y la sección "Pruebas y chequeos" del README con su evidencia. Entrega 4: empaquetado OCI rootless (`Containerfile`, `.containerignore`), gobernanza de dependencias de servicio en `pyproject.toml` y automatización en Makefile (`make export-model`, `make image`, `make container`, `make smoke`). Entrega 5: Evidently en el grupo `monitoring` y parches de CVE en dependencias, A/B testing (`monitoring/ab_test.py`) con sus pruebas, targets de monitoreo del Makefile, entrenamiento del challenger, reproducción del champion en un solo Registry y sección de A/B testing del reporte. Entrega 6: arquitectura de microservicios con Docker Compose (`docker-compose.yml`, `Containerfile.mlflow`, red `mibici-net`, volumen `mlflow_data` y fallback de bundle en WP-1a), automatización en Makefile con los targets `up`, `down`, `logs`, `compose-smoke`, `load-test` y `load-report` (WP-1b), redacción de la sección 1 y Anexo A.1 sobre topología de microservicios (WP-1c), e implementación de la calculadora FinOps (`scripts/finops_calc.py`, `tests/test_finops_calc.py`, WP-1d). |
 
 Los merges de los pull requests hechos desde la web de GitHub aparecen con el nombre de la cuenta
 de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el usuario de Git.
@@ -592,9 +722,13 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 
 ```
 ├── Makefile                   <- Comandos: make data, make lint, make test, make security, make prepare-model, make export-model, make image, make container, make smoke,
-│                                 make features-current, make drift-report, make train-challenger, make ab-test
+│                                 make features-current, make drift-report, make train-challenger, make ab-test, make up, make compose-smoke, make logs, make down, make load-test, make load-report
+├── docker-compose.yml         <- Orquestación de microservicios: mlflow (Tracking Server) y api (FastAPI P2)
 ├── Containerfile              <- Imagen de la API (python:3.13-slim, usuario sin root)
+├── Containerfile.mlflow       <- Imagen del servidor de tracking y Model Registry de MLflow
 ├── .containerignore           <- Lista blanca de inclusiones para construcción de imágenes
+├── .github/
+│   └── workflows/ci.yml       <- Pipeline CI/CD: lint, security, matriz pytest fast/slow, compose-smoke y GHCR
 ├── README.md
 ├── pyproject.toml             <- Metadatos del paquete, dependencias y configuración de ruff
 ├── uv.lock                    <- Versiones exactas de las dependencias
@@ -604,25 +738,35 @@ de GitHub (por ejemplo, `Oscar` o `Manuel Alejandro Preciado Morán`), no con el
 │   ├── external/estaciones/   <- Catálogo de estaciones
 │   └── processed/             <- Panel estación-hora y artefactos de features por pregunta
 ├── docs/                      <- Sitio MkDocs: canvases, feature engineering y justificaciones
+├── load_tests/                <- Suite de pruebas de carga con Locust (grupo opcional perf)
+│   ├── locustfile.py          <- Escenarios de tráfico: mixed, batch_1x365 y batch_365x1
+│   └── payloads.py            <- Generadores deterministas de lotes de estaciones (1, 20, 365)
 ├── models/                    <- Bundle champion versionado y exportaciones locales ignoradas
+│   ├── p2-champion-v3.zip     <- Copia versionada del champion de P2 (fuera de gitignore)
 │   └── p2-riesgo/             <- Bundle local del champion P2 (MLmodel, model.pkl, registry_metadata.json)
 ├── notebooks/                 <- Exploración inicial y EDA (número-iniciales-descripción)
 ├── references/                <- ML Canvas de referencia y viajes_manifest.json
+│   └── deliverables/          <- Planes de acción y especificaciones de entrega
 ├── reports/                   <- Figuras y reportes generados; los HTML/JSON de deepchecks no se versionan
-│   ├── TC5061_Drift_ABTest_Equipo05.md  <- Reporte de la Entrega 5: drift, A/B y Continuous Training
+│   ├── TC5061_Drift_ABTest_Equipo05.md       <- Reporte de la Entrega 5: drift, A/B y Continuous Training
+│   ├── TC5061_Operacion_FinOps_Equipo05.md  <- Reporte de la Entrega 6: microservicios, CI/CD, carga y FinOps
+│   ├── load/                  <- CSVs de Locust, docker stats, opt3_benchmark, finops_summary.json, anexo_b.md y anexo_c.md
 │   ├── monitoring/            <- Reporte de Evidently (HTML y JSON) y resumen del A/B
 │   └── figures/
 │       ├── entrega2/          <- Evidencias de MLflow
 │       ├── entrega3/          <- Evidencias de pruebas, deepchecks y seguridad
 │       ├── entrega4/          <- Evidencias de contenedor OCI y endpoints HTTP
-│       └── entrega5/          <- Distribuciones comparativas del reporte de drift
-├── tests/                     <- Pruebas unitarias y de integración de la API (pytest)
+│       ├── entrega5/          <- Distribuciones comparativas del reporte de drift
+│       └── entrega6/          <- Evidencias de pruebas de carga (RPS, latencias, recursos) y economía FinOps
+├── tests/                     <- Pruebas unitarias, de integración, contrato batch y FinOps (pytest)
 ├── MLproject                  <- Entry points de MLflow: ingest, features, train, search, select, register
 ├── python_env.yaml            <- Entorno de Python del MLflow Project
-├── .env.example               <- Variables de MLflow (tracking URI y experimento)
+├── .env.example               <- Variables de MLflow, puertos y resolución de modelo
 ├── .secrets.baseline          <- Falsos positivos auditados de detect-secrets
 ├── mlflow.db, mlartifacts/    <- Servidor de tracking local; fuera de Git
 ├── scripts/
+│   ├── collect_load_metrics.py <- Orquestador de pruebas Locust, muestreo docker stats y anexo_b.md
+│   ├── finops_calc.py         <- Calculadora FinOps de costo por petición/predicción y anexo_c.md
 │   ├── data_checks.py         <- Validación de datos con DeepChecks (entorno aislado, PEP 723)
 │   ├── export_model.py        <- Exportación del champion de P2 desde el Model Registry
 │   └── smoke_request.json     <- Carga útil de ejemplo para pruebas de humo
