@@ -223,11 +223,15 @@ def finops_summary() -> dict:
     peak_req, peak_pred = 45.0, 2_100.0
     real_pred_month = 365 * 24 * 30
     real_per_1m = monthly / real_pred_month * 1_000_000
+    peak_per_1m = hourly / (peak_pred * 3600) * 1_000_000
+    # Like finops_calc.py: capacity optimizations are compared with the peak cost and
+    # scale-to-zero with the real 24/7 demand.
+    references = {"peak": peak_per_1m, "real_24_7": real_per_1m}
     optimizations = [
-        ("opt1", "Batching de 365 estaciones por petición", 0.92),
-        ("opt2", "MLflow fuera del camino de inferencia", 0.75),
-        ("opt3", "Booster + numpy sin DataFrame por petición", 0.85),
-        ("opt4", "Scale-to-zero (serverless)", 0.04),
+        ("opt1", "Batching de 365 estaciones por petición", "peak", 0.92),
+        ("opt2", "MLflow fuera del camino de inferencia", "peak", 0.75),
+        ("opt3", "Booster + numpy sin DataFrame por petición", "peak", 0.85),
+        ("opt4", "Scale-to-zero (serverless)", "real_24_7", 0.04),
     ]
     return {
         "baseline": {
@@ -239,7 +243,7 @@ def finops_summary() -> dict:
             "peak_pred_per_s": peak_pred,
             "cost_per_req_peak_usd": hourly / (peak_req * 3600),
             "cost_per_pred_peak_usd": hourly / (peak_pred * 3600),
-            "cost_per_1m_pred_peak_usd": round(hourly / (peak_pred * 3600) * 1_000_000, 6),
+            "cost_per_1m_pred_peak_usd": round(peak_per_1m, 6),
             "cost_per_1m_pred_real_24_7_usd": round(real_per_1m, 4),
             "attribution_pct": {"api": 82.0, "mlflow": 18.0},
         },
@@ -247,11 +251,12 @@ def finops_summary() -> dict:
             {
                 "id": opt_id,
                 "name": name,
-                "cost_per_1m_pred_usd": round(real_per_1m * ratio, 4),
+                "reference": reference,
+                "cost_per_1m_pred_usd": round(references[reference] * ratio, 6),
                 "monthly_usd": round(monthly * ratio, 4),
                 "savings_pct": round(100 * (1 - ratio), 1),
             }
-            for opt_id, name, ratio in optimizations
+            for opt_id, name, reference, ratio in optimizations
         ],
     }
 
