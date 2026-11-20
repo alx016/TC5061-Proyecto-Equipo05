@@ -19,8 +19,15 @@ COPY README.md ./
 COPY tc5061_proyecto_equipo5/ ./tc5061_proyecto_equipo5/
 RUN uv sync --frozen --no-default-groups --group api
 
-# Model exported from the Registry (run make export-model before building)
-COPY models/p2-riesgo/ ./models/p2-riesgo/
+# Model exported from the Registry. A clean clone only has the versioned zip, so it is
+# unpacked here; models/ is mounted only for this step, so the zip never enters the image
+RUN --mount=type=bind,source=models,target=/tmp/models \
+    if [ -f /tmp/models/p2-riesgo/registry_metadata.json ]; then \
+        mkdir -p models && cp -r /tmp/models/p2-riesgo models/; \
+    else \
+        python -m zipfile -e /tmp/models/p2-champion-v3.zip .; \
+    fi \
+    && test -f models/p2-riesgo/registry_metadata.json
 
 # Run without root privileges
 RUN useradd --create-home --uid 1000 app
