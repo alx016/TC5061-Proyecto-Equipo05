@@ -1,0 +1,211 @@
+{
+  "parameters": {
+    "storage_gb": 10.0,
+    "hours_per_month": 730.0,
+    "opt3_speedup": 1.61,
+    "serverless_usd_per_second": 1.66667e-05,
+    "serverless_usd_per_request": 2.0000000000000002e-07,
+    "ebs_usd_per_gb_month": 0.08,
+    "instance_vcpus": 2,
+    "cpu_baseline_fraction": 0.2,
+    "cpu_credit_usd_per_vcpu_hour": 0.05,
+    "max_error_pct": 1.0,
+    "max_api_cpu_pct": 80.0
+  },
+  "scenarios": [
+    {
+      "scenario": "nominal_10u",
+      "req_per_s": 14.259189543356566,
+      "pred_per_s": 583.7544443879079,
+      "error_pct": 0.0,
+      "median_ms_by_batch": {
+        "1": 38.0,
+        "20": 42.0,
+        "365": 120.0
+      },
+      "cpu_pct": {
+        "api": 47.786500000000004,
+        "mlflow": 3.4671666666666665
+      },
+      "mem_mib": {
+        "api": 247.30833333333334,
+        "mlflow": 374.275
+      },
+      "present": [
+        "api",
+        "mlflow"
+      ],
+      "vcpus_used": 0.5125366666666666
+    },
+    {
+      "scenario": "high_50u",
+      "req_per_s": 23.820610941576494,
+      "pred_per_s": 917.4244794399993,
+      "error_pct": 0.0,
+      "median_ms_by_batch": {
+        "1": 1300.0,
+        "20": 1400.0,
+        "365": 1800.0
+      },
+      "cpu_pct": {
+        "api": 99.155,
+        "mlflow": 3.3731666666666666
+      },
+      "mem_mib": {
+        "api": 267.0233333333333,
+        "mlflow": 373.99
+      },
+      "present": [
+        "api",
+        "mlflow"
+      ],
+      "vcpus_used": 1.0252816666666666
+    },
+    {
+      "scenario": "stress_120u",
+      "req_per_s": 20.94723659928898,
+      "pred_per_s": 830.0373961073485,
+      "error_pct": 0.0,
+      "median_ms_by_batch": {
+        "1": 4700.0,
+        "20": 4700.0,
+        "365": 5500.0
+      },
+      "cpu_pct": {
+        "api": 100.54083333333332,
+        "mlflow": 3.197
+      },
+      "mem_mib": {
+        "api": 280.32,
+        "mlflow": 374.6433333333334
+      },
+      "present": [
+        "api",
+        "mlflow"
+      ],
+      "vcpus_used": 1.0373783333333333
+    },
+    {
+      "scenario": "batch_1x365",
+      "req_per_s": 11.939876921545519,
+      "pred_per_s": 4358.055076364114,
+      "error_pct": 0.0,
+      "median_ms_by_batch": {
+        "365": 78.0
+      },
+      "cpu_pct": {
+        "api": 94.11548387096774,
+        "mlflow": 3.123225806451613
+      },
+      "mem_mib": {
+        "api": 277.9806451612903,
+        "mlflow": 374.92903225806447
+      },
+      "present": [
+        "api",
+        "mlflow"
+      ],
+      "vcpus_used": 0.9723870967741935
+    },
+    {
+      "scenario": "batch_365x1",
+      "req_per_s": 55.4772431943666,
+      "pred_per_s": 55.4772431943666,
+      "error_pct": 0.0,
+      "median_ms_by_batch": {
+        "1": 16.0
+      },
+      "cpu_pct": {
+        "api": 87.54290322580646,
+        "mlflow": 3.999354838709677
+      },
+      "mem_mib": {
+        "api": 277.46451612903223,
+        "mlflow": 377.0451612903226
+      },
+      "present": [
+        "api",
+        "mlflow"
+      ],
+      "vcpus_used": 0.9154225806451614
+    }
+  ],
+  "baseline": {
+    "instance_type": "t3.small",
+    "hourly_usd": 0.0208,
+    "storage_monthly_usd": 0.8,
+    "monthly_usd": 15.984,
+    "peak_scenario": "nominal_10u",
+    "peak_req_per_s": 14.259189543356566,
+    "peak_pred_per_s": 583.7544443879079,
+    "peak_cpu_credit_usd_per_h": 0.005626833333333331,
+    "cost_per_req_peak_usd": 5.148109585552953e-07,
+    "cost_per_pred_peak_usd": 1.2575128305419879e-08,
+    "cost_per_1m_pred_peak_usd": 0.012575128305419878,
+    "real_pred_per_month": 266450.0,
+    "cost_per_1m_pred_real_24_7_usd": 59.988740851942204,
+    "attribution_pct": {
+      "api": 66.51105771211144,
+      "mlflow": 33.48894228788856
+    }
+  },
+  "optimizations": [
+    {
+      "id": "opt1",
+      "name": "Batching de 365 estaciones por petición",
+      "reference": "peak",
+      "cost_per_1m_pred_usd": 0.0031499369158411498,
+      "monthly_usd": 15.984,
+      "savings_pct": 74.95105545377594,
+      "detail": {
+        "unit_cost_per_1m_pred_usd": 0.23318434706388613,
+        "savings_vs_unit_pct": 98.64916451061008,
+        "throughput_ratio": 78.5557252925403
+      }
+    },
+    {
+      "id": "opt2",
+      "name": "MLflow fuera del camino de inferencia",
+      "reference": "peak",
+      "cost_per_1m_pred_usd": 0.008363850844589876,
+      "monthly_usd": 10.63112746470389,
+      "savings_pct": 33.48894228788856
+    },
+    {
+      "id": "opt3",
+      "name": "Inferencia directa con el Booster y menos sobrecarga por petición",
+      "reference": "peak",
+      "cost_per_1m_pred_usd": 0.007810638699018557,
+      "monthly_usd": 15.984,
+      "savings_pct": 37.88819875776398
+    },
+    {
+      "id": "opt4",
+      "name": "Scale-to-zero con una corrida por hora",
+      "reference": "real_24_7",
+      "cost_per_1m_pred_usd": 0.004109596164383562,
+      "monthly_usd": 0.001095001898,
+      "savings_pct": 99.99314938752502,
+      "detail": {
+        "batch": {
+          "requests_per_month": 730.0,
+          "active_seconds_per_month": 56.94,
+          "compute_usd": 0.000949001898,
+          "requests_usd": 0.00014600000000000003,
+          "monthly_usd": 0.001095001898,
+          "cost_per_1m_pred_usd": 0.004109596164383562
+        },
+        "unit": {
+          "requests_per_month": 266450.0,
+          "active_seconds_per_month": 4263.2,
+          "compute_usd": 0.07105347544,
+          "requests_usd": 0.053290000000000004,
+          "monthly_usd": 0.12434347544,
+          "cost_per_1m_pred_usd": 0.4666672,
+          "savings_pct": 99.22207535385385
+        }
+      }
+    }
+  ],
+  "pending": {}
+}

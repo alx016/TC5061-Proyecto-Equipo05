@@ -1,0 +1,10 @@
+batch_size,path,iterations,mean_ms,p50_ms,p95_ms,pred_per_s,speedup_vs_pyfunc,max_prob_diff
+1,pyfunc_dataframe,100,10.481,9.0135,19.5737,95.41,1.0,0.0
+1,booster_numpy,100,0.5145,0.1959,2.8341,1943.72,20.37,0.0
+1,booster_numpy_1thread,100,0.1909,0.1886,0.2308,5238.91,54.91,0.0
+20,pyfunc_dataframe,100,13.86,10.2022,26.0605,1443.0,1.0,0.0
+20,booster_numpy,100,3.215,1.423,8.1398,6220.92,4.31,0.0
+20,booster_numpy_1thread,100,2.3379,2.2566,3.0486,8554.61,5.93,0.0
+365,pyfunc_dataframe,100,17.3909,15.6613,26.8483,20987.95,1.0,0.0
+365,booster_numpy,100,10.8354,8.0723,22.7326,33686.03,1.61,0.0
+365,booster_numpy_1thread,100,38.5979,35.1957,54.9231,9456.46,0.45,0.0
