@@ -638,6 +638,58 @@ El flujo de trabajo en [`.github/workflows/ci.yml`](.github/workflows/ci.yml) se
 3. **`compose-and-smoke`:** Construye las imágenes mediante Buildx con caché de capas GitHub Actions (`type=gha`), arranca el stack con `docker compose up -d --no-build --wait`, valida la respuesta de `/health`, `/model-info` y `/predict` con `make compose-smoke`, y verifica que el modelo servido sea `mibici-equipo05-p2-riesgo` en versión `3`.
 4. **`publish-image`:** Tras aprobar las etapas anteriores en eventos de `push` a `main`, publica la imagen final en GitHub Container Registry (`ghcr.io/alx016/mibici-p2-api:latest` y `ghcr.io/alx016/mibici-p2-api:<sha>`).
 
+### Pruebas de carga y economía operativa FinOps (`load_tests/`)
+
+Las pruebas de carga evalúan el comportamiento de la API bajo condiciones realistas de tráfico y permiten cuantificar la economía operativa del servicio. El reporte completo con figuras empíricas se encuentra en [`reports/TC5061_Operacion_FinOps_Equipo05.md`](reports/TC5061_Operacion_FinOps_Equipo05.md).
+
+#### Justificación de dominio y suite de Locust
+
+- **Dominio de MiBici:** El sistema cuenta con 365 estaciones activas en el Área Metropolitana de Guadalajara. El esquema `PredictRequest` admite consultas por lotes de 1 a 500 estaciones por llamada HTTP.
+- **Aislamiento de dependencias:** La biblioteca `locust` está aislada en el grupo opcional `perf` (`[dependency-groups] perf` en `pyproject.toml`). No se incluye en los grupos por defecto de `uv.lock`, protegiendo la imagen de producción y evitando falsos positivos en auditorías de seguridad (`make security`).
+- **Generadores deterministas:** `load_tests/payloads.py` genera lotes sintéticos con valores válidos de coordenadas, capacidades y lags mediante la biblioteca estándar de Python (sin importar `locust`), garantizando pruebas unitarias reproducibles bajo `uv sync --frozen`.
+- **Perfiles de tráfico (`load_tests/locustfile.py`):**
+  - `mixed` (predeterminado): Simula tráfico operacional ponderado con 50% peticiones unitarias (`batch=1`), 30% corredores o zonas (`batch=20`), 10% red completa (`batch=365`) y 10% consultas de metadatos y salud (`/model-info`, `/health`), con tiempos de reflexión entre 0.2 y 1.0 segundos.
+  - `batch_1x365`: Envía peticiones continuas de la red completa (365 estaciones por llamada) sin tiempo de espera, modelando la ingesta por lotes para el cálculo de FinOps.
+  - `batch_365x1`: Envía peticiones individuales continuas (1 estación por llamada) sin tiempo de espera, modelando el peor escenario de consultas fragmentadas.
+
+#### Comandos de ejecución y reporte
+
+```bash
+# 1. Ejecutar la suite de carga contra el contenedor de la API (muestreando docker stats y Opt 3)
+make load-test
+
+# Personalizar escenarios o banderas de Locust
+make load-test LOAD_ARGS="--scenarios baseline,nominal_10u"
+make load-test LOAD_ARGS="--with-benchmark"
+
+# 2. Generar el reporte de métricas y el cálculo de FinOps
+make load-report
+
+# Personalizar parámetros de almacenamiento o aceleración
+make load-report FINOPS_ARGS="--storage-gb 20 --opt3-speedup 2.5"
+```
+
+También es posible ejecutar Locust de forma interactiva con interfaz gráfica en el puerto 8089:
+
+```bash
+uv run --group perf locust -f load_tests/locustfile.py --host http://127.0.0.1:8000
+```
+
+#### Artefactos y resultados clave
+
+La ejecución de `make load-test` y `make load-report` produce los siguientes artefactos en `reports/load/`:
+
+- `locust_<slug>_stats.csv`: Rendimiento HTTP (peticiones por segundo, latencias p50, p95, p99 y tasa de error).
+- `docker_stats_<slug>.csv`: Muestreo concurrente de CPU y memoria para los contenedores `mibici-api` y `mibici-mlflow`.
+- `opt3_benchmark.csv` y `opt3_benchmark.json`: Microbenchmarks de tiempo de inferencia para optimización de preprocesamiento vectorial.
+- `finops_summary.json`: Desglose cuantitativo de costo por petición, por predicción estación-hora y por 1 millón de inferencias.
+- `anexo_b.md` y `anexo_c.md`: Tablas en Markdown listas para el reporte técnico.
+
+Resultados de economía operativa:
+
+- **Ventaja del procesamiento por lotes:** En el pico sostenible, evaluar la red completa en un solo lote de 365 estaciones cuesta **$0.0381 USD** por millón de inferencias, comparado con **$11.02 USD** evaluando estación por estación de forma unitaria (reducción del 99.65% en costos de cómputo).
+- **Atribución de costos:** Durante inferencia activa, la API consume el 95.8% del cómputo mientras que MLflow permanece pasivo (4.2%), justificando el desacople del Tracking Server en ambientes de producción para reducir capacidad aprovisionada.
+
 ## Flujo de trabajo con Git
 
 - `main` siempre debe funcionar y no recibe commits directos.
