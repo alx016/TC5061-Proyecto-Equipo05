@@ -74,6 +74,7 @@ jobs:
         run: make prepare-model
 
       - name: Run pytest
+        shell: bash
         run: uv run pytest tests -m "${{ matrix.marker }}" -q -rs | tee pytest.log
 
       - name: Write summary
