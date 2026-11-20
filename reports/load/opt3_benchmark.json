@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-11-20T00:57:50Z",
+  "model_uri": "models/p2-riesgo",
+  "iterations": 100,
+  "warmup": 10,
+  "results": [
+    {
+      "batch_size": 1,
+      "path": "pyfunc_dataframe",
+      "iterations": 100,
+      "mean_ms": 10.481,
+      "p50_ms": 9.0135,
+      "p95_ms": 19.5737,
+      "pred_per_s": 95.41,
+      "speedup_vs_pyfunc": 1.0,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 1,
+      "path": "booster_numpy",
+      "iterations": 100,
+      "mean_ms": 0.5145,
+      "p50_ms": 0.1959,
+      "p95_ms": 2.8341,
+      "pred_per_s": 1943.72,
+      "speedup_vs_pyfunc": 20.37,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 1,
+      "path": "booster_numpy_1thread",
+      "iterations": 100,
+      "mean_ms": 0.1909,
+      "p50_ms": 0.1886,
+      "p95_ms": 0.2308,
+      "pred_per_s": 5238.91,
+      "speedup_vs_pyfunc": 54.91,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 20,
+      "path": "pyfunc_dataframe",
+      "iterations": 100,
+      "mean_ms": 13.86,
+      "p50_ms": 10.2022,
+      "p95_ms": 26.0605,
+      "pred_per_s": 1443.0,
+      "speedup_vs_pyfunc": 1.0,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 20,
+      "path": "booster_numpy",
+      "iterations": 100,
+      "mean_ms": 3.215,
+      "p50_ms": 1.423,
+      "p95_ms": 8.1398,
+      "pred_per_s": 6220.92,
+      "speedup_vs_pyfunc": 4.31,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 20,
+      "path": "booster_numpy_1thread",
+      "iterations": 100,
+      "mean_ms": 2.3379,
+      "p50_ms": 2.2566,
+      "p95_ms": 3.0486,
+      "pred_per_s": 8554.61,
+      "speedup_vs_pyfunc": 5.93,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 365,
+      "path": "pyfunc_dataframe",
+      "iterations": 100,
+      "mean_ms": 17.3909,
+      "p50_ms": 15.6613,
+      "p95_ms": 26.8483,
+      "pred_per_s": 20987.95,
+      "speedup_vs_pyfunc": 1.0,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 365,
+      "path": "booster_numpy",
+      "iterations": 100,
+      "mean_ms": 10.8354,
+      "p50_ms": 8.0723,
+      "p95_ms": 22.7326,
+      "pred_per_s": 33686.03,
+      "speedup_vs_pyfunc": 1.61,
+      "max_prob_diff": 0.0
+    },
+    {
+      "batch_size": 365,
+      "path": "booster_numpy_1thread",
+      "iterations": 100,
+      "mean_ms": 38.5979,
+      "p50_ms": 35.1957,
+      "p95_ms": 54.9231,
+      "pred_per_s": 9456.46,
+      "speedup_vs_pyfunc": 0.45,
+      "max_prob_diff": 0.0
+    }
+  ]
+}
