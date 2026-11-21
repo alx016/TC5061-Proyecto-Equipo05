@@ -38,13 +38,31 @@ inferencia actual y optimizado, y la recomendación principal. Se escribe al fin
 
 ## 1. Arquitectura y orquestación con Docker Compose
 
-<!-- Fernando (WP-1c). ~0.8 pág.
-- Topología: servicios `api` y `mlflow`, red `mibici-net`, volumen `mlflow_data`.
-- Variables de entorno, healthchecks, `depends_on: service_healthy` y límites de CPU/RAM.
-- Un solo comando desde un clon limpio (fallback a `models/p2-champion-v3.zip`).
-- Modos de carga del modelo: bundle local por defecto y `models:/...@champion` vía MLflow.
-- Por qué no se usa Redis + RQ.
-- Detalle en el Anexo A.1. -->
+El sistema se levanta con un solo comando desde un clon limpio: `make up` (equivalente a `docker compose up -d --build`). `docker-compose.yml` define dos servicios en la red interna `mibici-net`:
+
+| Servicio | Imagen | Puerto | Límites | Función |
+|:---|:---|:---|:---|:---|
+| `mlflow` | `Containerfile.mlflow` (MLflow 3.17.2, versiones exactas de `uv.lock`) | 5001 | 0.5 CPU, 512 MiB | Tracking Server y Model Registry; metadatos y artefactos en el volumen `mlflow_data` |
+| `api` | `Containerfile` (FastAPI + champion v3) | 8000 | 1.0 CPU, 1024 MiB | Inferencia de P2 (`/health`, `/model-info`, `/predict`) |
+
+**Orden de arranque y salud.** Cada servicio tiene un *healthcheck* sobre su endpoint `/health`, y `api` declara `depends_on: mlflow: condition: service_healthy`, así que la API no arranca hasta que MLflow responde. `make compose-smoke` verifica el stack completo (`/health` de MLflow, `/model-info`, `/health` y `/predict` de la API), y el job `compose-and-smoke` del CI lo repite en cada PR (Sección 2).
+
+**Configuración.** Dentro de la red, la API llega a MLflow por su nombre de servicio: `MLFLOW_TRACKING_URI=http://mlflow:5001` va fijo en el compose y no se lee de `.env`, para que un `.env` local con `127.0.0.1` no rompa la resolución DNS interna. `MODEL_URI`, `API_PORT` y `MLFLOW_PORT` sí se pueden cambiar desde el entorno.
+
+**Clon limpio.** `models/p2-riesgo/` no está en Git. Si falta, el `Containerfile` descomprime el bundle versionado `models/p2-champion-v3.zip` durante el build; la carpeta se monta solo en ese paso (`RUN --mount=type=bind`), así que el zip no queda dentro de la imagen.
+
+**Dos modos de carga del modelo.**
+
+| Modo | `MODEL_URI` | Uso |
+|:---|:---|:---|
+| Bundle inmutable (default) | `/app/models/p2-riesgo` | La API arranca sin depender de MLflow; es el modo de producción |
+| Registry en vivo | `models:/mibici-equipo05-p2-riesgo@champion` | La API descarga el modelo desde `http://mlflow:5001`; sirve para promover versiones sin reconstruir la imagen |
+
+Los dos modos se validaron (Anexo A.1). Con `docker compose up -d --no-deps api`, la API funciona sin MLflow, que es la base de la Optimización 2 (Sección 4).
+
+**Ajuste de memoria de MLflow.** MLflow 3 levanta por defecto *workers* de *jobs* (~200 procesos y 1.7 GB en reposo). Con 512 MiB el *healthcheck* nunca pasaba, así que se apagaron con `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` (el proyecto no usa *jobs*): MLflow quedó en ~350 MiB y el stack completo en ~620 MiB en reposo, dentro de los 1.5 CPU y 1.5 GiB que caben en la `t3.small` de referencia (Sección 4).
+
+**Por qué no Redis + RQ.** La demanda real son 365 predicciones por hora, que la API resuelve en una sola petición de lote (mediana medida de 78 ms, Sección 3). Una cola asíncrona agregaría dos servicios, memoria y puntos de falla sin reducir la latencia, y no cabría en el presupuesto de la `t3.small`. Sería útil si las predicciones tardaran minutos o llegaran en ráfagas que la API no pudiera absorber, lo que no ocurre con P2.
 
 ## 2. CI/CD con GitHub Actions
 
@@ -149,8 +167,62 @@ Los anexos amplían el cuerpo del reporte y no cuentan en la extensión.
 
 ## Anexo A.1. Docker Compose
 
-<!-- Fernando (WP-1c). Extractos de docker-compose.yml y Containerfile*, validación con el
-Registry en vivo y del modo sin MLflow (`--no-deps api`). -->
+### A.1.1 Extractos
+
+`docker-compose.yml` (servicio `api`):
+
+```yaml
+api:
+  build:
+    context: .
+    dockerfile: Containerfile
+  depends_on:
+    mlflow:
+      condition: service_healthy
+  ports:
+    - "${API_PORT:-8000}:8000"
+  environment:
+    MODEL_URI: ${MODEL_URI:-/app/models/p2-riesgo}
+    MLFLOW_TRACKING_URI: http://mlflow:5001
+  networks:
+    - mibici-net
+  mem_limit: 1024m
+  cpus: 1.0
+```
+
+`Containerfile` (bundle del champion en un clon limpio):
+
+```dockerfile
+RUN --mount=type=bind,source=models,target=/tmp/models \
+    if [ -f /tmp/models/p2-riesgo/registry_metadata.json ]; then \
+        mkdir -p models && cp -r /tmp/models/p2-riesgo models/; \
+    else \
+        python -m zipfile -e /tmp/models/p2-champion-v3.zip .; \
+    fi \
+    && test -f models/p2-riesgo/registry_metadata.json
+```
+
+`Containerfile.mlflow` (servidor):
+
+```dockerfile
+ENV MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "sqlite:////mlflow/mlflow.db", \
+     "--artifacts-destination", "/mlflow/mlartifacts", \
+     "--host", "0.0.0.0", "--port", "5001", "--workers", "1", \
+     "--allowed-hosts", "mlflow:5001,mlflow,localhost:*,127.0.0.1:*"]
+```
+
+### A.1.2 Validación
+
+| Prueba | Comando | Resultado |
+|:---|:---|:---|
+| Stack con Docker | `make up`, `make compose-smoke`, `make down` | MLflow *healthy* antes de la API; `/model-info` devuelve la v3 (run `7bf71250`); `/predict` responde |
+| Stack con Podman | `make up COMPOSE=podman-compose` | Mismo resultado. `podman-compose` 1.0.6 no respeta `service_healthy` (usa `--requires`); no afecta en modo bundle |
+| Registry en vivo | *train*, *select* y *register* contra `http://127.0.0.1:5001`; `MODEL_URI=models:/mibici-equipo05-p2-riesgo@champion docker compose up -d api` | Test idéntico al champion (`test_recall_shortage` 0.8452). `/model-info` devuelve la versión 1 (run `36dd16ec`) cargada desde `http://mlflow:5001`; `/predict` da la misma predicción que el bundle |
+| API sin MLflow (Opt 2) | `docker compose up -d --no-deps api`, `make smoke` | Solo corre `mibici-api`; `/health` y `/predict` responden |
+| Puerto de MLflow | `make up MLFLOW_PORT=5002` | La UI responde 200 (antes 403 por `--allowed-hosts`) |
+| Consumo en reposo | `docker stats` | `api` 272 MiB de 1 GiB; `mlflow` 351 MiB de 512 MiB |
 
 ## Anexo A.2. Pipeline de CI/CD
 
