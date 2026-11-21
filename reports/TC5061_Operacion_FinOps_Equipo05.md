@@ -48,11 +48,20 @@ inferencia actual y optimizado, y la recomendación principal. Se escribe al fin
 
 ## 2. CI/CD con GitHub Actions
 
-<!-- Manuel (WP-2b). ~0.6 pág.
-- Disparadores y jobs: lint y seguridad, matriz de pruebas, compose + smoke, publicación a GHCR.
-- Cachés (uv, Buildx) y cómo se valida el levantamiento con Compose.
-- Evidencia del run en verde (enlace y captura).
-- Detalle en el Anexo A.2. -->
+El workflow `.github/workflows/ci.yml` tiene tres disparadores: push a `main`, PR hacia `main` y ejecución manual (`workflow_dispatch`). En todos se corren las validaciones de lint y seguridad, pruebas y Compose (detalle en la tabla); `publish-image` solo corre en push a `main`. Con `concurrency` y `cancel-in-progress: true`, cada push nuevo a la misma rama cancela el run anterior para no gastar minutos en código viejo. Siguiendo el **principio de mínimo privilegio**, el workflow tiene `contents: read` por defecto y solo el job de publicación recibe `packages: write`; no se usan secretos propios, solo el `GITHUB_TOKEN` que GitHub genera en cada run. Así, ningún job puede modificar el repo ni publicar paquetes sin haber pasado todas las validaciones.
+
+| Job | Qué valida y cómo | Qué falla atrapa |
+|:---|:---|:---|
+| `lint-and-security` | `make lint`: formato y errores estáticos (`ruff`); `make security`: `bandit` (código propio), `pip-audit` (dependencias) y `detect-secrets` (todo el repo). | Código mal formateado o con errores estáticos; código inseguro; librerías con vulnerabilidades conocidas (CVE); credenciales commiteadas. |
+| `test-matrix` | La suite de pytest se divide en dos jobs paralelos con marcadores: `slow` (suites de DeepChecks) y `not slow` (todo lo demás); `fail-fast: false` permite que ambos terminen aunque uno falle; `make prepare-model` descomprime `models/p2-champion-v3.zip` en `models/p2-riesgo/`. | Regresiones en la lógica (contrato de la API, features, entrenamiento, cálculo FinOps); problemas de integridad o drift en los datos (DeepChecks); que la API deje de ser compatible con el champion real, lo que sin el bundle se reportaría como *skip* (falso verde) en lugar de fallo. |
+| `compose-and-smoke` | Construye las dos imágenes de `docker-compose.yml` (`api` y `mlflow`); levanta el stack con `docker compose up --wait`, que espera a que pasen los healthchecks; `make compose-smoke` prueba `/health` de MLflow y `/model-info`, `/health` y `/predict` de la API; verifica que se sirva `mibici-equipo05-p2-riesgo` en su versión 3. | Errores de red, variables de entorno, healthchecks o un `Containerfile` roto; que la API sirva otro modelo o una versión equivocada. |
+| `publish-image` | Depende (`needs`) de los tres jobs anteriores y solo corre en push a `main` (`if`); publica `ghcr.io/alx016/mibici-p2-api` con dos tags: `latest` y el SHA del commit. | No detecta errores, los previene: evita que una imagen que no pasó lint, pruebas o el smoke test llegue a GHCR y alguien la despliegue. El tag por SHA da trazabilidad (imagen ↔ commit) y permite hacer rollback si la versión nueva falla. |
+
+La caché acelera los runs al no reconstruir lo que no cambió: dependencias de Python (incluido el entorno de DeepChecks) con uv y capas de Docker con Buildx. `compose-and-smoke` y `publish-image` comparten la caché de la imagen `api`, así que la publicación reutiliza sus capas: en el run [`44657398679`](https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/runs/44657398679) de `main`, la imagen se construyó en 25 s con el 50% de las capas en caché.
+
+Ese run pasó en verde en ~10 min (capturas en el Anexo A.2). La ruta crítica es `Tests (fast)` (~9.3 min) seguido de `publish-image` (38 s): para acelerar el pipeline habría que acelerar `fast`, porque optimizar los otros jobs no cambiaría el tiempo total.
+
+El pipeline cubre CI y **entrega continua**, pero no despliegue continuo: nada se despliega automáticamente a un servidor. Las pruebas de Locust (Sección 3) tampoco corren en CI por su duración y porque en runners compartidos los resultados varían según la máquina virtual, lo que haría poco confiable el cálculo FinOps (Sección 4).
 
 ## 3. Pruebas de carga con Locust y uso de recursos
 
@@ -158,7 +167,92 @@ Registry en vivo y del modo sin MLflow (`--no-deps api`). -->
 
 ## Anexo A.2. Pipeline de CI/CD
 
-<!-- Manuel (WP-2b). Extractos de ci.yml, captura del run en verde e imagen en GHCR. -->
+Las capturas corresponden al run [`44657398679`](https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/runs/44657398679) del workflow `CI`, disparado por el push a `main` del merge del PR #60 (commit `1df0f86`), y al paquete [`ghcr.io/alx016/mibici-p2-api`](https://github.com/alx016/TC5061-Proyecto-Equipo05/pkgs/container/mibici-p2-api) que publicó.
+
+**Disparadores, permisos por defecto y cancelación de runs** (`.github/workflows/ci.yml`, líneas 3–16):
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+**Levantamiento del stack y smoke test en `compose-and-smoke`** (líneas 114–132). `--wait` espera a que los healthchecks de ambos servicios pasen; el último paso comprueba que se sirva el champion v3:
+
+```yaml
+- name: Start the stack
+  run: docker compose up -d --no-build --wait --wait-timeout 180
+
+- name: Smoke test (/health, /model-info, /predict)
+  run: make compose-smoke
+
+- name: Check the served model
+  run: |
+    info=$(curl -fsS http://localhost:8000/model-info)
+    echo "$info"
+    test "$(echo "$info" | jq -r .model_name)" = "mibici-equipo05-p2-riesgo"
+    test "$(echo "$info" | jq -r .model_version)" = "3"
+
+- name: Show container logs
+  if: failure()
+  run: docker compose logs --tail=200
+
+- name: Stop the stack
+  if: always()
+  run: docker compose down -v
+```
+
+**Publicación condicionada en `publish-image`** (líneas 134–172, extracto). Solo corre en push a `main` tras los otros tres jobs, es el único con `packages: write` y reutiliza la caché `api`:
+
+```yaml
+publish-image:
+  needs: [lint-and-security, test-matrix, compose-and-smoke]
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  permissions:
+    contents: read
+    packages: write
+  steps:
+    # ... checkout, setup-buildx y login a ghcr.io con GITHUB_TOKEN ...
+    - id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/mibici-p2-api
+        tags: |
+          type=raw,value=latest
+          type=sha
+
+    - name: Build and push
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Containerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        cache-from: type=gha,scope=api
+        cache-to: type=gha,scope=api,mode=max
+```
+
+![Figura A.1. Resumen del run del workflow CI en verde](figures/entrega6/ci_run_verde1.png)
+
+**Figura A.1.** Resumen del run `44657398679` (10 min 5 s en total). Los cinco jobs terminaron en verde y el grafo muestra que `publish-image` espera a la matriz `test-matrix`, a `lint-and-security` (1 min 25 s) y a `compose-and-smoke` (2 min 53 s). Abajo, el resumen que escribe `Tests (fast)`: 516 pruebas pasadas y 5 excluidas (las `slow`).
+
+![Figura A.2. Resumen de publicación de la imagen y del build de Docker](figures/entrega6/ci_run_verde2.png)
+
+**Figura A.2.** Resumen del job `publish-image` del mismo run: la imagen se publicó con los tags `latest` y `sha-1df0f86`, y el build del `Containerfile` tardó 25 s con el 50% de las capas tomadas de la caché compartida `api`.
+
+![Figura A.3. Paquete mibici-p2-api publicado en GitHub Container Registry](figures/entrega6/ghcr_paquete.png)
+
+**Figura A.3.** Paquete público `mibici-p2-api` en GHCR, ligado al repositorio, con los tags `latest` y `sha-1df0f86` y el comando `docker pull` para descargar la versión exacta del commit.
 
 ## Anexo B. Resultados completos de las pruebas de carga
 
