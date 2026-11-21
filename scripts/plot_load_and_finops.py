@@ -151,12 +151,18 @@ def grouped_bars(ax: plt.Axes, table: pd.DataFrame, colors: dict, labels: dict |
         label = labels.get(column, column) if labels else column
         ax.bar(offsets, table[column], width * 0.9, color=colors[column], label=label)
     ax.set_xticks(list(positions), table.index)
+    ax.set_xlim(-0.5, len(table.index) - 0.5)
     style_axis(ax)
 
 
 def usd(value: float) -> str:
     """Costos muy chicos (pico) necesitan más decimales que los de la demanda real."""
-    return f"${value:.4f}" if value < 0.01 else f"${value:.2f}"
+    return f"${value:.4f}" if value < 1 else f"${value:.2f}"
+
+
+def pct(value: float) -> str:
+    """Ahorros casi totales (scale-to-zero) no deben redondearse a 100%."""
+    return f"{value:.0f}%" if value < 99.5 else f"{value:.2f}%"
 
 
 def plot_rps_users(history: pd.DataFrame, stats: pd.DataFrame, output_dir: Path) -> Path:
@@ -331,7 +337,7 @@ def plot_finops(finops: dict, output_dir: Path) -> Path:
         labels = [base_label] + [o["name"] for o in opts]
         costs = [base_cost] + [o["cost_per_1m_pred_usd"] for o in opts]
         texts = [usd(base_cost)] + [
-            f"{usd(o['cost_per_1m_pred_usd'])} (−{o['savings_pct']:.0f}%)" for o in opts
+            f"{usd(o['cost_per_1m_pred_usd'])} (−{pct(o['savings_pct'])})" for o in opts
         ]
         colors = [NEUTRAL] + [TOTAL_COLOR] * len(opts)
 
