@@ -7,6 +7,32 @@ body {
   font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
   font-size: 11pt;
   line-height: 1.15;
+  text-align: justify;
+}
+/* Espacio entre párrafos de media línea; el interlineado se queda en 1.15. */
+p, ul, ol, table, pre {
+  margin: 0.5em 0;
+}
+img {
+  display: block;
+  max-height: 7cm;
+  margin: 0 auto;
+}
+/* Dos figuras lado a lado: a 7 cm de alto ya miden ~8 cm de ancho. */
+.par-figuras {
+  display: flex;
+  gap: 0.5cm;
+}
+.par-figuras > div {
+  flex: 1;
+}
+.par-figuras img {
+  max-width: 100%;
+}
+/* Pie de figura: el párrafo que sigue a la imagen. */
+p:has(> img) + p {
+  font-size: 9pt;
+  text-align: center;
 }
 </style>
 
@@ -19,119 +45,86 @@ body {
   (`mibici-equipo05-p2-riesgo`, champion v3), con el servidor de MLflow de la Entrega 2.
 - **Fecha:** 22 de noviembre de 2026.
 
-<!--
-Guía del esqueleto (WP-0). Borrar este comentario en WP-D.
-
-- Formato del PDF: Arial 11 (o Liberation Sans / Helvetica), interlineado 1.15.
-- Cuerpo (Resumen a Referencias): de 3 a 5 cuartillas. Los Anexos no cuentan.
-- Presupuesto por sección, en páginas: Resumen 0.4, Sec. 1 0.8, Sec. 2 0.6, Sec. 3 1.2,
-  Sec. 4 1.3, Sec. 5 0.5. Total: 4.8.
-- Cada quien edita solo su bloque. El responsable está en el comentario de cada sección.
-- Figuras en reports/figures/entrega6/ (las genera scripts/plot_load_and_finops.py).
-- Tablas largas, YAML completo y logs van a los Anexos.
--->
 
 ## Resumen
 
-<!-- Manuel (WP-D). ~0.4 pág. Qué se construyó, CI en verde, RPS sostenibles, costo por
-inferencia actual y optimizado, y la recomendación principal. Se escribe al final. -->
+Esta entrega convierte la API del modelo P2 de MiBici (riesgo de desabasto o saturación por estación) en un sistema operable: Docker Compose levanta la API y el servidor de MLflow con un solo comando, un pipeline de GitHub Actions prueba, construye y publica la imagen en cada cambio, y pruebas de carga con Locust alimentan un análisis FinOps del costo por inferencia. El pipeline pasó en verde en ~10 min (run `44657398679` de `main`) y publicó la imagen en GHCR (`ghcr.io/alx016/mibici-p2-api`; Anexo A.2). En las pruebas de carga no hubo **ningún error** en los 6 escenarios: con 10 usuarios la API sostiene **14.26 req/s** con la CPU bajo 80%, y con 50 su única vCPU satura cerca de **24 req/s** (Sección 3). Enviar las 365 estaciones en una sola petición da **78.56× más predicciones por segundo** que enviarlas una por una. En una AWS EC2 `t3.small`, el costo en el pico es de **$0.01258 por millón de predicciones**, pero con la demanda real (365 predicciones por hora) sube a **$59.99**, porque la instancia pasa ociosa casi todo el mes. Recomendamos servir el lote horario con *scale-to-zero* y sin MLflow en inferencia, lo que baja el gasto de **$15.98 a menos de $0.01 al mes** (Sección 4).
 
 ## 1. Arquitectura y orquestación con Docker Compose
 
-El sistema se levanta con un solo comando desde un clon limpio: `make up` (equivalente a `docker compose up -d --build`). `docker-compose.yml` define dos servicios en la red interna `mibici-net`:
+El sistema se levanta con un solo comando desde un clon limpio: `make up` (`docker compose up -d --build`; Docker, 2026). `docker-compose.yml` define dos servicios conectados por la red *bridge* `mibici-net`:
 
-| Servicio | Imagen | Puerto | Límites | Función |
-|:---|:---|:---|:---|:---|
-| `mlflow` | `Containerfile.mlflow` (MLflow 3.17.2, versiones exactas de `uv.lock`) | 5001 | 0.5 CPU, 512 MiB | Tracking Server y Model Registry; metadatos y artefactos en el volumen `mlflow_data` |
-| `api` | `Containerfile` (FastAPI + champion v3) | 8000 | 1.0 CPU, 1024 MiB | Inferencia de P2 (`/health`, `/model-info`, `/predict`) |
+| Servicio | Puerto | Límites | Función |
+|:---|:---|:---|:---|
+| `mlflow` | 5001 | 0.5 CPU, 512 MiB | Tracking Server y Model Registry (MLflow 3.17.2; MLflow Project, 2026); metadatos y artefactos en el volumen `mlflow_data` |
+| `api` | 8000 | 1.0 CPU, 1024 MiB | Inferencia de P2 con FastAPI (`/health`, `/model-info`, `/predict`) |
 
-**Orden de arranque y salud.** Cada servicio tiene un *healthcheck* sobre su endpoint `/health`, y `api` declara `depends_on: mlflow: condition: service_healthy`, así que la API no arranca hasta que MLflow responde. `make compose-smoke` verifica el stack completo (`/health` de MLflow, `/model-info`, `/health` y `/predict` de la API), y el job `compose-and-smoke` del CI lo repite en cada PR (Sección 2).
+**Red, salud y variables.** Cada servicio tiene un *healthcheck* sobre `/health`, y `api` espera a MLflow con `depends_on: condition: service_healthy`. Dentro de la red, la API llega a MLflow por su nombre: `MLFLOW_TRACKING_URI=http://mlflow:5001` va fijo para que un `.env` local con `127.0.0.1` no rompa el DNS interno, mientras que `MODEL_URI`, `API_PORT` y `MLFLOW_PORT` se configuran desde el entorno.
 
-**Configuración.** Dentro de la red, la API llega a MLflow por su nombre de servicio: `MLFLOW_TRACKING_URI=http://mlflow:5001` va fijo en el compose y no se lee de `.env`, para que un `.env` local con `127.0.0.1` no rompa la resolución DNS interna. `MODEL_URI`, `API_PORT` y `MLFLOW_PORT` sí se pueden cambiar desde el entorno.
+**Clon limpio y modos de carga.** `models/p2-riesgo/` no está en Git: si falta, el `Containerfile` descomprime `models/p2-champion-v3.zip` durante el build con `RUN --mount=type=bind`, sin copiar el zip a la imagen. Por defecto la API sirve ese bundle inmutable y no depende de MLflow (`docker compose up -d --no-deps api`, base de la Opt 2); con `MODEL_URI=models:/mibici-equipo05-p2-riesgo@champion` carga el modelo del Registry en vivo. Validación y ajuste de memoria de MLflow en el Anexo A.1.
 
-**Clon limpio.** `models/p2-riesgo/` no está en Git. Si falta, el `Containerfile` descomprime el bundle versionado `models/p2-champion-v3.zip` durante el build; la carpeta se monta solo en ese paso (`RUN --mount=type=bind`), así que el zip no queda dentro de la imagen.
-
-**Dos modos de carga del modelo.**
-
-| Modo | `MODEL_URI` | Uso |
-|:---|:---|:---|
-| Bundle inmutable (default) | `/app/models/p2-riesgo` | La API arranca sin depender de MLflow; es el modo de producción |
-| Registry en vivo | `models:/mibici-equipo05-p2-riesgo@champion` | La API descarga el modelo desde `http://mlflow:5001`; sirve para promover versiones sin reconstruir la imagen |
-
-Los dos modos se validaron (Anexo A.1). Con `docker compose up -d --no-deps api`, la API funciona sin MLflow, que es la base de la Optimización 2 (Sección 4).
-
-**Ajuste de memoria de MLflow.** MLflow 3 levanta por defecto *workers* de *jobs* (~200 procesos y 1.7 GB en reposo). Con 512 MiB el *healthcheck* nunca pasaba, así que se apagaron con `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` (el proyecto no usa *jobs*): MLflow quedó en ~350 MiB y el stack completo en ~620 MiB en reposo, dentro de los 1.5 CPU y 1.5 GiB que caben en la `t3.small` de referencia (Sección 4).
-
-**Por qué no Redis + RQ.** La demanda real son 365 predicciones por hora, que la API resuelve en una sola petición de lote (mediana medida de 78 ms, Sección 3). Una cola asíncrona agregaría dos servicios, memoria y puntos de falla sin reducir la latencia, y no cabría en el presupuesto de la `t3.small`. Sería útil si las predicciones tardaran minutos o llegaran en ráfagas que la API no pudiera absorber, lo que no ocurre con P2.
+**Sin Redis + RQ.** La demanda real son 365 predicciones por hora, que una sola petición de lote resuelve en 78 ms (Sección 3). Una cola asíncrona agregaría dos servicios y memoria sin reducir la latencia, y no cabría en la `t3.small` de referencia.
 
 ## 2. CI/CD con GitHub Actions
 
-El workflow `.github/workflows/ci.yml` tiene tres disparadores: push a `main`, PR hacia `main` y ejecución manual (`workflow_dispatch`). En todos se corren las validaciones de lint y seguridad, pruebas y Compose (detalle en la tabla); `publish-image` solo corre en push a `main`. Con `concurrency` y `cancel-in-progress: true`, cada push nuevo a la misma rama cancela el run anterior para no gastar minutos en código viejo. Siguiendo el **principio de mínimo privilegio**, el workflow tiene `contents: read` por defecto y solo el job de publicación recibe `packages: write`; no se usan secretos propios, solo el `GITHUB_TOKEN` que GitHub genera en cada run. Así, ningún job puede modificar el repo ni publicar paquetes sin haber pasado todas las validaciones.
+`.github/workflows/ci.yml` corre en cada push y PR hacia `main` y de forma manual (`workflow_dispatch`), y `concurrency` cancela el run anterior de la misma rama (GitHub, 2026). Por **mínimo privilegio**, el permiso por defecto es `contents: read`, solo `publish-image` recibe `packages: write` y no hay secretos propios, solo el `GITHUB_TOKEN` de cada run. Cuatro jobs (detalle en el Anexo A.2):
 
-| Job | Qué valida y cómo | Qué falla atrapa |
-|:---|:---|:---|
-| `lint-and-security` | `make lint`: formato y errores estáticos (`ruff`); `make security`: `bandit` (código propio), `pip-audit` (dependencias) y `detect-secrets` (todo el repo). | Código mal formateado o con errores estáticos; código inseguro; librerías con vulnerabilidades conocidas (CVE); credenciales commiteadas. |
-| `test-matrix` | La suite de pytest se divide en dos jobs paralelos con marcadores: `slow` (suites de DeepChecks) y `not slow` (todo lo demás); `fail-fast: false` permite que ambos terminen aunque uno falle; `make prepare-model` descomprime `models/p2-champion-v3.zip` en `models/p2-riesgo/`. | Regresiones en la lógica (contrato de la API, features, entrenamiento, cálculo FinOps); problemas de integridad o drift en los datos (DeepChecks); que la API deje de ser compatible con el champion real, lo que sin el bundle se reportaría como *skip* (falso verde) en lugar de fallo. |
-| `compose-and-smoke` | Construye las dos imágenes de `docker-compose.yml` (`api` y `mlflow`); levanta el stack con `docker compose up --wait`, que espera a que pasen los healthchecks; `make compose-smoke` prueba `/health` de MLflow y `/model-info`, `/health` y `/predict` de la API; verifica que se sirva `mibici-equipo05-p2-riesgo` en su versión 3. | Errores de red, variables de entorno, healthchecks o un `Containerfile` roto; que la API sirva otro modelo o una versión equivocada. |
-| `publish-image` | Depende (`needs`) de los tres jobs anteriores y solo corre en push a `main` (`if`); publica `ghcr.io/alx016/mibici-p2-api` con dos tags: `latest` y el SHA del commit. | No detecta errores, los previene: evita que una imagen que no pasó lint, pruebas o el smoke test llegue a GHCR y alguien la despliegue. El tag por SHA da trazabilidad (imagen ↔ commit) y permite hacer rollback si la versión nueva falla. |
+- **`lint-and-security`:** `ruff` sobre el paquete `tc5061_proyecto_equipo5`, `bandit`, `pip-audit` (CVE en dependencias) y `detect-secrets`.
+- **`test-matrix`:** **matriz** de pytest en dos jobs paralelos, `fast` y `slow` (DeepChecks), con el champion real descomprimido para que su prueba falle en lugar de saltarse.
+- **`compose-and-smoke`:** **valida el levantamiento con Compose** (`up --wait` hasta pasar los *healthchecks*), prueba `/health`, `/model-info` y `/predict`, y verifica que se sirva la v3.
+- **`publish-image`:** solo en push a `main` y tras los otros tres, **publica** `ghcr.io/alx016/mibici-p2-api` con los tags `latest` y `sha-<commit>`, para trazabilidad y *rollback*.
 
-La caché acelera los runs al no reconstruir lo que no cambió: dependencias de Python (incluido el entorno de DeepChecks) con uv y capas de Docker con Buildx. `compose-and-smoke` y `publish-image` comparten la caché de la imagen `api`, así que la publicación reutiliza sus capas: en el run [`44657398679`](https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/runs/44657398679) de `main`, la imagen se construyó en 25 s con el 50% de las capas en caché.
-
-Ese run pasó en verde en ~10 min (capturas en el Anexo A.2). La ruta crítica es `Tests (fast)` (~9.3 min) seguido de `publish-image` (38 s): para acelerar el pipeline habría que acelerar `fast`, porque optimizar los otros jobs no cambiaría el tiempo total.
-
-El pipeline cubre CI y **entrega continua**, pero no despliegue continuo: nada se despliega automáticamente a un servidor. Las pruebas de Locust (Sección 3) tampoco corren en CI por su duración y porque en runners compartidos los resultados varían según la máquina virtual, lo que haría poco confiable el cálculo FinOps (Sección 4).
+La **caché** de uv (dependencias) y de Buildx (capas, compartida entre el smoke test y la publicación) evita reconstruir lo que no cambió: en el run [`44657398679`](https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/runs/44657398679) de `main`, en verde en ~10 min, la imagen se construyó en 25 s con el 50% de las capas en caché. El pipeline llega a entrega continua, no a despliegue continuo, y Locust queda fuera de CI porque los *runners* compartidos dan resultados variables.
 
 ## 3. Pruebas de carga con Locust y uso de recursos
 
-El modelo P2 predice por hora las **365 estaciones activas** de MiBici (`POST /predict` admite de 1 a 500 instancias). En `load_tests/locustfile.py`, el escenario **`mixed`** (`wait_time` de `0.2` a `1.0 s`) combina consultas unitarias (`@task(5)`, `batch=1`), zonales (`@task(3)`, `batch=20`), de red completa (`@task(1)`, `batch=365`) y lecturas `/model-info` y `/health` (`@task(1)`), validando HTTP `200` y longitud exacta de `predictions`. Además, **`batch_1x365`** y **`batch_365x1`** (1 usuario, sin pausa) contrastan el envío por lote completo frente a peticiones individuales. La corrida oficial en Linux Docker (`mibici-api`: `1.0` vCPU, `1,024 MiB`; `mibici-mlflow`: `0.5` vCPU, `512 MiB`) con `docker stats` cada `1.5 s` (`scripts/collect_load_metrics.py`) registró **0 fallos (0.00%)** y `OOMKilled=false` en los 6 escenarios (**Anexo B**).
+El modelo predice por hora las **365 estaciones activas** de MiBici. El escenario **`mixed`** de `load_tests/locustfile.py` (Locust, 2026; pausa de 0.2 a 1.0 s) mezcla consultas unitarias (`batch=1`, peso 5), zonales (`batch=20`, peso 3), de red completa (`batch=365`, peso 1) y lecturas de `/model-info` y `/health` (peso 1), valida HTTP 200 y el número de predicciones, y corre en escalones de 10, 50 y 120 usuarios. **`batch_1x365`** y **`batch_365x1`** (1 usuario, sin pausa) comparan un lote completo contra 365 peticiones individuales. La corrida oficial en Linux, con `docker stats` cada 1.5 s, registró **0 fallos** y ningún `OOMKilled` en los 6 escenarios (Anexo B).
+
+<div class="par-figuras" markdown="1">
+<div markdown="1">
 
 ![Figura 1. Throughput (RPS) y usuarios concurrentes a lo largo de la corrida oficial y por endpoint](figures/entrega6/01_rps_y_usuarios_vs_tiempo.png)
 
-**Figura 1.** Throughput (RPS) y usuarios concurrentes por escalón (arriba) y endpoint (abajo). En carga mixta, `nominal_10u` sostiene `14.26 req/s` (`583.8 pred/s`), `high_50u` alcanza el techo HTTP de `23.82 req/s` (`917.4 pred/s`) y `stress_120u` cae a `20.95 req/s` (`830.0 pred/s`); por lotes, `batch_1x365` logra `11.94 req/s` (`4,358.1 pred/s`) frente a `55.48 req/s` (`55.5 pred/s`) en `batch_365x1`.
+**Figura 1.** RPS por escalón y por endpoint. `nominal_10u` sostiene 14.26 req/s y `high_50u` toca el techo de 23.82 req/s; `batch_1x365` entrega 4,358 pred/s contra 55.5 de `batch_365x1`.
+
+</div>
+<div markdown="1">
 
 ![Figura 2. Percentiles de latencia p50, p95 y p99, desglose p95 por tamaño de lote y tasa de error](figures/entrega6/02_latencia_percentiles.png)
 
-**Figura 2.** Latencias (`p50`/`p95`/`p99`), `p95` por tamaño de lote y tasa de error (`0.0%` en todos los casos). En `nominal_10u` la mediana es `38 ms` (`p95=320 ms`, `p99=810 ms`; `batch=365`: `p50=120 ms`, `p95=710 ms`), pero al saturar CPU sube a `p50=1,300 ms` (`p95=2,800 ms`) en `high_50u` y a `p50=4,600 ms` (`p95=7,700 ms`, `p99=8,300 ms`) en `stress_120u`.
+**Figura 2.** Latencias p50/p95/p99, p95 por tamaño de lote y tasa de error (0% en todos los casos). La mediana pasa de 38 ms en `nominal_10u` a 1.3 s en `high_50u` y 4.6 s en `stress_120u`.
+
+</div>
+</div>
 
 ![Figura 3. Consumo de CPU y memoria RAM por contenedor según docker stats](figures/entrega6/03_recursos_contenedores.png)
 
-**Figura 3.** CPU y RAM observadas en `docker stats`. El cuello es puramente de cómputo en `api` (`1.8%` en `baseline`, `47.8%` en `nominal_10u`, `99.2%` en `high_50u`, `100.5%` en `stress_120u`), mientras su RAM sube apenas de `241.3 MiB` a `293.9 MiB` máx. (`28.7%` de `1,024 MiB`) y `mlflow` permanece casi inactivo (`3.1%–4.0%` CPU, `~374 MiB` / `73%` de `512 MiB`).
+**Figura 3.** CPU y RAM por contenedor (`docker stats`). La CPU de `api` pasa de 1.8% en reposo a 47.8% con 10 usuarios y ~100% desde 50, mientras su RAM no pasa de 294 MiB; `mlflow` se mantiene casi inactivo (3–4% de CPU, ~374 MiB).
 
-**Interpretación y áreas de mejora.** La rodilla de saturación ocurre entre `10` y `50` usuarios: `nominal_10u` cumple `CPU <= 80%` con `0%` de error, pero con `50` usuarios la única vCPU de `api` satura y con `120` usuarios la mediana crece `3.5x` (`4.6 s`) y los RPS caen `12%`. En `tc5061_proyecto_equipo5/api/main.py` y `model.py`, `predict_risk` es síncrona (hilos AnyIO bajo 1 worker Uvicorn en `Containerfile`) y en cada llamada reconstruye un `pd.DataFrame` con `astype(SIGNATURE_DTYPES)` para `mlflow.pyfunc`, provocando contención del GIL y competencia de hilos OpenMP en LightGBM. Tres mejoras cuantificadas en la Sección 4 atacan estos cuellos: (1) agrupar en lotes (`batch_1x365` multiplica `78.56x` las `pred/s` frente a `batch_365x1`); (2) retirar `mlflow` en inferencia (`--no-deps api`, liberando `~374 MiB` y `0.5` vCPU); y (3) invocar el `Booster` con `numpy` sin DataFrame (`opt3_benchmark.json`: `20.37x` en `batch=1`, `4.31x` en `batch=20` y `1.61x` en `batch=365` con `max_prob_diff=0.0`; 1 hilo acelera `batch=1` a `54.91x` pero degrada `batch=365` a `0.45x`). Adicionalmente, escalar los *workers* de Uvicorn según las vCPUs disponibles mitigaría la contención del GIL bajo concurrencia alta (mejora operativa no cuantificada), y la arquitectura sin estado habilitada por (1) y (2) sustenta el esquema *scale-to-zero* evaluado como Opt 4 en la Sección 4.
+**Interpretación y áreas de mejora.** La rodilla de saturación está entre 10 y 50 usuarios: con 10, la CPU de `api` queda bajo 80% sin errores; con 50, su única vCPU satura, y con 120 la mediana crece 3.5× (4.6 s) y los RPS caen 12%. El cuello es de cómputo, no de memoria: `predict_risk` es síncrona bajo un solo *worker* de Uvicorn y en cada llamada reconstruye un `pd.DataFrame` para `mlflow.pyfunc`, lo que genera contención del GIL y de los hilos OpenMP de LightGBM. De ahí salen tres mejoras que la Sección 4 cuantifica: agrupar en lotes (`batch_1x365` multiplica **78.56×** las predicciones por segundo), retirar `mlflow` del camino de inferencia (libera ~374 MiB y 0.5 vCPU) e invocar el `Booster` con `numpy` (20.37× más rápido en `batch=1` y 1.61× en `batch=365`, con las mismas probabilidades; Anexo B.4). Escalar los *workers* de Uvicorn también aliviaría el GIL (no cuantificado).
 
 ## 4. Análisis FinOps
 
-**Parámetros base y armonización mensual (730 h/mes).** Siguiendo `scripts/finops_calc.py` y la facturación AWS de `730 h/mes` (`2,628,000 s/mes`), la instancia de referencia AWS EC2 `t3.small` (`us-east-1`, 2 vCPU, 2 GiB) cuesta `$0.0208/h` (`$15.18/mes`) más `10 GB` EBS `gp3` a `$0.08/GB-mes` (`$0.80/mes`), sumando **`$15.98 USD/mes`** (`$16.78/mes` con `20 GB`), más `$0.05/vCPU-h` por *burst* sobre la línea base del `20%` (`0.4` vCPU; Amazon Web Services, 2026a, 2026b, 2026c). La demanda real armonizada de MiBici es `365 estaciones × 730 h/mes =` **`266,450 predicciones/mes`** (`~8,760/día`, **Anexo C**).
+La instancia de referencia es una AWS EC2 `t3.small` (`us-east-1`, 2 vCPU, 2 GiB), donde caben los 1.5 CPU y 1.5 GiB del stack: `$0.0208/h` × 730 h más 10 GB de EBS `gp3` suman **$15.98 al mes**, más $0.05 por vCPU-hora de *burst* sobre la línea base del 20% (Amazon Web Services, 2026a, 2026b, 2026c). La demanda real es de 365 estaciones × 730 h = **266,450 predicciones al mes**. El costo se mide de tres formas (FinOps Foundation, 2026; cálculo en el Anexo C):
 
-**Tres regímenes de costo (`finops_summary.json`).** (1) **Pico sostenible (`nominal_10u`):** mayor rendimiento con error `<= 1%` y CPU `api <= 80%` (`14.26 req/s`, `583.8 pred/s`, `0.5125` vCPU; `+$0.005627/h` de créditos = `$0.02643/h`), equivalente a **`$5.15×10⁻⁷/req`**, **`$1.26×10⁻⁸/pred`** y **`$0.01258 USD/1M pred`**. (2) **Operación real 24/7:** pagar `$15.98/mes` para `266,450 pred/mes` equivale a **`$59.99 USD/1M pred`** (`4,769x` el costo pico, al quedar ociosa `99.84%` del mes en `batch=1` y `99.998%` en `batch=365`). (3) **Atribución por servicio en el pico:** promediando CPU y RAM en `nominal_10u`, **`api` explica 66.5%** (`$10.63/mes`) y **`mlflow` 33.5%** (`$5.35/mes`).
+1. **Pico sostenible** (`nominal_10u`, el mayor rendimiento con error ≤ 1% y CPU de `api` ≤ 80%): 583.8 pred/s a $0.02643/h con créditos, es decir, **$0.01258 por millón de predicciones**.
+2. **Operación real 24/7:** $15.98 al mes para 266,450 predicciones equivalen a **$59.99 por millón**, 4,769× el pico, porque la instancia pasa ociosa más del 99.8% del mes.
+3. **Atribución por servicio:** en el pico, `api` explica el 66.5% del costo y `mlflow` el 33.5%.
 
 ![Figura 4. Comparativa FinOps de costo por 1M de predicciones frente a la línea base correspondiente](figures/entrega6/04_finops_comparativa_optimizaciones.png)
 
-**Figura 4.** Costo por 1M de predicciones frente a su línea base: arriba, optimizaciones de capacidad (pico, `$0.01258`; mostrado como `$0.0126` en la barra); abajo, *scale-to-zero* sobre demanda real 24/7 (`$59.99`).
+**Figura 4.** Costo por millón de predicciones contra su línea base: arriba, optimizaciones de capacidad frente al pico ($0.01258, mostrado como $0.0126); abajo, *scale-to-zero* frente a la operación real 24/7 ($59.99).
 
-**Optimizaciones cuantificadas y comparativa *scale-to-zero*.** Frente al pico (`$0.01258/1M`), **Opt 1 (`batch_1x365`)** alcanza `4,358.1 pred/s` y baja el costo a **`$0.00315/1M`** (`74.95%` de ahorro vs. pico mixto; `98.65%` vs. unitario `$0.2332/1M`); **Opt 2 (`--no-deps api`)** elimina el `33.49%` atribuido a `mlflow` (`$0.008364/1M`, `$10.63/mes`); y **Opt 3 (`Booster` + `numpy`)**, con el speedup conservador de `batch=365` (`1.61x`), lo reduce a **`$0.007811/1M`** (`37.89%`). Frente al gasto real 24/7 (`$15.98/mes`), **Opt 4 (*scale-to-zero*)** factura solo el tiempo activo, logrando `< $0.01/mes` (`>99.9%` ahorro) en lote horario tanto con `p50` medido (`78 ms` lote, `16 ms` unitario) como con margen conservador (`0.5 s` / `50 ms`):
-
-| Plataforma (`730 h/mes`, `266,450 pred/mes`) | Tarifa pública (18 nov 2026) | Lote (`730 req/mes`, USD/mes): `78 ms` / `0.5 s` | Unitario (`266,450 req/mes`, USD/mes): `16 ms` / `50 ms` | Ahorro vs. `t3.small` |
-|:---|:---|---:|---:|---:|
-| EC2 `t3.small` (`us-east-1`, `10 GB gp3`) | `$0.0208/h` + `$0.80/mes` + burst (Amazon Web Services, 2026a, 2026b, 2026c) | `$15.98` (`99.998%` / `99.99%` ocioso) | `$15.98` (`99.84%` / `99.49%` ocioso) | Base (`0%`) |
-| AWS Lambda (`us-east-1`, `1 GB` x86) | `$1.667e-5/GB-s` + `$0.20/1M` inv. (Amazon Web Services, 2026d) | **`$0.0011`** / `$0.0062` | **`$0.1243`** / `$0.2753` | **`99.99%`** (`99.96%`) lote; **`99.22%`** (`98.28%`) unit. |
-| Cloud Run (`us-central1`, `1 vCPU/1 GiB`) | `$2.65e-5/s` + `$0.40/1M` req. (Google Cloud, 2026) | **`$0.0018`** / `$0.0100` | **`$0.2196`** / `$0.4596` | **`99.99%`** (`99.94%`) lote; **`98.63%`** (`97.12%`) unit. |
+**Optimizaciones.** Contra el pico, **Opt 1** (lotes de 365) baja el costo a $0.00315 por millón (−74.95%), **Opt 2** (`--no-deps api`) elimina la parte de `mlflow` (−33.49%, $10.63 al mes) y **Opt 3** (`Booster` + `numpy`, con el *speedup* conservador de 1.61×) lo deja en $0.007811 (−37.89%). El problema de fondo, sin embargo, es la instancia ociosa, y lo resuelve **Opt 4** (*scale-to-zero*), que solo cobra el tiempo activo y es viable porque Opt 1 y 2 dejan una API sin estado ni MLflow. Con las tarifas públicas (Amazon Web Services, 2026d; Google Cloud, 2026) y la latencia mediana medida, el lote horario costaría **$0.0011 al mes en AWS Lambda** y **$0.0018 en Cloud Run** (−99.99%), y aun sin agrupar, $0.12 y $0.22 (−99.22% y −98.63%). Con margen conservador de latencia sigue en $0.01 o menos (Anexo C.6).
 
 ## 5. Conclusiones
 
-<!-- Borrador de Emilio (WP-3b) sobre los bullets del equipo; cierre de Manuel (WP-D). ~0.5 pág.
-Cuatro o cinco bullets: operación en un comando, CI, comportamiento bajo carga, costo y
-siguiente paso. -->
-
-- **Orquestación reproducible en un comando y respaldo por paquete inmutable.** `docker-compose.yml` despliega `mibici-api` (`1.0 vCPU`, `1024 MiB`) y `mibici-mlflow` (`0.5 vCPU`, `512 MiB`, MLflow `3.17.2` con `--allowed-hosts` y volumen `mlflow_data`) en la red `mibici-net` sincronizados mediante `depends_on` con `condition: service_healthy`. El `Containerfile` desempaqueta automáticamente `models/p2-champion-v3.zip` cuando falta el directorio local, lo que garantiza el arranque con `docker compose up -d --build` desde un clon limpio y permite alternar sin cambios de código hacia la resolución en vivo del Registry (`models:/mibici-equipo05-p2-riesgo@champion`).
-- **Gobernanza automatizada de CI/CD y seguridad en GitHub Actions.** El flujo `.github/workflows/ci.yml` bloquea regresiones mediante compuertas estáticas y de seguridad (`ruff`, `bandit`, `pip-audit` y `detect-secrets`), ejecuta en paralelo la matriz de pruebas `fast` y `slow` con caché de `uv` (incluyendo DeepChecks en Python 3.12 y el contrato del paquete `v3` con `make prepare-model`), valida la pila completa con pruebas de humo en Docker Compose (`/health`, `/model-info` y `/predict`) y publica imágenes verificadas en GHCR (`ghcr.io/alx016/mibici-p2-api`).
-- **Resiliencia bajo carga de 365 estaciones y perfilado de concurrencia en Locust.** Las pruebas de carga (`load_tests/locustfile.py`) y la telemetría de `docker stats` (`scripts/collect_load_metrics.py`) sobre escalones de 10, 50 y 120 usuarios concurrentes demuestran que agrupar las 365 estaciones activas de MiBici en lotes (`batch=20` y `batch=365` frente a `batch=1`) multiplica el rendimiento efectivo en predicciones por segundo. El perfilado bajo saturación identifica como cuellos de botella la contención del GIL en un único proceso Uvicorn, la construcción repetida de `pd.DataFrame` con `astype(SIGNATURE_DTYPES)` en `mlflow.pyfunc` y la competencia de hilos OpenMP en LightGBM, lo que fundamenta la ejecución directa sobre `Booster` con arreglos `numpy` (Optimización 3).
-- **Eficiencia FinOps mediante procesamiento por lotes, desacoplamiento y scale-to-zero.** La demanda real de MiBici (`365` estaciones × `730 h/mes` = `266,450` predicciones/mes) deja ociosa una instancia dedicada AWS EC2 `t3.small` (`$15.98 USD/mes` con 10 GB EBS `gp3` o `$16.78 USD/mes` con 20 GB) entre el `99.49%`–`99.84%` (`batch=1`) y el `99.99%`–`99.998%` (`batch=365`) del mes. Combinar el lote horario consolidado (`730` peticiones/mes, Optimización 1) y el retiro de MLflow del camino de inferencia (`--no-deps api`, Optimización 2) con ejecución *serverless* bajo demanda (Optimización 4) reduce el gasto mensual a `$0.0011`–`$0.0062 USD/mes` en AWS Lambda y `$0.0018`–`$0.0100 USD/mes` en Google Cloud Run (`< $0.02 USD/mes`, ahorro `>99.9%`), o a `$0.12`–`$0.46 USD/mes` bajo peticiones unitarias (ahorro `97.1%` a `99.2%`, FinOps Foundation, 2026).
-- **Madurez MLOps de extremo a extremo para la operación de MiBici P2.** La integración de las Entregas 1 a 6 consolida un ciclo operativo trazable que enlaza datos versionados por manifiesto y validación DeepChecks (E1 y E3), gobierno de experimentos y Model Registry en MLflow (E2), servicio contenedorizado con contratos estrictos en FastAPI y Pydantic (E4), monitoreo de *data drift* con Evidently y pruebas A/B con disparadores de reentrenamiento continuo (E5), y operación reproducible con CI/CD, pruebas de estrés y disciplina FinOps lista para producción (E6; Gift & Deza, 2021; Treveil et al., 2020; Wilson, 2022).
+- **Operación en un comando.** `make up` levanta API y MLflow desde un clon limpio, con red propia, *healthchecks* y un bundle que no depende del Registry.
+- **CI/CD en verde.** Cada PR pasa lint, seguridad, matriz de pruebas y smoke test con Compose antes de que `main` publique en GHCR.
+- **Comportamiento bajo carga.** Sin errores hasta 120 usuarios, pero con un solo *worker* la API satura su vCPU cerca de 24 req/s por la sobrecarga por petición.
+- **Costo y siguiente paso.** La `t3.small` pasa ociosa casi todo el mes ($59.99 por millón con la demanda real). Recomendamos *scale-to-zero* con el lote horario y sin MLflow (menos de $0.01 al mes) y aplicar la Opt 3. Con esto se cierra el ciclo MLOps de las Entregas 1 a 6 (Gift & Deza, 2021; Treveil et al., 2020; Wilson, 2022).
 
 ## Referencias
-
-<!-- Emilio (WP-3b) completa y ordena en APA 7. Las de precios llevan fecha de consulta. -->
 
 Amazon Web Services. (2026a). *Amazon EC2 On-Demand pricing*. Recuperado el 18 de noviembre de 2026, de https://aws.amazon.com/ec2/pricing/on-demand/
 
@@ -222,11 +215,32 @@ CMD ["mlflow", "server", \
 | Registry en vivo | *train*, *select* y *register* contra `http://127.0.0.1:5001`; `MODEL_URI=models:/mibici-equipo05-p2-riesgo@champion docker compose up -d api` | Test idéntico al champion (`test_recall_shortage` 0.8452). `/model-info` devuelve la versión 1 (run `36dd16ec`) cargada desde `http://mlflow:5001`; `/predict` da la misma predicción que el bundle |
 | API sin MLflow (Opt 2) | `docker compose up -d --no-deps api`, `make smoke` | Solo corre `mibici-api`; `/health` y `/predict` responden |
 | Puerto de MLflow | `make up MLFLOW_PORT=5002` | La UI responde 200 (antes 403 por `--allowed-hosts`) |
-| Consumo en reposo | `docker stats` | `api` 272 MiB de 1 GiB; `mlflow` 351 MiB de 512 MiB |
+
+### A.1.3 Modos de carga del modelo y memoria de MLflow
+
+| Modo | `MODEL_URI` | Uso |
+|:---|:---|:---|
+| Bundle inmutable (default) | `/app/models/p2-riesgo` | La API arranca sin depender de MLflow; es el modo de producción |
+| Registry en vivo | `models:/mibici-equipo05-p2-riesgo@champion` | La API descarga el modelo desde `http://mlflow:5001`; sirve para promover versiones sin reconstruir la imagen |
+
+MLflow 3 levanta por defecto *workers* de *jobs* (~200 procesos y 1.7 GB en reposo). Con 512 MiB el *healthcheck* nunca pasaba, así que se apagaron con `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` (el proyecto no usa *jobs*). En la corrida oficial, MLflow quedó en ~374 MiB y el stack completo en ~615 MiB en reposo (Anexo B.3), dentro de los 1.5 CPU y 1.5 GiB que caben en la `t3.small` de referencia. Una cola Redis + RQ sería útil si las predicciones tardaran minutos o llegaran en ráfagas que la API no pudiera absorber, lo que no ocurre con P2.
 
 ## Anexo A.2. Pipeline de CI/CD
 
 Las capturas corresponden al run [`44657398679`](https://github.com/alx016/TC5061-Proyecto-Equipo05/actions/runs/44657398679) del workflow `CI`, disparado por el push a `main` del merge del PR #60 (commit `1df0f86`), y al paquete [`ghcr.io/alx016/mibici-p2-api`](https://github.com/alx016/TC5061-Proyecto-Equipo05/pkgs/container/mibici-p2-api) que publicó.
+
+### A.2.1 Jobs del pipeline
+
+| Job | Qué valida y cómo | Qué falla atrapa |
+|:---|:---|:---|
+| `lint-and-security` | `make lint`: formato y errores estáticos del paquete `tc5061_proyecto_equipo5` (`ruff`); `make security`: `bandit` (código propio), `pip-audit` (dependencias) y `detect-secrets` (todo el repo). | Código mal formateado o con errores estáticos; código inseguro; librerías con vulnerabilidades conocidas (CVE); credenciales commiteadas. |
+| `test-matrix` | La suite de pytest se divide en dos jobs paralelos con marcadores: `slow` (suites de DeepChecks) y `not slow` (todo lo demás); `fail-fast: false` permite que ambos terminen aunque uno falle; `make prepare-model` descomprime `models/p2-champion-v3.zip` en `models/p2-riesgo/`. | Regresiones en la lógica (contrato de la API, features, entrenamiento, cálculo FinOps); problemas de integridad o drift en los datos (DeepChecks); que la API deje de ser compatible con el champion real, lo que sin el bundle se reportaría como *skip* (falso verde) en lugar de fallo. |
+| `compose-and-smoke` | Construye las dos imágenes de `docker-compose.yml` (`api` y `mlflow`); levanta el stack con `docker compose up --wait`, que espera a que pasen los healthchecks; `make compose-smoke` prueba `/health` de MLflow y `/model-info`, `/health` y `/predict` de la API; verifica que se sirva `mibici-equipo05-p2-riesgo` en su versión 3. | Errores de red, variables de entorno, healthchecks o un `Containerfile` roto; que la API sirva otro modelo o una versión equivocada. |
+| `publish-image` | Depende (`needs`) de los tres jobs anteriores y solo corre en push a `main` (`if`); publica `ghcr.io/alx016/mibici-p2-api` con dos tags: `latest` y el SHA del commit. | No detecta errores, los previene: evita que una imagen que no pasó lint, pruebas o el smoke test llegue a GHCR y alguien la despliegue. El tag por SHA da trazabilidad (imagen ↔ commit) y permite hacer rollback si la versión nueva falla. |
+
+La ruta crítica del run es `Tests (fast)` (~9.3 min) seguido de `publish-image` (38 s): para acelerar el pipeline habría que acelerar `fast`, porque los demás jobs corren en paralelo y optimizarlos no cambiaría el tiempo total.
+
+### A.2.2 Extractos de `ci.yml` y evidencia
 
 **Disparadores, permisos por defecto y cancelación de runs** (`.github/workflows/ci.yml`, líneas 3–16):
 
@@ -434,7 +448,17 @@ Línea base: $15.98/mes, $59.99 por 1M de predicciones. Las dos escalas no son c
 
 Sin agrupar (365 peticiones de 1 estación por hora): $0.1243/mes, ahorro de 99.22%.
 
-### C.6 Comandos de reproducción
+### C.6 Comparativa *scale-to-zero* por plataforma
+
+Opt 4 con la latencia mediana medida (`78 ms` por lote, `16 ms` por petición unitaria) y con un margen conservador (`0.5 s` / `50 ms`):
+
+| Plataforma (`730 h/mes`, `266,450 pred/mes`) | Tarifa pública (18 nov 2026) | Lote (`730 req/mes`, USD/mes): `78 ms` / `0.5 s` | Unitario (`266,450 req/mes`, USD/mes): `16 ms` / `50 ms` | Ahorro vs. `t3.small` |
+|:---|:---|---:|---:|---:|
+| EC2 `t3.small` (`us-east-1`, `10 GB gp3`) | `$0.0208/h` + `$0.80/mes` + burst (Amazon Web Services, 2026a, 2026b, 2026c) | `$15.98` (`99.998%` / `99.99%` ocioso) | `$15.98` (`99.84%` / `99.49%` ocioso) | Base (`0%`) |
+| AWS Lambda (`us-east-1`, `1 GB` x86) | `$1.667e-5/GB-s` + `$0.20/1M` inv. (Amazon Web Services, 2026d) | **`$0.0011`** / `$0.0062` | **`$0.1243`** / `$0.2753` | **`99.99%`** (`99.96%`) lote; **`99.22%`** (`98.28%`) unit. |
+| Cloud Run (`us-central1`, `1 vCPU/1 GiB`) | `$2.65e-5/s` + `$0.40/1M` req. (Google Cloud, 2026) | **`$0.0018`** / `$0.0100` | **`$0.2196`** / `$0.4596` | **`99.99%`** (`99.94%`) lote; **`98.63%`** (`97.12%`) unit. |
+
+### C.7 Comandos de reproducción
 
 ```bash
 make up && make compose-smoke
