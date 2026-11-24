@@ -16,7 +16,7 @@ from tc5061_proyecto_equipo5.api.model import SIGNATURE_DTYPES, load_model, pred
 from tc5061_proyecto_equipo5.modeling.train_classification import FEATURE_COLUMNS
 
 NAME = "mibici-equipo05-p2-riesgo"
-ORIGINAL_RUN = "7bf71250a91947ba8465d5db48d4bce5"
+ORIGINAL_RUN = "run-original-v3"
 
 
 def write_metadata(bundle: Path, source_run_id: str = ORIGINAL_RUN) -> None:
@@ -26,7 +26,7 @@ def write_metadata(bundle: Path, source_run_id: str = ORIGINAL_RUN) -> None:
         "model_version": "3",
         "model_alias": "champion",
         "source_run_id": source_run_id,
-        "git_commit": "71b6c42f47040bd5ada00078982a01fe6a8e9dd4",
+        "git_commit": "commit-de-prueba",
         "data_version": "4c54003c",
         "thresholds": {"shortage": 0.2, "saturation": 0.95},
         "exported_at": "2026-11-05T01:06:39Z",
@@ -82,7 +82,7 @@ def test_the_seeded_run_carries_what_the_api_reads(tracking: str, bundle: Path):
     assert run.data.params["threshold_shortage"] == "0.2"
     assert run.data.params["threshold_saturation"] == "0.95"
     assert run.data.params["data_version"] == "4c54003c"
-    assert run.data.tags["git_commit"] == "71b6c42f47040bd5ada00078982a01fe6a8e9dd4"
+    assert run.data.tags["git_commit"] == "commit-de-prueba"
 
 
 def test_the_api_loads_and_scores_the_seeded_champion(tracking: str, bundle: Path):
