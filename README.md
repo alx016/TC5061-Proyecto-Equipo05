@@ -29,12 +29,13 @@ Este proyecto integrador consolida el ciclo de vida completo de MLOps para el si
 
 ```mermaid
 flowchart LR
-    A["Datos 2024<br/>(MiBici CSV)"] --> B["Features<br/>(sin fuga)"]
-    B --> C["MLflow Tracking<br/>(6 entry points)"]
+    A["Datos abiertos MiBici<br/>(2024 entrenamiento, 2025 monitoreo)"] --> B["Features sin fuga<br/>(MLflow Project)"]
+    B --> C["MLflow Tracking"]
     C --> D["Model Registry<br/>(@champion v3)"]
     D --> E["API FastAPI<br/>(Docker Compose)"]
-    E --> F["CI/CD Pipeline<br/>(GitHub Actions)"]
-    F --> G["Monitoreo y FinOps<br/>(Evidently + A/B)"]
+    D --> G["Monitoreo<br/>(Evidently + A/B)"]
+    F["CI/CD<br/>(GitHub Actions)"] -. "construye, prueba y publica" .-> E
+    E --> H["Carga y FinOps<br/>(Locust)"]
 ```
 
 ### Matriz de rúbrica contra evidencia
@@ -42,9 +43,9 @@ flowchart LR
 | Criterio (peso) | Archivo o componente de evidencia | Comando o demostración en vivo |
 |:---|:---|:---|
 | **Estructura y experimentación (20%)** | Plantilla Cookiecutter Data Science, [`tc5061_proyecto_equipo5/features.py`](tc5061_proyecto_equipo5/features.py), [`MLproject`](MLproject) con 6 entry points y tracking en MLflow con tags `git_commit`/`git_dirty`. | `make mlflow-server`<br>`uv run mlflow run . -e features -P question=p2 --env-manager local` |
-| **Modelo y Registry (15%)** | [`tc5061_proyecto_equipo5/modeling/registry.py`](tc5061_proyecto_equipo5/modeling/registry.py), bundle versionado [`models/p2-champion-v3.zip`](models/p2-champion-v3.zip), metadatos de linaje en [`models/p2-riesgo/registry_metadata.json`](models/p2-riesgo/registry_metadata.json), y aliases `champion`/`challenger`. | `make seed-registry`<br>`curl -fsS http://localhost:8000/model-info` |
+| **Modelo y Registry (15%)** | [`tc5061_proyecto_equipo5/modeling/registry.py`](tc5061_proyecto_equipo5/modeling/registry.py), bundle versionado [`models/p2-champion-v3.zip`](models/p2-champion-v3.zip), metadatos de linaje en `registry_metadata.json` (dentro del zip), y aliases `champion`/`challenger`. | `make seed-registry`<br>`curl -fsS http://localhost:8000/model-info` |
 | **Despliegue y operación (25%)** | [`Containerfile`](Containerfile), [`docker-compose.yml`](docker-compose.yml) con healthchecks y límites de memoria/CPU, pipeline de 4 jobs en [`.github/workflows/ci.yml`](.github/workflows/ci.yml) e imagen en GHCR (`ghcr.io/alx016/mibici-p2-api`). | `make up`<br>`make compose-smoke` |
-| **Monitoreo, gobernanza y FinOps (20%)** | Reporte de drift con Evidently en [`reports/monitoring/drift_2024_vs_2025.html`](reports/monitoring/drift_2024_vs_2025.html), resumen A/B en `reports/monitoring/ab_summary.json`, reporte FinOps en [`reports/TC5061_Operacion_FinOps_Equipo05.pdf`](reports/TC5061_Operacion_FinOps_Equipo05.pdf) y Model Card en [`reports/model_card.md`](reports/model_card.md). | `make drift-report`<br>`make ab-test`<br>`make load-test` |
+| **Monitoreo, gobernanza y FinOps (20%)** | Reporte de drift con Evidently en [`reports/monitoring/drift_2024_vs_2025.html`](reports/monitoring/drift_2024_vs_2025.html), resumen A/B en [`reports/monitoring/ab_summary.json`](reports/monitoring/ab_summary.json), reporte FinOps en [`reports/TC5061_Operacion_FinOps_Equipo05.pdf`](reports/TC5061_Operacion_FinOps_Equipo05.pdf) y Model Card en [`reports/model_card.md`](reports/model_card.md). | `make drift-report`<br>`make ab-test`<br>`make load-test` |
 | **Presentación y video (20%)** | Presentación ejecutiva en [`reports/TC5061_Proyecto_Final_Equipo05.pdf`](reports/TC5061_Proyecto_Final_Equipo05.pdf) y guion estructurado en [`references/deliverables/final-video-script.md`](references/deliverables/final-video-script.md). | Video continuo de 4 a 5 minutos mostrando inferencia en vivo y métricas operativas. |
 
 ## Preguntas de negocio
