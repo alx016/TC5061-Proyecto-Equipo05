@@ -662,6 +662,21 @@ La API soporta dos estrategias de carga según el escenario de operación:
 | **Bundle inmutable (default)** | `/app/models/p2-riesgo` | Carga el modelo empaquetado directamente en la imagen de contenedor. Permite que la API arranque y responda inmediatamente en clon limpio sin requerir conexión a un servidor de MLflow activo. |
 | **Live Model Registry** | `models:/mibici-equipo05-p2-riesgo@champion` | Descarga y resuelve dinámicamente el modelo registrado con el alias `champion` desde el servicio `mlflow:5001` en tiempo de ejecución. Requiere que el modelo esté registrado en el servidor de tracking. |
 
+##### Servir el modelo desde el Model Registry (`make seed-registry`)
+
+El servidor MLflow de Compose arranca inicialmente vacío. Para que la API cargue el champion desde el Model Registry en lugar del bundle local:
+
+```bash
+make up                 # levanta mlflow + api (la API usa el bundle)
+make seed-registry      # registra el champion v3 del bundle como @champion
+MODEL_URI=models:/mibici-equipo05-p2-riesgo@champion docker compose up -d api
+curl -s http://127.0.0.1:8000/model-info   # model_version "1", alias champion
+```
+
+El comando `make seed-registry` vuelve a registrar el bundle en un run nuevo con sus umbrales, `data_version` y `git_commit`, preservando el run original en el tag `source_run_id_original`. Se puede ejecutar varias veces sin generar versiones duplicadas por su diseño idempotente. Si `@champion` ya apunta a otro modelo, el proceso se detiene; para forzar la reasignación se utiliza `uv run python scripts/seed_registry.py --force`.
+
+Para regresar al bundle inmutable ejecuta `docker compose up -d api`. Para reiniciar con el Registry completamente vacío ejecuta `docker compose down -v` (elimina el volumen `mlflow_data`).
+
 ### Pipeline de CI/CD (GitHub Actions)
 
 El flujo de trabajo en [`.github/workflows/ci.yml`](.github/workflows/ci.yml) se ejecuta automáticamente en cada `push` o `pull_request` hacia la rama `main`:
