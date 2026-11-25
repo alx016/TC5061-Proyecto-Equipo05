@@ -20,7 +20,7 @@ debe contar el argumento completo.
 | 4 | 1:00–1:25 | Emilio | Cada experimento es un run reproducible y trazable a su commit y sus datos | Runs de P2 en MLflow |
 | 5 | 1:25–1:55 | Fernando | **DEMO** · El champion v3 vive en el Registry con su linaje completo | MLflow UI en vivo |
 | 6 | 1:55–2:40 | Fernando | **DEMO** · Un comando levanta API y MLflow; la API responde en vivo | Terminal en vivo |
-| 7 | 2:40–3:05 | Emilio | **DEMO** · Ningún cambio llega a `main` sin pasar cuatro etapas | GitHub Actions en vivo |
+| 7 | 2:40–3:05 | Emilio | **DEMO** · Ningún cambio llega a `main` sin pasar tres checks; solo `main` publica la imagen | GitHub Actions en vivo |
 | 8 | 3:05–3:35 | Oscar | Con la demanda real, el costo es la instancia ociosa: scale-to-zero lo baja casi a cero | Comparativa FinOps |
 | 9 | 3:35–4:00 | Oscar | Los datos no cambiaron, pero el recall de desabasto ya cayó debajo del piso | Drift + A/B |
 | 10 | 4:00–4:15 | Oscar | El Model Card dice lo que el modelo no hace bien | Captura del Model Card |
@@ -84,9 +84,9 @@ debe contar el argumento completo.
 - **La narración cubre:**
   - Aliases en lugar de stages (deprecados desde MLflow 2.9): `champion` = producción,
     `challenger` = candidato. Una versión nueva entra como `challenger`; promover es mover el alias.
-  - Linaje: run de origen, commit, versión de datos, umbrales (0.20 desabasto, 0.95 saturación).
-  - Una frase: "es la v3 de nuestro Registry de desarrollo, sembrada en el stack" (plan,
-    problema 2).
+  - Linaje en los tags de la versión: run de origen, commit, versión de datos.
+  - Aparece como versión 1 porque el MLflow de Compose arranca vacío; el tag
+    `source_registry_version` dice que es la v3 de desarrollo (plan, problema 2).
 
 ### 6 · DEMO API en Compose (1:55–2:40, Fernando)
 
@@ -97,22 +97,25 @@ debe contar el argumento completo.
 - **La narración cubre:**
   - Dos servicios en una red privada, con healthchecks y límites de CPU/memoria
     (`docker-compose.yml`).
-  - `/model-info` confirma qué modelo y versión se sirven (cargado desde `models:/…@champion`).
+  - `/model-info` confirma qué modelo y versión se sirven (cargado desde `models:/…@champion`) y
+    sus umbrales: 0.20 desabasto, 0.95 saturación (son params del run, no tags de la versión, por
+    eso se muestran aquí y no en la demo 5).
   - `/predict` devuelve la clase y las probabilidades por estación; leer en voz alta un resultado.
   - Latencia mediana con 10 usuarios: 38 ms por estación, 120 ms con 365 estaciones
     (`reports/load/finops_summary.json`, `nominal_10u`).
 
 ### 7 · DEMO CI/CD (2:40–3:05, Emilio)
 
-- **Título:** Ningún cambio llega a `main` sin pasar cuatro etapas
+- **Título:** Ningún cambio llega a `main` sin pasar tres checks; solo `main` publica la imagen
 - **Evidencia (PDF):** `reports/figures/entrega6/ci_run_verde1.png`
 - **En pantalla:** GitHub → Actions → última corrida verde en `main`.
 - **La narración cubre:**
-  - Etapas: lint y seguridad (ruff, bandit, pip-audit, detect-secrets) → pruebas fast/slow (521
-    pruebas en la suite rápida, PR #68) → Compose y smoke → publicación de la imagen en GHCR
-    (`ghcr.io/alx016/mibici-p2-api`).
-  - Solo `main` publica, y solo si las tres primeras pasan.
-  - La corrida tarda ~7 a 13 min (últimas corridas en `main`).
+  - Tres jobs en paralelo: lint y seguridad (ruff, bandit, pip-audit, detect-secrets), pruebas
+    fast/slow (536: 531 rápidas y 5 lentas, corrida del merge de #70) y Compose con smoke test.
+    Los tres son required checks en la protección de `main` (desde el 2026-11-25).
+  - La publicación de la imagen en GHCR (`ghcr.io/alx016/mibici-p2-api`) espera a los tres y
+    solo corre en push a `main` (`ci.yml:137-138`).
+  - La corrida tarda ~7 a 12 min (últimas seis en `main`); la de #70 tardó 10 min.
 
 ### 8 · Carga y FinOps (3:05–3:35, Oscar)
 
@@ -166,7 +169,8 @@ debe contar el argumento completo.
   1. Partición temporal sin fuga.
   2. Aliases `champion`/`challenger` en lugar de stages.
   3. Bundle inmutable por defecto, Registry en vivo como opción.
-  4. Inferencia síncrona por lotes, sin cola (Redis descartado, plan Entrega 6, 6.1).
+  4. Inferencia síncrona por lotes, sin cola (Redis + RQ descartado: 365 predicciones por
+     hora caben en un lote, `reports/TC5061_Operacion_FinOps_Equipo05.md:66`).
   5. Reentrenar por desempeño, no solo por drift.
 - **La narración cubre:** una frase por decisión como máximo, y el cierre.
 

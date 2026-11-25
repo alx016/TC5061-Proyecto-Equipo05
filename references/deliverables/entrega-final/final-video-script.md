@@ -88,8 +88,9 @@ formato aserción y evidencia; los datos, fuentes y figuras de cada bloque está
 ## 5 · DEMO Registry (1:25–1:55, Fernando)
 
 - **Diapositiva (PDF):** El champion v3 vive en el Registry con su linaje completo
-- **Cubre:** aliases `champion`/`challenger` en lugar de stages · linaje (run, commit, datos,
-  umbrales) · "es la v3 de nuestro Registry de desarrollo, sembrada en el stack".
+- **Cubre:** aliases `champion`/`challenger` en lugar de stages · linaje (run, commit, datos) ·
+  aparece como versión 1 porque el MLflow de Compose arranca vacío; el tag
+  `source_registry_version` dice que es la v3 de desarrollo.
 
 **En pantalla:**
 
@@ -98,14 +99,18 @@ formato aserción y evidencia; los datos, fuentes y figuras de cada bloque está
 
 **Narración:**
 
-> _Pendiente_
+> Este es nuestro Model Registry. Usamos aliases en lugar de stages: champion es lo que sirve
+> producción y challenger, el candidato; promover un modelo es solo mover el alias. Aquí aparece
+> como versión uno porque este servidor arrancó vacío, pero sus tags dicen que es la versión tres
+> de desarrollo. También guardan el commit, la versión de datos y el run de origen.
 
 **Transición:** Fernando cambia a la terminal.
 
 ## 6 · DEMO API en Compose (1:55–2:40, Fernando)
 
 - **Diapositiva (PDF):** Un comando levanta API y MLflow; la API responde en vivo
-- **Cubre:** dos servicios con healthchecks y límites · `/model-info` confirma modelo y versión ·
+- **Cubre:** dos servicios con healthchecks y límites · `/model-info` confirma modelo, versión y
+  umbrales (0.20 desabasto, 0.95 saturación) ·
   leer en voz alta un resultado de `/predict` · latencia mediana 38 ms (1 estación) y 120 ms
   (365 estaciones).
 
@@ -121,21 +126,29 @@ curl -fsS -X POST http://localhost:8000/predict \
 
 **Narración:**
 
-> _Pendiente_
+> Con make up levantamos dos servicios, MLflow y la API, en una red privada, cada uno con
+> healthcheck y límites de CPU y memoria; los dos están sanos. Model-info confirma que la API
+> sirve la versión uno con alias champion, cargada desde el Registry, y sus umbrales: 0.20 para
+> desabasto y 0.95 para saturación. Ahora pedimos una predicción para la estación cien: la
+> clasifica como balanceada, con más de 99% de probabilidad. Con diez usuarios, la mediana es de
+> 38 milisegundos por estación y 120 con las 365.
 
 **Transición:** cede la palabra a Emilio; Fernando cambia a GitHub Actions.
 
 ## 7 · DEMO CI/CD (2:40–3:05, Emilio)
 
-- **Diapositiva (PDF):** Ningún cambio llega a `main` sin pasar cuatro etapas
-- **Cubre:** lint y seguridad → pruebas fast/slow → Compose y smoke → publicación en GHCR · solo
-  `main` publica · ~7 a 13 min por corrida.
+- **Diapositiva (PDF):** Ningún cambio llega a `main` sin pasar tres checks; solo `main` publica la imagen
+- **Cubre:** tres jobs en paralelo (lint y seguridad, pruebas fast/slow, Compose y smoke) ·
+  publicación en GHCR solo si pasan los tres y solo en `main` · 536 pruebas · ~10 min por corrida.
 
 **En pantalla:** GitHub → **Actions** → última corrida verde en `main` → vista de los 4 jobs.
 
 **Narración:**
 
-> _Pendiente_
+> Cada push o pull request a main dispara cuatro jobs. Tres corren en paralelo: lint y seguridad,
+> 536 pruebas rápidas y lentas, y un smoke test que levanta el stack de Compose. Solo si los tres
+> pasan, y solo en main, se publica la imagen en GitHub Container Registry. Esta corrida tardó
+> diez minutos.
 
 **Transición:** cede la palabra a Oscar; Fernando regresa a las diapositivas (8).
 
@@ -194,7 +207,9 @@ curl -fsS -X POST http://localhost:8000/predict \
 
 **Narración:**
 
-> _Pendiente_
+> Cinco decisiones definieron el sistema: separar los datos por tiempo, promover con aliases,
+> servir un bundle inmutable o el Registry, predecir por lotes sin cola y reentrenar por
+> desempeño, no solo por drift. Gracias.
 
 ---
 
