@@ -1,8 +1,10 @@
 # Plan de acción · Entrega Final: Proyecto integrador, presentación y video
 
-- **Entrega:** domingo 29 de noviembre de 2026, 23:59 (hora de Ciudad de México).
-- **Ventana de trabajo:** lunes 23 a domingo 29 de noviembre (7 días). El domingo es colchón:
-  revisión final del PDF, del video y envío en Canvas, sin trabajo nuevo.
+- **Entrega:** viernes 27 de noviembre de 2026, 23:59 (hora de Ciudad de México). La fecha
+  original era el domingo 29; el cambio se avisó el martes 24 y el calendario se comprimió
+  (sección 4, decisión F.9).
+- **Ventana de trabajo:** lunes 23 a viernes 27 de noviembre (5 días). El viernes es colchón:
+  revisión final del PDF, del video y envío en Canvas antes de las 20:00, sin trabajo nuevo.
 - **Esfuerzo estimado:** ~24 h de paquetes (~6 h por integrante) + ~2.5 h por integrante de
   ensayo y grabación en conjunto.
 - **Base en `main`:** `3a4ebc2` (merge del PR #67, reporte de Entrega 6 en PDF).
@@ -22,6 +24,7 @@
 | F.6 | Duración objetivo | **4:00 a 4:30.** Deja ~30 s de margen bajo el máximo de 5:00 y queda muy por encima del mínimo de 2:00. Si un ensayo pasa de 4:40, se recorta guion, no demo |
 | F.7 | Hospedaje del video | **Archivo `TC5061_Proyecto_Final_Equipo05.mp4` en Canvas** y, además, enlace en la última diapositiva (YouTube no listado o Drive con acceso "cualquiera con el enlace"). El enlace se prueba en una ventana de incógnito antes de enviar |
 | F.8 | Continuous Training (opcional) | **No se implementa.** No modifica la rúbrica y la semana no da para hacerlo bien. Se presenta en una diapositiva la propuesta de la Entrega 5 (disparador por desempeño, drift como alerta temprana, reentrenamiento mensual) |
+| F.9 | Calendario comprimido (entrega el viernes 27) | **Se graba el jueves 26 en la noche y el viernes queda de colchón.** Manuel escribe completos la presentación y el guion a partir del spec (`entrega-final/final-presentation-spec.md`), para que el resto del equipo se concentre en sus paquetes y revisiones; cada narrador solo lee y ensaya sus bloques. Los PR #69 (WP-A), #70 (WP-B) y #68 (WP-C) se integran el miércoles, en ese orden. Si la grabación del jueves falla, se repite el viernes antes de las 18:00 |
 
 ---
 
@@ -70,7 +73,7 @@ tests/test_seed_registry.py           <- WP-B
 Makefile                              <- WP-B: target seed-registry
 README.md                             <- WP-C: sección "Proyecto final" al inicio
 reports/TC5061_Proyecto_Final_Equipo05.pdf   <- WP-D
-references/deliverables/final-video-script.md <- WP-D: guion con tiempos y narradores
+references/deliverables/entrega-final/final-video-script.md <- WP-D: guion con tiempos y narradores
 ```
 
 **Contrato**
@@ -131,7 +134,7 @@ references/deliverables/final-video-script.md <- WP-D: guion con tiempos y narra
 ## 3. Paquetes de trabajo
 
 **Nadie espera a otro para empezar.** WP-D arranca con lo que ya está en `main`; las
-diapositivas del Model Card y de la demo del Registry se completan el jueves.
+diapositivas del Model Card y de la demo del Registry se completan el miércoles.
 
 **Criterio de reparto.** Cada integrante tiene **~6 h**, **un entregable propio en su PR** y
 **una revisión**. Cada paquete le toca a quien construyó esa parte en entregas anteriores, para
@@ -139,23 +142,22 @@ no gastar la semana aprendiendo código ajeno.
 
 | WP | Responsable | Revisa | Entregable | Horas |
 |:---|:---|:---|:---|:---:|
-| WP-A Model Card | Oscar | Emilio | `reports/model_card.md` con el contrato de la sección 2, punto 1. Entrenó P2, calibró sus umbrales y diseñó el guardrail de recall. Al terminar, le pasa a Manuel los 3 o 4 datos clave para la diapositiva | 4 |
-| WP-A2 Diapositivas de carga, FinOps y monitoreo | Oscar | Manuel | Texto y figuras de esas 2 diapositivas (de `reports/figures/entrega5/` y `entrega6/`), entregados a Manuel el miércoles | 1 |
+| WP-A Model Card | Oscar | Emilio | `reports/model_card.md` con el contrato de la sección 2, punto 1. Entrenó P2, calibró sus umbrales y diseñó el guardrail de recall | 4 |
 | WP-B Registry en vivo | Fernando | Oscar | `scripts/seed_registry.py`, `tests/test_seed_registry.py` (con un tracking local en `tmp_path`: siembra, idempotencia, params que lee la API), target `make seed-registry` y una sección corta en el README (Entrega 6, "Modos de resolución del modelo"). Revisa Oscar porque escribió `export_model.py` y el bundle | 4 |
 | WP-B2 Preparación de la demo | Fernando | — | Ensayo técnico de la demo en su máquina, lista de pestañas y comandos (va en el guion de WP-D), y respaldo: si algo falla al grabar, cómo dejar el stack listo en menos de 2 minutos | 1.5 |
 | WP-C README final | Emilio | Manuel | Sección "Proyecto final" (sección 2, punto 3) con el diagrama de arquitectura y la tabla rúbrica → evidencia. Tabla de integrantes con lo de esta entrega | 2.5 |
 | WP-C2 Verificación en clon limpio | Emilio | — | En su máquina, desde `main`: `make up`, `make compose-smoke` y, después del merge de WP-B, el flujo del punto 2. Reporta en el chat lo que falle. Decide con el equipo si `reports/TC5061_Drift_ABTest_Equipo05.pdf` entra al repo | 1.5 |
-| WP-D Presentación y guion | Manuel | Fernando | `TC5061_Proyecto_Final_Equipo05.pdf` (sección 2, punto 4) y `references/deliverables/final-video-script.md` con tiempos, narradores, pantallas y lista de verificación antes de grabar | 5 |
+| WP-D Presentación y guion | Manuel | Fernando | `TC5061_Proyecto_Final_Equipo05.pdf` (sección 2, punto 4) y `references/deliverables/entrega-final/final-video-script.md` con tiempos, narradores, pantallas y lista de verificación antes de grabar | 5 |
 | WP-D2 Integración y envío | Manuel | — | Enlace al video en la última diapositiva, PDF final en `reports/`, prueba del enlace en incógnito, envío en Canvas (repo, PDF, video) | 1 |
 
 **Carga por integrante**
 
 | Integrante | Paquetes | Horas | PR propios | Revisa |
 |:---|:---|:---:|:---|:---|
-| Oscar | WP-A, WP-A2 | 5 + 1 de revisión | Model Card | WP-B |
+| Oscar | WP-A | 4 + 1 de revisión | Model Card | WP-B |
 | Fernando | WP-B, WP-B2 | 5.5 + 0.5 de revisión | Seed del Registry | WP-D |
 | Emilio | WP-C, WP-C2 | 4 + 2 de revisión y pruebas | README final | WP-A |
-| Manuel | WP-D, WP-D2 | 6 | Presentación, guion | WP-C, WP-A2 |
+| Manuel | WP-D, WP-D2 | 6 | Presentación y guion completos (F.9) | WP-C |
 
 Además, **todos**: ~2.5 h de ensayo y grabación (sección 4). Si alguien se atrasa, el primero
 en liberar horas toma la revisión que falte, no el paquete de otro.
@@ -167,13 +169,13 @@ en liberar horas toma la revisión que falte, no el paquete de otro.
 | `reports/model_card.md` | WP-A (Oscar) |
 | `scripts/seed_registry.py`, `tests/test_seed_registry.py`, `Makefile` | WP-B (Fernando) |
 | `README.md` | WP-C (Emilio). Fernando le pasa el texto de su sección y Emilio lo integra |
-| `reports/TC5061_Proyecto_Final_Equipo05.pdf`, `references/deliverables/final-video-script.md` | WP-D (Manuel) |
+| `reports/TC5061_Proyecto_Final_Equipo05.pdf`, `references/deliverables/entrega-final/final-video-script.md` | WP-D (Manuel) |
 
 **Dependencias reales**
 
 - La diapositiva del Model Card necesita WP-A; la de la demo del Registry necesita WP-B.
 - WP-C enlaza el Model Card (WP-A) y la presentación (WP-D); puede dejar los enlaces listos y
-  verificarlos el jueves.
+  verificarlos el miércoles.
 - WP-C2 necesita WP-B en `main` para la segunda parte.
 - Los ensayos necesitan WP-B y el guion de WP-D. La grabación necesita todo en `main`.
 
@@ -184,12 +186,10 @@ en liberar horas toma la revisión que falte, no el paquete de otro.
 | Fase | Día | Trabajo | Hito |
 |:---|:---|:---|:---|
 | 1. Construir | Lun 23 | Manuel comparte el plan. Arrancan WP-A, WP-B, WP-C y WP-D en paralelo | Plan acordado |
-| | Mar 24 | PR de WP-B. Borrador del Model Card. Primeras diapositivas con lo que ya existe | PR de WP-B abierto |
-| | Mié 25 | **Merge de WP-B.** PR de WP-A. Oscar entrega WP-A2. Emilio corre WP-C2 en clon limpio | Registry sembrable desde `main` |
-| 2. Integrar | Jue 26 | **Merge de WP-A y WP-C.** Presentación completa y borrador del guion. Fernando hace el ensayo técnico de la demo (WP-B2) | `main` con todo el contenido; PDF v1 |
-| 3. Ensayar | Vie 27 | **Los 4 juntos:** ensayo 1 con cronómetro, ajustes al guion, ensayo 2 | Guion final entre 4:00 y 4:30 |
-| 4. Grabar | Sáb 28 | Lista de verificación, una toma continua (las que hagan falta), exportar `TC5061_Proyecto_Final_Equipo05.mp4`, subir y poner el enlace en el PDF | Video grabado |
-| 5. Entregar | Dom 29 | Colchón. Ver el video completo, revisar el PDF y los enlaces en incógnito, enviar en Canvas **antes de las 20:00** | Entregado |
+| | Mar 24 | PR abiertos de WP-A (#69), WP-B (#70) y WP-C (#68), con sus revisiones. Manuel sube el spec de la presentación y la estructura del guion | Los 3 PR en revisión |
+| 2. Integrar | Mié 25 | **Merge de #69 y #70 en la mañana, luego #68.** Emilio corre WP-C2 en clon limpio. Fernando hace el ensayo técnico de la demo (WP-B2) y toma la captura del Registry. Manuel escribe el guion completo y arma el PDF v1 (F.9) | `main` con todo el contenido; PDF v1 y guion completo |
+| 3. Ensayar y grabar | Jue 26 | Manuel comparte el guion en la mañana para que cada narrador lea sus bloques. **Los 4 juntos en la noche:** ensayo 1 con cronómetro, ajustes, ensayo 2 y grabación (una toma continua, las que hagan falta). Exportar `TC5061_Proyecto_Final_Equipo05.mp4`, subirlo y poner el enlace en el PDF | Video grabado |
+| 4. Entregar | Vie 27 | Colchón. Ver el video completo, revisar el PDF y los enlaces en incógnito, enviar en Canvas **antes de las 20:00**. Solo si la grabación del jueves falló: repetirla antes de las 18:00 | Entregado |
 
 **Lista de verificación antes de grabar** (WP-D la completa con WP-B2):
 
