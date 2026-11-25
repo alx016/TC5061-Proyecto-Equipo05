@@ -5,6 +5,7 @@ from pathlib import Path
 
 import mlflow
 from mlflow import MlflowClient
+from mlflow.exceptions import MlflowException
 from mlflow.models import infer_signature
 import numpy as np
 import pandas as pd
@@ -130,6 +131,22 @@ def test_incomplete_metadata_names_the_missing_fields(tracking: str, bundle: Pat
     (bundle / seed_registry.METADATA_FILE).write_text(json.dumps({"model_version": "3"}))
     with pytest.raises(seed_registry.SeedError, match="source_run_id"):
         seed_registry.seed(bundle, tracking)
+
+
+def test_a_registry_error_stops_instead_of_moving_the_champion(
+    tracking: str, bundle: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seed_registry.seed(bundle, tracking)
+    write_metadata(bundle, source_run_id="otro-run")
+
+    def failing_lookup(*args, **kwargs):
+        raise MlflowException("registry unavailable")
+
+    monkeypatch.setattr(MlflowClient, "get_registered_model", failing_lookup)
+    with pytest.raises(seed_registry.SeedError, match="No se pudo consultar"):
+        seed_registry.seed(bundle, tracking)
+    monkeypatch.undo()
+    assert len(MlflowClient().search_model_versions(f"name='{NAME}'")) == 1
 
 
 def test_a_server_that_is_down_fails_fast():

@@ -84,11 +84,21 @@ def check_server(tracking_uri: str) -> None:
 
 
 def current_champion(client: MlflowClient, name: str) -> ModelVersion | None:
-    """The version behind @champion, or None when the model or the alias do not exist."""
+    """The version behind @champion, or None when the model or the alias do not exist.
+
+    Absence is checked without relying on exceptions: a missing alias comes back as a generic
+    INVALID_PARAMETER_VALUE, the same code as other errors. Any MLflow error stops the seed,
+    so a failed lookup never ends up moving the alias without --force.
+    """
     try:
-        return client.get_model_version_by_alias(name, ALIAS)
-    except MlflowException:
-        return None
+        if not client.search_registered_models(filter_string=f"name = '{name}'"):
+            return None
+        version = client.get_registered_model(name).aliases.get(ALIAS)
+        return client.get_model_version(name, str(version)) if version is not None else None
+    except MlflowException as error:
+        raise SeedError(
+            f"No se pudo consultar @{ALIAS} de {name} ({error}); no se cambio nada."
+        ) from error
 
 
 def experiment_id(client: MlflowClient) -> str:

@@ -182,9 +182,10 @@ compose-smoke:
 	@echo
 	@$(MAKE) --no-print-directory smoke API_PORT=$(API_PORT)
 
-## Register the bundled P2 champion in the Compose MLflow (idempotent; run make up first)
+## Register the bundled P2 champion in the Compose MLflow (unpacks the bundle if missing; run make up first)
 .PHONY: seed-registry
 seed-registry:
+	@test -f models/p2-riesgo/registry_metadata.json || $(MAKE) --no-print-directory prepare-model
 	uv run python scripts/seed_registry.py --tracking-uri http://127.0.0.1:$(MLFLOW_PORT)
 
 ## Run the official load scenarios against the API, with docker stats and the Opt 3 benchmark
