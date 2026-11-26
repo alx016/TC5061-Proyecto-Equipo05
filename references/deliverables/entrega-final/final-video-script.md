@@ -18,13 +18,13 @@ formato aserción y evidencia; los datos, fuentes y figuras de cada bloque está
 | 2 | 0:10–0:35 | Manuel | Problema | 58 | ~25 seg|
 | 3 | 0:35–1:00 | Emilio | Datos y features | 58 | ~22 seg|
 | 4 | 1:00–1:25 | Emilio | Experimentación | 58 | ~25 seg|
-| 5 | 1:25–1:55 | Fernando | DEMO Registry | 70 | |
-| 6 | 1:55–2:40 | Fernando | DEMO API en Compose | 105 | |
-| 7 | 2:40–3:05 | Emilio | DEMO CI/CD | 58 | |
+| 5 | 1:25–1:55 | Fernando | DEMO Registry | 70 | ~21 seg|
+| 6 | 1:55–2:40 | Fernando | DEMO API en Compose | 105 | ~37 seg|
+| 7 | 2:40–3:05 | Emilio | DEMO CI/CD | 58 | ~21 seg|
 | 8 | 3:05–3:35 | Oscar | Carga y FinOps | 70 | ~31 seg|
 | 9 | 3:35–4:00 | Oscar | Monitoreo | 58 | ~25 seg |
-| 10 | 4:00–4:15 | Oscar | Gobernanza | 35 | ~ seg|
-| 11 | 4:15–4:30 | Manuel | Decisiones y cierre | 35 | ~ seg|
+| 10 | 4:00–4:15 | Oscar | Gobernanza | 35 | ~11 seg|
+| 11 | 4:15–4:30 | Manuel | Decisiones y cierre | 35 | ~15 seg|
 | | | | **Total** | **628** | |
 
 ---
