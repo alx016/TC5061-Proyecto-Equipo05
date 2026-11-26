@@ -1,8 +1,8 @@
 # Guion · Video de la Entrega Final
 
 Texto narrado completo del video `TC5061_Proyecto_Final_Equipo05.mp4`. Las diapositivas siguen el
-formato aserción y evidencia; los datos, fuentes y figuras de cada bloque están en
-[final-presentation-spec.md](final-presentation-spec.md).
+formato aserción y evidencia; cada bloque corresponde a una diapositiva de
+[la presentación](../../reports/TC5061_Proyecto_Final_Equipo05.pdf).
 
 - **Duración objetivo:** 4:30. Si un ensayo pasa de 4:40, se recorta narración, no demo.
 - **Teclado:** Fernando. Los demás narran por turnos.
