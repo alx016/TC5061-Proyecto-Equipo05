@@ -95,14 +95,14 @@ formato aserción y evidencia; cada bloque corresponde a una diapositiva de
 **En pantalla:**
 
 1. `localhost:5001` → **Models** → `mibici-equipo05-p2-riesgo`.
-2. Versión con alias `champion` → tags de linaje.
+2. Versión con alias `champion` → descripción y tags de linaje.
 
 **Narración:**
 
 > Este es nuestro Model Registry. Usamos aliases en lugar de stages: champion es lo que sirve
 > producción y challenger, el candidato; promover un modelo es solo mover el alias. Aquí aparece
-> como versión uno porque este servidor arrancó vacío, pero sus tags dicen que es la versión tres
-> de desarrollo. También guardan el commit, la versión de datos y el run de origen.
+> como versión uno porque este servidor arrancó vacío, pero su descripción dice que es la versión
+> tres de desarrollo y cuál fue su run de origen. Sus tags guardan el commit y la versión de datos.
 
 **Transición:** Fernando cambia a la terminal.
 
