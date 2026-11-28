@@ -23,7 +23,7 @@ Este proyecto integrador consolida el ciclo de vida completo de MLOps para el si
 
 - **Model Card:** [`reports/model_card.md`](reports/model_card.md) (documentación del modelo champion P2 v3 bajo el estándar de Mitchell et al.).
 - **Presentación ejecutiva:** [`reports/TC5061_Proyecto_Final_Equipo05.pdf`](reports/TC5061_Proyecto_Final_Equipo05.pdf) (síntesis de negocio, decisiones técnicas y aprendizajes).
-- **Video de demostración:** Archivo `TC5061_Proyecto_Final_Equipo05.mp4` en Canvas y enlace público en la diapositiva final de la presentación.
+- **Video de demostración:** [`reports/TC5061_Proyecto_Final_Equipo05.mp4`](reports/TC5061_Proyecto_Final_Equipo05.mp4) (también en Canvas y enlazado en la diapositiva final de la presentación).
 
 ### Arquitectura del sistema
 
